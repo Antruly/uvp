@@ -1,0 +1,14 @@
+# Keep text checkouts consistent with the repository formatter on every platform.
+* text=auto eol=lf
+
+# Windows build scripts and batch fixtures keep their native line endings.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Preserve whitespace in generated C++ and fixture sources so that a checkout
+# matches what a probe compiled. A whitespace-normalizing diff here would
+# invalidate a recorded digest.
+tests/fixtures/** -text
+
+# Preserve upstream licensing texts verbatim.
+licenses/** whitespace=-blank-at-eol

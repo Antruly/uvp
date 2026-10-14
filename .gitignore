@@ -1,0 +1,42 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Test and tool scratch space
+.tmp/
+tmp/
+test-results.xml
+reports/
+.stryker-tmp/
+
+# Generated workspace artifacts (never commit build output or provider projects)
+workspace/
+build/
+out/
+*.o
+*.obj
+*.node
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.exe
+*.pdb
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

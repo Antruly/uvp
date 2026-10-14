@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "sortImports": false,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "dist/**",
+    "build/**",
+    "docs/api/**",
+    "docs/public/**",
+    "node_modules/**",
+    "CHANGELOG.md",
+    "package-lock.json",
+    "third_party/**",
+    "licenses/**",
+    "tests/fixtures/**",
+    "skills/**",
+    "src/generatedPackageMetadata.ts",
+    "docs/error-contract.schema.json"
+  ]
+}

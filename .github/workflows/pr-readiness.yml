@@ -1,0 +1,49 @@
+name: PR readiness
+
+# Uses `pull_request_target` so that the check runs from the default branch with
+# a trusted script, and never executes code from the pull request. The job reads
+# the PR body through the API and sets a commit status; it does not check out or
+# run the contributor's revision.
+
+on:
+  pull_request_target:
+    branches: [main, "release/*"]
+    types: [opened, edited, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Open PR to recheck
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: pr-readiness-${{ github.event.pull_request.number || inputs.pull_request_number }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    name: Validate author declaration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Check out the default branch for the checker
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check the author readiness declaration
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { pathToFileURL } = require("node:url");
+            const entry = pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/scripts/ci/pr-readiness.mjs`,
+            );
+            const { runReadinessCheck } = await import(entry.href);
+            await runReadinessCheck({ github, context, core });

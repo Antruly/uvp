@@ -1,0 +1,321 @@
+import type { UvpFeature } from "../domain/features.js";
+
+/**
+ * The toolchain port.
+ *
+ * This is uvp's provider abstraction, and it exists for the same reason REA's
+ * does: the contract above it must not know whether the C++ is being compiled
+ * by a local GCC, a local MSVC, a container, or a machine reached over SSH.
+ *
+ * A provider reports what it *can* do before it is asked to do anything
+ * (`inspectAvailability`), and reports per-capability gaps rather than failing
+ * as a monolith. Local MSVC has no Ninja; a container has no host filesystem;
+ * an SSH target has no local digests. Each says so.
+ */
+
+export interface ToolchainIdentity {
+  readonly id: string;
+  readonly version?: string;
+  readonly platform: string;
+}
+
+export interface CompilerDescriptor {
+  readonly id: string;
+  readonly path: string;
+  readonly version?: string;
+  readonly target?: string;
+}
+
+export interface BuildSystemDescriptor {
+  readonly id: string;
+  readonly path: string;
+  readonly version?: string;
+}
+
+/** A prerequisite that is absent, and the capability it blocks. */
+export interface MissingPrerequisite {
+  readonly id: string;
+  readonly requiredFor: string;
+}
+
+export interface ToolchainAvailability {
+  readonly id: string;
+  readonly available: boolean;
+  readonly version?: string;
+  readonly compilers: readonly CompilerDescriptor[];
+  readonly buildSystems: readonly BuildSystemDescriptor[];
+  readonly missing: readonly MissingPrerequisite[];
+  readonly limitations: readonly string[];
+}
+
+/**
+ * What a particular libuvcpp build provides.
+ *
+ * `modules` is read from that build's generated header, not from the version
+ * number: two 1.7.0 builds can differ in whether HTTP/3 was compiled in. A
+ * capability claim drawn from the version alone would be a guess.
+ */
+export interface LibuvcppBuild {
+  readonly found: boolean;
+  readonly version?: string;
+  /**
+   * Which file the version was read from.
+   *
+   * Carried because the sources can disagree — a prefix holding both a
+   * source-built CMake package and an unpacked prebuilt archive will answer with
+   * whichever is checked first — and because an install with no CMake package at
+   * all is a normal prebuilt release, not a broken one.
+   */
+  readonly versionSource?: "cmake_package" | "pkgconfig" | "version_file";
+  readonly installPrefix?: string;
+  readonly modules: readonly string[];
+  readonly note?: string;
+}
+
+export type BuildPhase = "configure" | "compile" | "link" | "post";
+
+export interface BuildDiagnostic {
+  readonly severity: "error" | "warning" | "note";
+  readonly file?: string;
+  readonly line?: number;
+  readonly column?: number;
+  readonly message: string;
+  readonly phase: BuildPhase;
+}
+
+export interface BuildArtifact {
+  readonly path: string;
+  readonly bytes: number;
+  readonly digest: string;
+}
+
+export interface BuildRequest {
+  readonly workspacePath: string;
+  readonly buildDir: string;
+  readonly buildType: "Debug" | "RelWithDebInfo" | "Release";
+  readonly generator?: "ninja" | "unix-makefiles" | "msbuild";
+  readonly target?: string;
+  readonly clean: boolean;
+  readonly jobs?: number;
+  readonly timeoutMs: number;
+  readonly configureOnly: boolean;
+  /**
+   * The libuvcpp install to build against, when one was discovered.
+   *
+   * Handed to the toolchain rather than left to the ambient environment. uvp
+   * already reports which install it found; if it then invoked CMake without
+   * pointing at it, a workspace would configure against a different libuvcpp than
+   * the one `uvp doctor` described — or, for a prebuilt archive outside every
+   * search path, against none at all.
+   */
+  readonly libuvcppPrefix?: string;
+  readonly signal: AbortSignal;
+}
+
+/**
+ * A completed build attempt.
+ *
+ * `exitCode !== 0` is a normal outcome carrying diagnostics, not an exception.
+ * Only the inability to run the toolchain at all is an error, and that is
+ * reported by the caller as a `UvpFailure`.
+ */
+export interface BuildOutcome {
+  readonly buildDir: string;
+  readonly exitCode: number;
+  readonly succeeded: boolean;
+  readonly configureDurationMs: number;
+  readonly compileDurationMs: number;
+  readonly fromCache: boolean;
+  readonly diagnostics: readonly BuildDiagnostic[];
+  readonly artifacts: readonly BuildArtifact[];
+  readonly commands: readonly string[];
+}
+
+/** A provider that can also build. Split from `ToolchainProvider` so that
+ *  inspection-only providers (a text report, a remote probe) stay possible. */
+export interface ToolchainClient {
+  readonly identity: ToolchainIdentity;
+  build(request: BuildRequest): Promise<BuildOutcome>;
+}
+
+export interface ToolchainProvider {
+  identity(): ToolchainIdentity;
+  inspectAvailability(signal: AbortSignal): Promise<ToolchainAvailability>;
+  findLibuvcpp(workspacePath: string | undefined, signal: AbortSignal): Promise<LibuvcppBuild>;
+  createClient(): ToolchainClient;
+}
+
+/**
+ * What each feature actually demands of a libuvcpp build.
+ *
+ * These names are taken from libuvcpp's own `option()` declarations and
+ * `cmake/uvcpp_config.h.in`, not from documentation, because a wrong switch name
+ * fails silently: CMake warns about an unused `-D` and builds a library without
+ * the module, and the generated service then fails to compile against headers
+ * that were never installed.
+ *
+ * Two facts make this table less uniform than it looks:
+ *
+ *   - The WebSocket server lives in the **web** layer and is routed in the
+ *     **webapp** layer, so `websocket` needs both `UVCPP_BUILD_WEB` and
+ *     `UVCPP_BUILD_WEBAPP`. There is no standalone `UVCPP_ENABLE_WEBSOCKET`.
+ *   - **grpc has no option at all.** Its headers are installed whenever they are
+ *     present in the source tree, so the only honest check is whether
+ *     `include/grpc/` exists. An empty `cmakeOptions` here means "nothing to
+ *     turn on", not "nothing needed".
+ */
+export interface UvpFeatureRequirement {
+  /** CMake `-D` switches that must be set when building libuvcpp from source. */
+  readonly cmakeOptions: readonly string[];
+  /** `uvcpp_config.h` macros that must be defined non-zero in the installed build. */
+  readonly configSymbols: readonly string[];
+  /** Header, relative to the libuvcpp include root, that proves the module ships. */
+  readonly header: string;
+}
+
+export const FEATURE_REQUIREMENTS: Record<UvpFeature, UvpFeatureRequirement> = {
+  tls: {
+    cmakeOptions: ["UVCPP_ENABLE_OPENSSL"],
+    configSymbols: ["UVCPP_OPENSSL_ENABLE"],
+    header: "ssl/uvcpp_ssl_context.h",
+  },
+  http2: {
+    cmakeOptions: ["UVCPP_ENABLE_NGHTTP2"],
+    configSymbols: ["UVCPP_NGHTTP2_ENABLE"],
+    header: "http2/uvcpp_h2_common.h",
+  },
+  http3: {
+    // HTTP/3 is dialect-over-QUIC; enabling one without the other yields a build
+    // with the header present and no transport under it.
+    cmakeOptions: ["UVCPP_ENABLE_HTTP3", "UVCPP_ENABLE_QUIC"],
+    configSymbols: ["UVCPP_HTTP3_ENABLE", "UVCPP_QUIC_ENABLE"],
+    header: "http3/uvcpp_h3_common.h",
+  },
+  grpc: {
+    cmakeOptions: [],
+    configSymbols: [],
+    header: "grpc",
+  },
+  websocket: {
+    cmakeOptions: ["UVCPP_BUILD_WEB", "UVCPP_BUILD_WEBAPP"],
+    configSymbols: ["UVCPP_WEB_ENABLE", "UVCPP_WEBAPP_ENABLE"],
+    header: "web/uvcpp_ws_server.h",
+  },
+  soap: {
+    // SOAP is XML over the ordinary HTTP stack. The WSDL module generates and
+    // parses service descriptions, which a hand-written envelope does not need —
+    // so it is not a prerequisite here.
+    cmakeOptions: ["UVCPP_BUILD_WEB", "UVCPP_BUILD_WEBAPP"],
+    configSymbols: ["UVCPP_WEB_ENABLE", "UVCPP_WEBAPP_ENABLE"],
+    header: "webapp/uvcpp_web_app.h",
+  },
+  db: {
+    cmakeOptions: ["UVCPP_ENABLE_DB"],
+    configSymbols: ["UVCPP_DB_ENABLE"],
+    header: "db",
+  },
+};
+
+/** A feature the installed libuvcpp build does not provide. */
+export interface FeatureGap {
+  readonly feature: UvpFeature;
+  /** How the absence was established. */
+  readonly detection: "config_symbol" | "header";
+  /** Non-zero macros the build is missing. Empty when the header is the evidence. */
+  readonly absentSymbols: readonly string[];
+  /** CMake switches that would have enabled them; empty when no switch governs this. */
+  readonly cmakeOptions: readonly string[];
+}
+
+export interface FeatureAssessment {
+  readonly satisfied: readonly UvpFeature[];
+  readonly unmet: readonly FeatureGap[];
+  /**
+   * Features that cannot be decided from the config header alone. Kept as its
+   * own bucket rather than folded into either side: a module whose presence is
+   * checked by looking for headers has not been proven absent, and reporting it
+   * as missing would be a guess dressed up as a finding.
+   */
+  readonly undetermined: readonly { feature: UvpFeature; reason: string }[];
+}
+
+/**
+ * Answers whether a header exists under a libuvcpp install's include root.
+ *
+ * It returns `undefined` when it cannot tell — an unreadable install, a probe
+ * that was not wired up. That third state is the point: "I could not look" and
+ * "I looked and it was not there" are different findings, and collapsing them
+ * would turn every missing probe into a fabricated absence.
+ */
+export type HeaderProbe = (header: string) => Promise<boolean | undefined>;
+
+/**
+ * Compare the feature set a caller wants against what a build actually has.
+ *
+ * `modules` is the list of `UVCPP_*_ENABLE` macros the build defines non-zero,
+ * as read out of its generated `uvcpp_config.h`.
+ *
+ * Two kinds of feature meet two kinds of evidence. When libuvcpp has a switch
+ * for a module, the config header decides it outright. When it has none — grpc,
+ * whose headers install whenever they are present — the installed headers are
+ * the only evidence there is, and a feature that cannot be checked lands in
+ * `undetermined` rather than being guessed into `satisfied` or `unmet`.
+ */
+export const assessFeatures = async (
+  wanted: readonly UvpFeature[],
+  modules: readonly string[],
+  probe?: HeaderProbe,
+): Promise<FeatureAssessment> => {
+  const defined = new Set(modules);
+  const satisfied: UvpFeature[] = [];
+  const unmet: FeatureGap[] = [];
+  const undetermined: { feature: UvpFeature; reason: string }[] = [];
+
+  for (const feature of new Set(wanted)) {
+    const requirement = FEATURE_REQUIREMENTS[feature];
+
+    if (requirement.configSymbols.length > 0) {
+      const absent = requirement.configSymbols.filter((symbol) => !defined.has(symbol));
+      if (absent.length === 0) {
+        satisfied.push(feature);
+        continue;
+      }
+      unmet.push({
+        feature,
+        detection: "config_symbol",
+        absentSymbols: absent,
+        cmakeOptions: requirement.cmakeOptions,
+      });
+      continue;
+    }
+
+    if (probe === undefined) {
+      undetermined.push({
+        feature,
+        reason: `libuvcpp has no configuration switch for ${feature}, and no header probe was supplied to check for ${requirement.header}.`,
+      });
+      continue;
+    }
+
+    const present = await probe(requirement.header);
+    if (present === undefined) {
+      undetermined.push({
+        feature,
+        reason: `libuvcpp has no configuration switch for ${feature}, and ${requirement.header} could not be inspected under the install root.`,
+      });
+      continue;
+    }
+    if (present) {
+      satisfied.push(feature);
+      continue;
+    }
+    unmet.push({
+      feature,
+      detection: "header",
+      absentSymbols: [],
+      cmakeOptions: [],
+    });
+  }
+
+  return { satisfied, unmet, undetermined };
+};

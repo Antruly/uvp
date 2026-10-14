@@ -1,0 +1,52 @@
+name: Mutation sweep
+
+# Mutation testing is slow by nature and its value is in reading the survivors,
+# not in gating a merge. It runs on a schedule and on demand, never on a pull
+# request — a PR that fails on a mutation score invites editing the score.
+
+on:
+  schedule:
+    - cron: "37 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  HUSKY: "0"
+
+jobs:
+  mutation:
+    name: Mutation sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Cache npm package downloads
+        uses: ./.github/actions/npm-cache
+      - run: npm ci
+      - name: Preflight the configuration
+        run: npx --no-install stryker run --dryRunOnly
+      - name: Run the sweep
+        run: npx --no-install stryker run
+      - name: Require both reports from the completed sweep
+        run: |
+          test -s reports/mutation/uvp.json
+          test -s reports/mutation/uvp.html
+      - name: Summarize survivors
+        run: node scripts/ci/mutation-summary.mjs
+      - name: Retain the reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-${{ github.run_attempt }}
+          path: reports/mutation/
+          if-no-files-found: warn
+          retention-days: 30

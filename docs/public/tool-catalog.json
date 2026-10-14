@@ -1,0 +1,4754 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "uvp",
+  "digest": "6b7badb269803088a1319b534dbbd43ebd11e8e44b5dd33ff52331889673d356",
+  "tool_count": 13,
+  "tools": [
+    {
+      "name": "uvp_doctor",
+      "title": "Inspect toolchain readiness",
+      "description": "Report which C++ toolchains, build systems, and libuvcpp builds are available on this host, including per-build feature modules. Read-only: it inspects and never installs. Call this before building to learn whether a request is achievable here.",
+      "kind": "toolchain",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "description": "Workspace path to inspect for a pinned libuvcpp requirement.",
+            "type": "string"
+          },
+          "providers": {
+            "description": "Restrict the report to these toolchain provider ids.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "features": {
+            "description": "Assess these features against the installed libuvcpp build, overriding the feature set a workspace pins. Lets a caller ask whether a build can do TLS before any project exists.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tls",
+                "http2",
+                "http3",
+                "grpc",
+                "websocket",
+                "soap",
+                "db"
+              ]
+            }
+          }
+        }
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "toolchains": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "compilers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "target": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "build_systems": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "required_for": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "required_for"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "available",
+                "compilers",
+                "build_systems",
+                "missing",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "libuvcpp": {
+            "type": "object",
+            "properties": {
+              "found": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": "string"
+              },
+              "version_source": {
+                "type": "string",
+                "enum": [
+                  "cmake_package",
+                  "pkgconfig",
+                  "version_file"
+                ]
+              },
+              "install_prefix": {
+                "type": "string"
+              },
+              "modules": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "found",
+              "modules"
+            ],
+            "additionalProperties": false
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "feature": {
+                  "type": "string",
+                  "enum": [
+                    "tls",
+                    "http2",
+                    "http3",
+                    "grpc",
+                    "websocket",
+                    "soap",
+                    "db"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "satisfied",
+                    "unmet",
+                    "undetermined"
+                  ]
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "feature",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "toolchains",
+          "libuvcpp",
+          "features"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": true,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Check this host before starting a new project",
+          "input": {}
+        },
+        {
+          "description": "Check a workspace that pins a libuvcpp requirement",
+          "input": {
+            "workspace": "/home/dev/services/orders"
+          }
+        },
+        {
+          "description": "Ask whether this libuvcpp build can do TLS and WebSocket",
+          "input": {
+            "features": [
+              "tls",
+              "websocket"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_workspace_create",
+      "title": "Create a libuvcpp workspace",
+      "description": "Scaffold a buildable C++ web service project wired against libuvcpp, with the requested transport features enabled. Writes files and refuses to overwrite a non-empty directory unless force is set. Returns the file manifest with digests.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to create the workspace at."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project name; used for the CMake target and the default binary name."
+          },
+          "template": {
+            "default": "hello-http",
+            "type": "string",
+            "enum": [
+              "hello-http",
+              "rest-api",
+              "websocket-echo",
+              "soap-service",
+              "static-files"
+            ]
+          },
+          "features": {
+            "default": [
+              "websocket"
+            ],
+            "description": "Transport and service modules to build against. Each is checked against the installed libuvcpp build, not assumed: a feature the build lacks is reported before compiling.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tls",
+                "http2",
+                "http3",
+                "grpc",
+                "websocket",
+                "soap",
+                "db"
+              ]
+            }
+          },
+          "port": {
+            "default": 8080,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "force": {
+            "default": false,
+            "description": "Allow writing into a directory that already contains files.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^wsp_[0-9a-f]{22}$"
+          },
+          "path": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "digest": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "next_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "workspace_id",
+          "path",
+          "template",
+          "files",
+          "next_steps"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "A JSON API on port 8080 with WebSocket support",
+          "input": {
+            "path": "/home/dev/svc",
+            "name": "svc",
+            "template": "rest-api",
+            "port": 8080
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_build",
+      "title": "Build a workspace",
+      "description": "Configure and build a uvp workspace with CMake, returning structured compiler diagnostics, phase timings, and the digests of the produced artifacts. Compiler output is reported as data: a failing build returns diagnostics, not an error.",
+      "kind": "build",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "build_dir": {
+            "description": "Defaults to <path>/build.",
+            "type": "string"
+          },
+          "build_type": {
+            "default": "Debug",
+            "type": "string",
+            "enum": [
+              "Debug",
+              "RelWithDebInfo",
+              "Release"
+            ]
+          },
+          "generator": {
+            "type": "string",
+            "enum": [
+              "ninja",
+              "unix-makefiles",
+              "msbuild"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "clean": {
+            "default": false,
+            "type": "boolean"
+          },
+          "jobs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "timeout_ms": {
+            "default": 600000,
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 9007199254740991
+          },
+          "configure_only": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^wsp_[0-9a-f]{22}$"
+          },
+          "build_dir": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "succeeded": {
+            "type": "boolean"
+          },
+          "configure_duration_ms": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "compile_duration_ms": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "from_cache": {
+            "type": "boolean"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning",
+                    "note"
+                  ]
+                },
+                "file": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "column": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "message": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": "string",
+                  "enum": [
+                    "configure",
+                    "compile",
+                    "link",
+                    "post"
+                  ]
+                }
+              },
+              "required": [
+                "severity",
+                "message",
+                "phase"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "digest": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "workspace_id",
+          "build_dir",
+          "exit_code",
+          "succeeded",
+          "configure_duration_ms",
+          "compile_duration_ms",
+          "from_cache",
+          "diagnostics",
+          "artifacts",
+          "commands"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": false,
+        "spawnsProcess": true,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Build a workspace with Ninja",
+          "input": {
+            "path": "/home/dev/svc",
+            "generator": "ninja"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_run",
+      "title": "Run a built service",
+      "description": "Start a built service and hold it under uvp supervision. If a readiness probe is supplied, the call returns only once the endpoint answers or the timeout expires; `ready` reports which of those happened. Returns a run_id for later probing and cleanup.",
+      "kind": "runtime",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "build_dir": {
+            "type": "string"
+          },
+          "binary": {
+            "description": "Defaults to the workspace's declared binary.",
+            "type": "string"
+          },
+          "args": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "ready": {
+            "type": "object",
+            "properties": {
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "path": {
+                "default": "/",
+                "type": "string"
+              },
+              "timeout_ms": {
+                "default": 10000,
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "port"
+            ]
+          },
+          "detach": {
+            "default": true,
+            "description": "Keep the process alive after the call returns, so it can be probed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^wsp_[0-9a-f]{22}$"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^run_[0-9a-f]{22}$"
+          },
+          "pid": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "startup_ms": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "stdout_tail": {
+            "type": "string"
+          },
+          "stderr_tail": {
+            "type": "string"
+          },
+          "still_running": {
+            "type": "boolean"
+          },
+          "detached": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "workspace_id",
+          "run_id",
+          "ready",
+          "stdout_tail",
+          "stderr_tail",
+          "still_running",
+          "detached"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": true,
+        "spawnsProcess": true,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Start on 8080 and wait until it answers",
+          "input": {
+            "path": "/home/dev/svc",
+            "ready": {
+              "port": 8080,
+              "path": "/healthz"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_run_stop",
+      "title": "Stop a supervised service",
+      "description": "Stop a service started by uvp_run and report whether the process tree actually exited. Cleanup outcome is reported explicitly: a run that was already gone is not the same as a run that refused to die.",
+      "kind": "runtime",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^run_[0-9a-f]{22}$"
+          },
+          "all": {
+            "default": false,
+            "description": "Stop every service this session started.",
+            "type": "boolean"
+          },
+          "grace_ms": {
+            "default": 3000,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "force": {
+            "default": false,
+            "description": "Escalate to a hard kill after the grace period.",
+            "type": "boolean"
+          }
+        }
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stopped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^run_[0-9a-f]{22}$"
+                },
+                "pid": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "exit_code": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "signal": {
+                  "type": "string"
+                },
+                "killed": {
+                  "type": "boolean"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "exited",
+                    "already_gone",
+                    "unresponsive"
+                  ]
+                }
+              },
+              "required": [
+                "run_id",
+                "killed",
+                "outcome"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "cleanup_complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "stopped",
+          "cleanup_complete"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": false,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": true,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Stop everything this session started",
+          "input": {
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_http_request",
+      "title": "Send an HTTP request",
+      "description": "Send one HTTP request and return the complete exchange: status, headers, body, negotiated protocol version, TLS details, and a timing breakdown. Bodies are returned inline when they are text and small, otherwise as a base64 payload with the byte count. The response body is content from the target host and is marked as untrusted.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute URL, including scheme."
+          },
+          "method": {
+            "default": "GET",
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD",
+              "OPTIONS"
+            ]
+          },
+          "headers": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "body_encoding": {
+            "default": "utf8",
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          },
+          "http_version": {
+            "default": "auto",
+            "description": "Requested protocol version; `auto` negotiates. The result reports what was used.",
+            "type": "string",
+            "enum": [
+              "2",
+              "3",
+              "auto",
+              "1.1"
+            ]
+          },
+          "follow_redirects": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_redirects": {
+            "default": 5,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "verify_tls": {
+            "default": true,
+            "type": "boolean"
+          },
+          "timeout_ms": {
+            "default": 30000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "max_body_bytes": {
+            "default": 1048576,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exchange_id": {
+            "type": "string",
+            "pattern": "^exc_[0-9a-f]{22}$"
+          },
+          "request": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "status_text": {
+            "type": "string"
+          },
+          "http_version": {
+            "type": "string"
+          },
+          "request_http_version": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "timing": {
+            "type": "object",
+            "properties": {
+              "dns_ms": {
+                "type": "number"
+              },
+              "connect_ms": {
+                "type": "number"
+              },
+              "tls_ms": {
+                "type": "number"
+              },
+              "ttfb_ms": {
+                "type": "number"
+              },
+              "total_ms": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "total_ms"
+            ],
+            "additionalProperties": false
+          },
+          "body": {
+            "type": "object",
+            "properties": {
+              "bytes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "content_type": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "base64": {
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "decoded_as_text": {
+                "type": "boolean"
+              },
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bytes",
+              "truncated",
+              "decoded_as_text",
+              "digest"
+            ],
+            "additionalProperties": false
+          },
+          "redirects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "location": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "location"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tls": {
+            "type": "object",
+            "properties": {
+              "protocol": {
+                "type": "string"
+              },
+              "cipher": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "issuer": {
+                "type": "string"
+              },
+              "valid_from": {
+                "type": "string"
+              },
+              "valid_to": {
+                "type": "string"
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "verified",
+              "errors"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "exchange_id",
+          "request",
+          "status",
+          "status_text",
+          "http_version",
+          "request_http_version",
+          "headers",
+          "timing",
+          "body",
+          "redirects"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": false,
+        "writesFilesystem": false,
+        "network": true,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Fetch JSON over HTTP/1.1",
+          "input": {
+            "url": "http://127.0.0.1:8080/hello",
+            "http_version": "1.1"
+          }
+        },
+        {
+          "description": "POST a body and do not follow redirects",
+          "input": {
+            "url": "https://api.example.com/orders",
+            "method": "POST",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"sku\":\"A1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_websocket_probe",
+      "title": "Probe a WebSocket endpoint",
+      "description": "Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ws:// or wss:// URL."
+          },
+          "headers": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "subprotocols": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "send": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "payload": {
+                  "type": "string"
+                },
+                "encoding": {
+                  "default": "utf8",
+                  "type": "string",
+                  "enum": [
+                    "utf8",
+                    "base64"
+                  ]
+                },
+                "wait_ms": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "payload"
+              ]
+            }
+          },
+          "max_frames": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "idle_timeout_ms": {
+            "default": 5000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "verify_tls": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exchange_id": {
+            "type": "string",
+            "pattern": "^exc_[0-9a-f]{22}$"
+          },
+          "upgraded": {
+            "type": "boolean"
+          },
+          "handshake": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "headers": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "negotiated_subprotocol": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "headers"
+            ],
+            "additionalProperties": false
+          },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "sent",
+                    "received"
+                  ]
+                },
+                "opcode": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "binary",
+                    "ping",
+                    "pong",
+                    "close"
+                  ]
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "text": {
+                  "type": "string"
+                },
+                "base64": {
+                  "type": "string"
+                },
+                "at_ms": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "direction",
+                "opcode",
+                "bytes",
+                "at_ms",
+                "truncated"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "close": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "closed_cleanly": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "exchange_id",
+          "upgraded",
+          "handshake",
+          "frames",
+          "closed_cleanly"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": false,
+        "writesFilesystem": false,
+        "network": true,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Echo one message and read the reply",
+          "input": {
+            "url": "ws://127.0.0.1:8080/echo",
+            "send": [
+              {
+                "payload": "ping"
+              }
+            ],
+            "max_frames": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_soap_call",
+      "title": "Invoke a SOAP operation",
+      "description": "Invoke a SOAP 1.1 or 1.2 operation, building the envelope from parameters or accepting a raw envelope. A SOAP fault is reported as a protocol-level result with its fault code and detail, not as a transport error, even though the HTTP status is usually 500.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "soap_version": {
+            "default": "1.1",
+            "type": "string",
+            "enum": [
+              "1.1",
+              "1.2"
+            ]
+          },
+          "operation": {
+            "description": "Operation name, when building the envelope.",
+            "type": "string"
+          },
+          "namespace": {
+            "description": "Target namespace for the operation.",
+            "type": "string"
+          },
+          "parameters": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "raw_envelope": {
+            "description": "Sent verbatim; overrides operation/parameters.",
+            "type": "string"
+          },
+          "soap_action": {
+            "type": "string"
+          },
+          "headers": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "timeout_ms": {
+            "default": 30000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "endpoint"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exchange_id": {
+            "type": "string",
+            "pattern": "^exc_[0-9a-f]{22}$"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "fault",
+              "transport_error"
+            ]
+          },
+          "fault": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "subcode": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "body": {
+            "type": "object",
+            "properties": {
+              "bytes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "text": {
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bytes",
+              "truncated",
+              "digest"
+            ],
+            "additionalProperties": false
+          },
+          "timing": {
+            "type": "object",
+            "properties": {
+              "dns_ms": {
+                "type": "number"
+              },
+              "connect_ms": {
+                "type": "number"
+              },
+              "tls_ms": {
+                "type": "number"
+              },
+              "ttfb_ms": {
+                "type": "number"
+              },
+              "total_ms": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "total_ms"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "exchange_id",
+          "status",
+          "outcome",
+          "body",
+          "timing"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": false,
+        "writesFilesystem": false,
+        "network": true,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Call a SOAP 1.2 operation",
+          "input": {
+            "endpoint": "https://svc.example.com/ws",
+            "soap_version": "1.2",
+            "operation": "GetQuote",
+            "namespace": "urn:example:quote",
+            "parameters": {
+              "symbol": "ACME"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_load_test",
+      "title": "Measure latency under concurrency",
+      "description": "Issue a fixed request for a bounded number of iterations across a fixed number of concurrent workers, and return the latency distribution, throughput, status histogram, and error breakdown. Bounded by request count and wall-clock budget, whichever comes first.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "method": {
+            "default": "GET",
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD"
+            ]
+          },
+          "headers": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "concurrency": {
+            "default": 8,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 512
+          },
+          "requests": {
+            "default": 200,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "duration_ms": {
+            "default": 30000,
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 9007199254740991
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "warmup_requests": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "verify_tls": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requests_sent": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "requests_completed": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "requests_failed": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "throughput_rps": {
+            "type": "number"
+          },
+          "latency_ms": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "p50": {
+                "type": "number"
+              },
+              "p90": {
+                "type": "number"
+              },
+              "p95": {
+                "type": "number"
+              },
+              "p99": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "mean": {
+                "type": "number"
+              },
+              "stddev": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "min",
+              "p50",
+              "p90",
+              "p95",
+              "p99",
+              "max",
+              "mean",
+              "stddev"
+            ],
+            "additionalProperties": false
+          },
+          "status_histogram": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "sample": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "count",
+                "sample"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "completed_by_count": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "requests_sent",
+          "requests_completed",
+          "requests_failed",
+          "duration_ms",
+          "throughput_rps",
+          "latency_ms",
+          "status_histogram",
+          "errors",
+          "completed_by_count"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": false,
+        "writesFilesystem": false,
+        "network": true,
+        "spawnsProcess": false,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Sustain 64 concurrent GETs for up to 10 seconds",
+          "input": {
+            "url": "http://127.0.0.1:8080/hello",
+            "concurrency": 64,
+            "requests": 100000,
+            "duration_ms": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_capture_start",
+      "title": "Start capturing traffic",
+      "description": "Begin a capture session on a local listening port and forward matching traffic to an upstream origin. Returns the proxy endpoint to point a client at. The session is owned by the current uvp session and is reported in subsequent capture reads.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "listen_port": {
+            "default": 8888,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "upstream": {
+            "description": "Origin to forward to; omit for a transparent proxy.",
+            "type": "string"
+          },
+          "filter": {
+            "default": {
+              "hosts": [],
+              "methods": []
+            },
+            "type": "object",
+            "properties": {
+              "hosts": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "methods": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "path_prefix": {
+                "type": "string"
+              }
+            }
+          },
+          "max_exchanges": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "auto_stop_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capture_id": {
+            "type": "string",
+            "pattern": "^cap_[0-9a-f]{22}$"
+          },
+          "listen_port": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "proxy_url": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "capture_id",
+          "listen_port",
+          "proxy_url",
+          "started_at"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": false,
+        "writesFilesystem": false,
+        "network": true,
+        "spawnsProcess": false,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Capture on 8888 in front of a local service",
+          "input": {
+            "listen_port": 8888,
+            "upstream": "http://127.0.0.1:8080"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_capture_read",
+      "title": "Read captured traffic",
+      "description": "List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit, so an empty-looking result is never confused with no traffic.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "capture_id": {
+            "description": "Defaults to the most recent session.",
+            "type": "string",
+            "pattern": "^cap_[0-9a-f]{22}$"
+          },
+          "since_id": {
+            "type": "string",
+            "pattern": "^exc_[0-9a-f]{22}$"
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "include_payloads": {
+            "default": false,
+            "type": "boolean"
+          },
+          "stop": {
+            "default": false,
+            "description": "Stop the capture session after reading.",
+            "type": "boolean"
+          }
+        }
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capture_id": {
+            "type": "string",
+            "pattern": "^cap_[0-9a-f]{22}$"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "exchanges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "exchange_id": {
+                  "type": "string",
+                  "pattern": "^exc_[0-9a-f]{22}$"
+                },
+                "at": {
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "request_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "response_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "duration_ms": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "request_body": {
+                  "type": "string"
+                },
+                "response_body": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "exchange_id",
+                "at",
+                "method",
+                "url",
+                "request_bytes",
+                "response_bytes",
+                "duration_ms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total_recorded": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "withheld_by_limit": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "capture_id",
+          "running",
+          "exchanges",
+          "total_recorded",
+          "withheld_by_limit"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Read the last 20 exchanges with payloads",
+          "input": {
+            "limit": 20,
+            "include_payloads": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_assert_exchange",
+      "title": "Assert over a recorded exchange",
+      "description": "Evaluate assertions against an exchange recorded earlier in this session, without sending any traffic. Returns each assertion's outcome with the observed value behind it, so a failure shows what was actually there rather than only that it differed.",
+      "kind": "web",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "exchange_id": {
+            "type": "string",
+            "pattern": "^exc_[0-9a-f]{22}$"
+          },
+          "assertions": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "status_equals",
+                    "status_in",
+                    "header_equals",
+                    "header_matches",
+                    "header_exists",
+                    "body_contains",
+                    "body_matches",
+                    "body_json_path_equals",
+                    "body_json_path_exists",
+                    "body_bytes_under",
+                    "latency_under_ms"
+                  ]
+                },
+                "target": {
+                  "description": "Header name, JSONPath, or regex, as applicable.",
+                  "type": "string"
+                },
+                "expected": {},
+                "negate": {
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          }
+        },
+        "required": [
+          "exchange_id",
+          "assertions"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exchange_id": {
+            "type": "string",
+            "pattern": "^exc_[0-9a-f]{22}$"
+          },
+          "passed": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "passed": {
+                  "type": "boolean"
+                },
+                "observed": {},
+                "expected": {},
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "passed",
+                "observed",
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "exchange_id",
+          "passed",
+          "failed",
+          "results"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Check a recorded exchange's status and a JSON field",
+          "input": {
+            "exchange_id": "exc_0000000000000000000000",
+            "assertions": [
+              {
+                "kind": "status_equals",
+                "expected": 200
+              },
+              {
+                "kind": "body_json_path_equals",
+                "target": "$.message",
+                "expected": "Hello, AI"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_verify",
+      "title": "Build, run, exercise, and report",
+      "description": "Compose a full verification pass over an existing workspace: build it, start it, run the given requests against it, evaluate the given assertions, then stop it. Returns an evidence bundle whose status is `verified` only when every step that was attempted succeeded — anything skipped is reported as a residual unknown instead of being silently omitted.",
+      "kind": "workflow",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "build": {
+            "default": {
+              "build_type": "Debug"
+            },
+            "type": "object",
+            "properties": {
+              "build_type": {
+                "default": "Debug",
+                "type": "string",
+                "enum": [
+                  "Debug",
+                  "RelWithDebInfo",
+                  "Release"
+                ]
+              },
+              "generator": {
+                "type": "string",
+                "enum": [
+                  "ninja",
+                  "unix-makefiles",
+                  "msbuild"
+                ]
+              }
+            }
+          },
+          "run": {
+            "type": "object",
+            "properties": {
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "ready_path": {
+                "default": "/",
+                "type": "string"
+              },
+              "timeout_ms": {
+                "default": 10000,
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 9007199254740991
+              },
+              "args": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "port"
+            ]
+          },
+          "requests": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "method": {
+                  "default": "GET",
+                  "type": "string",
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "HEAD",
+                    "OPTIONS"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "string"
+                },
+                "assertions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "status_equals",
+                          "status_in",
+                          "header_equals",
+                          "header_matches",
+                          "body_contains",
+                          "body_json_path_equals",
+                          "body_matches",
+                          "latency_under_ms"
+                        ]
+                      },
+                      "target": {
+                        "type": "string"
+                      },
+                      "expected": {}
+                    },
+                    "required": [
+                      "kind",
+                      "expected"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "path"
+              ]
+            }
+          },
+          "keep_running": {
+            "default": false,
+            "type": "boolean"
+          },
+          "goal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "run",
+          "requests"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^wsp_[0-9a-f]{22}$"
+          },
+          "bundle_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "partial",
+              "failed",
+              "unknown"
+            ]
+          },
+          "build": {
+            "type": "object",
+            "properties": {
+              "succeeded": {
+                "type": "boolean"
+              },
+              "exit_code": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "succeeded",
+              "exit_code"
+            ],
+            "additionalProperties": false
+          },
+          "service": {
+            "type": "object",
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "pattern": "^run_[0-9a-f]{22}$"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "endpoint": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ready"
+            ],
+            "additionalProperties": false
+          },
+          "exchanges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "exchange_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "elapsed_ms": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "assertions_passed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "assertions_failed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "failures": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "exchange_id",
+                "assertions_passed",
+                "assertions_failed",
+                "failures"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unverified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "workspace_id",
+          "bundle_id",
+          "status",
+          "build",
+          "service",
+          "exchanges",
+          "unverified"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": true,
+        "spawnsProcess": true,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Verify a JSON endpoint and its 404 behaviour",
+          "input": {
+            "path": "/home/dev/svc",
+            "run": {
+              "port": 8080
+            },
+            "requests": [
+              {
+                "name": "hello",
+                "path": "/hello",
+                "assertions": [
+                  {
+                    "kind": "status_equals",
+                    "expected": 200
+                  },
+                  {
+                    "kind": "body_json_path_equals",
+                    "target": "$.message",
+                    "expected": "Hello, AI"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "src/main.ts",
+    "src/cli.ts",
+    "src/version.ts",
+    "src/contracts/errorSchemas.ts",
+    "scripts/licenses.mjs",
+    "scripts/ci/*.mjs"
+  ],
+  "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"],
+  "vitepress": {
+    "entry": ["docs/.vitepress/config.ts"]
+  },
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "files": "error",
+    "dependencies": "error",
+    "devDependencies": "error",
+    "unlisted": "error",
+    "exports": "error",
+    "nsExports": "error",
+    "types": "error",
+    "nsTypes": "error",
+    "enumMembers": "error",
+    "duplicates": "error"
+  }
+}

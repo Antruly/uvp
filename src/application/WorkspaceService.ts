@@ -1,0 +1,369 @@
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { Buffer } from "node:buffer";
+
+import { UvpFailure } from "../domain/errors.js";
+import type {
+  BuildArtifact,
+  BuildDiagnostic,
+  BuildOutcome,
+  ToolchainClient,
+} from "./ToolchainProvider.js";
+import { newId, sha256 } from "../domain/identity.js";
+import type { SupervisedRun } from "./sessionStore.js";
+import { SessionStore } from "./sessionStore.js";
+import { renderTemplate, type TemplateId } from "./templates.js";
+import type { UvpFeature } from "../domain/features.js";
+import { startSupervised } from "../toolchains/local/processRunner.js";
+import { performRequest } from "./httpClient.js";
+
+export interface CreatedFile {
+  readonly path: string;
+  readonly bytes: number;
+  readonly digest: string;
+}
+
+export interface CreateWorkspaceResult {
+  readonly workspaceId: string;
+  readonly path: string;
+  readonly template: string;
+  readonly files: readonly CreatedFile[];
+  readonly nextSteps: readonly string[];
+}
+
+export interface RunResult {
+  readonly runId: string;
+  readonly workspaceId: string;
+  /**
+   * The executable that was started, as it was invoked.
+   *
+   * Reported because it is what a launch claim rests on. The pid alone does not
+   * survive the session — it is reused by the next process the kernel starts —
+   * so evidence that named only a pid would be unreproducible a minute later,
+   * and a reader could not tell which binary had been run.
+   */
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly pid: number | undefined;
+  readonly ready: boolean;
+  readonly endpoint: string | undefined;
+  readonly startupMs: number | undefined;
+  readonly stdoutTail: string;
+  readonly stderrTail: string;
+  readonly stillRunning: boolean;
+  /**
+   * True when the process was released rather than kept under observation.
+   *
+   * The distinction reaches the caller because it changes what can be promised:
+   * a released service is running but no longer watched, so `uvp_run_stop` can
+   * signal it within this session and nothing can after the session ends.
+   */
+  readonly detached: boolean;
+}
+
+export interface StopResult {
+  readonly stopped: readonly {
+    runId: string;
+    pid: number | undefined;
+    exitCode: number | undefined;
+    signal: string | undefined;
+    killed: boolean;
+    outcome: "exited" | "already_gone" | "unresponsive";
+  }[];
+  readonly cleanupComplete: boolean;
+}
+
+const workspaceIdOf = (path: string): string => {
+  // Derived, not random: re-opening the same directory must yield the same id,
+  // so an evidence record from an earlier call still refers to this workspace.
+  const digest = sha256(resolve(path));
+  return `wsp_${digest.slice(0, 22)}`;
+};
+
+const directoryEntries = async (path: string): Promise<readonly string[]> => {
+  try {
+    return await readdir(path);
+  } catch {
+    return [];
+  }
+};
+
+const waitForReadiness = async (
+  endpoint: string,
+  timeoutMs: number,
+): Promise<{ ready: boolean; elapsedMs: number }> => {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const exchange = await performRequest({
+        url: endpoint,
+        method: "GET",
+        headers: { "user-agent": "uvp/0.1 readiness" },
+        body: undefined,
+        httpVersion: "auto",
+        followRedirects: false,
+        maxRedirects: 0,
+        verifyTls: false,
+        timeoutMs: Math.min(2_000, Math.max(200, deadline - Date.now())),
+      });
+      // Any HTTP status means the service is accepting and answering. A 404 on
+      // the readiness path is still readiness; only a transport failure is not.
+      if (exchange.status > 0) return { ready: true, elapsedMs: Date.now() - started };
+    } catch {
+      // Not up yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return { ready: false, elapsedMs: Date.now() - started };
+};
+
+/**
+ * Workspace lifecycle: create, build, run, stop.
+ *
+ * The service owns no policy about what "success" means beyond the mechanical
+ * facts (exit code, readiness probe result). Interpretation belongs to the
+ * caller, because the same build that fails for one goal is fine for another.
+ */
+export class WorkspaceService {
+  constructor(
+    private readonly store: SessionStore,
+    private readonly client: ToolchainClient,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  async create(input: {
+    path: string;
+    name: string;
+    template: TemplateId;
+    features: readonly UvpFeature[];
+    port: number;
+    force: boolean;
+  }): Promise<CreateWorkspaceResult> {
+    const root = resolve(input.path);
+
+    if (!input.force) {
+      const entries = await directoryEntries(root);
+      const meaningful = entries.filter((entry) => entry !== "." && entry !== "..");
+      if (meaningful.length > 0) {
+        throw new UvpFailure({
+          code: "invalid_request",
+          message: `Refusing to write into ${root}: it already contains ${String(meaningful.length)} entries.`,
+          remediation: {
+            action:
+              "Choose an empty directory, or pass force=true to write alongside the existing files.",
+          },
+          details: { entries: meaningful.slice(0, 20) },
+        });
+      }
+    }
+
+    const files = renderTemplate(input.template, {
+      name: input.name,
+      port: input.port,
+      features: input.features,
+    });
+
+    const created: CreatedFile[] = [];
+    for (const file of files) {
+      const target = join(root, file.path);
+      await mkdir(dirname(target), { recursive: true });
+      const bytes = Buffer.from(file.content, "utf8");
+      await writeFile(target, bytes);
+      created.push({ path: target, bytes: bytes.byteLength, digest: sha256(bytes) });
+    }
+
+    return {
+      workspaceId: workspaceIdOf(root),
+      path: root,
+      template: input.template,
+      files: created,
+      nextSteps: [
+        `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
+        `cmake --build ${join(root, "build")}`,
+        `${join(root, "build", input.name)}`,
+      ],
+    };
+  }
+
+  async build(input: {
+    path: string;
+    buildDir?: string | undefined;
+    buildType: "Debug" | "RelWithDebInfo" | "Release";
+    generator?: "ninja" | "unix-makefiles" | "msbuild" | undefined;
+    target?: string | undefined;
+    clean: boolean;
+    jobs?: number | undefined;
+    timeoutMs: number;
+    configureOnly: boolean;
+    /** The libuvcpp install to build against, when the caller discovered one. */
+    libuvcppPrefix?: string | undefined;
+    signal: AbortSignal;
+  }): Promise<{ workspaceId: string; outcome: BuildOutcome }> {
+    const root = resolve(input.path);
+    await this.#requireWorkspace(root);
+    const buildDir = resolve(input.buildDir ?? join(root, "build"));
+
+    const outcome = await this.client.build({
+      workspacePath: root,
+      buildDir,
+      buildType: input.buildType,
+      ...(input.generator === undefined ? {} : { generator: input.generator }),
+      ...(input.target === undefined ? {} : { target: input.target }),
+      clean: input.clean,
+      ...(input.jobs === undefined ? {} : { jobs: input.jobs }),
+      timeoutMs: input.timeoutMs,
+      configureOnly: input.configureOnly,
+      ...(input.libuvcppPrefix === undefined ? {} : { libuvcppPrefix: input.libuvcppPrefix }),
+      signal: input.signal,
+    });
+
+    return { workspaceId: workspaceIdOf(root), outcome };
+  }
+
+  async run(input: {
+    path: string;
+    buildDir?: string | undefined;
+    binary?: string | undefined;
+    args: readonly string[];
+    env: Readonly<Record<string, string>>;
+    ready?: { port: number; path: string; timeoutMs: number } | undefined;
+    detach: boolean;
+  }): Promise<RunResult> {
+    const root = resolve(input.path);
+    const manifest = await this.#readManifest(root);
+    const buildDir = resolve(input.buildDir ?? join(root, "build"));
+    const binaryName = input.binary ?? manifest.binary ?? manifest.name;
+    const binaryPath = join(buildDir, binaryName);
+
+    const endpoint =
+      input.ready === undefined
+        ? undefined
+        : `http://127.0.0.1:${String(input.ready.port)}${input.ready.path}`;
+
+    const process_ = startSupervised({
+      command: binaryPath,
+      args: input.args,
+      cwd: root,
+      env: input.env,
+    });
+
+    let ready = false;
+    let startupMs: number | undefined;
+    if (endpoint !== undefined && input.ready !== undefined) {
+      const probe = await waitForReadiness(endpoint, input.ready.timeoutMs);
+      ready = probe.ready;
+      startupMs = probe.elapsedMs;
+    }
+
+    const runId = newId("run");
+    if (input.detach && process_.isRunning()) {
+      const record: SupervisedRun = {
+        runId,
+        workspaceId: workspaceIdOf(root),
+        workspacePath: root,
+        endpoint,
+        startedAt: this.now().toISOString(),
+        process: process_,
+      };
+      this.store.addRun(record);
+    }
+
+    // Snapshot before releasing: `release()` detaches the pipes, so a tail read
+    // afterwards would return whatever happened to be buffered and never grow —
+    // a startup error printed a millisecond later would vanish from the report.
+    const stdoutTail = process_.stdoutTail().slice(-4_096);
+    const stderrTail = process_.stderrTail().slice(-4_096);
+    const stillRunning = process_.isRunning();
+    const detached = input.detach && stillRunning;
+    if (detached) process_.release();
+
+    return {
+      runId,
+      workspaceId: workspaceIdOf(root),
+      command: binaryPath,
+      args: [...input.args],
+      pid: process_.pid,
+      ready,
+      endpoint,
+      startupMs,
+      stdoutTail,
+      stderrTail,
+      stillRunning,
+      detached,
+    };
+  }
+
+  async stop(input: {
+    runId?: string | undefined;
+    all: boolean;
+    graceMs: number;
+    force: boolean;
+  }): Promise<StopResult> {
+    const targets =
+      input.all || input.runId === undefined
+        ? this.store.runs()
+        : this.store.runs().filter((run) => run.runId === input.runId);
+
+    if (targets.length === 0) {
+      return { stopped: [], cleanupComplete: true };
+    }
+
+    const stopped: StopResult["stopped"][number][] = [];
+    let cleanupComplete = true;
+    for (const run of targets) {
+      const outcome = await run.process.stop(input.graceMs, input.force);
+      if (outcome.outcome !== "exited" && outcome.outcome !== "already_gone")
+        cleanupComplete = false;
+      stopped.push({
+        runId: run.runId,
+        pid: run.process.pid,
+        exitCode: outcome.code,
+        signal: outcome.signal,
+        killed: outcome.killed,
+        outcome: outcome.outcome,
+      });
+      if (outcome.outcome !== "unresponsive") this.store.forgetRun(run.runId);
+    }
+    return { stopped, cleanupComplete };
+  }
+
+  artifactsOf(outcome: BuildOutcome): readonly BuildArtifact[] {
+    return outcome.artifacts;
+  }
+
+  diagnosticsOf(outcome: BuildOutcome): readonly BuildDiagnostic[] {
+    return outcome.diagnostics;
+  }
+
+  async #readManifest(root: string): Promise<{ name: string; binary?: string; port?: number }> {
+    try {
+      const text = await readFile(join(root, "uvp.json"), "utf8");
+      const parsed = JSON.parse(text) as { name?: unknown; binary?: unknown; port?: unknown };
+      return {
+        name: typeof parsed.name === "string" ? parsed.name : "app",
+        ...(typeof parsed.binary === "string" ? { binary: parsed.binary } : {}),
+        ...(typeof parsed.port === "number" ? { port: parsed.port } : {}),
+      };
+    } catch {
+      // A workspace without a manifest still builds; it just cannot be run
+      // without an explicit binary name.
+      return { name: "app" };
+    }
+  }
+
+  async #requireWorkspace(root: string): Promise<void> {
+    try {
+      await readFile(join(root, "CMakeLists.txt"), "utf8");
+    } catch {
+      throw new UvpFailure({
+        code: "workspace_not_found",
+        message: `${root} is not a uvp workspace: no CMakeLists.txt found.`,
+        remediation: {
+          action:
+            "Create one with uvp_workspace_create, or pass the path to an existing CMake project.",
+        },
+      });
+    }
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "cacheMaxAge": "7d",
+  "cacheMaxSize": "500MB",
+  "globalDependencies": [".nvmrc", ".npmrc"],
+  "globalPassThroughEnv": ["UV_THREADPOOL_SIZE"],
+  "tasks": {
+    "compile": {
+      "dependsOn": ["metadata:check"],
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/clean-build-output.mjs",
+        "scripts/generate-package-metadata.mjs",
+        "src/**/*.{cts,mts,ts,tsx}",
+        "src/**/package.json",
+        "!src/**/*.test.ts",
+        "tsconfig.json",
+        "tsconfig.build.json"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "src/**/*.{cts,mts,ts,tsx}",
+        "tests/**/*.{cts,mts,ts,tsx}",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "vitest.config.ts",
+        "docs/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "!docs/.vitepress/cache/**",
+        "!docs/.vitepress/dist/**"
+      ],
+      "outputs": []
+    },
+    "metadata:check": {
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/generate-package-metadata.mjs",
+        "scripts/lib/generated-file.mjs",
+        "scripts/lib/paths.mjs",
+        "src/generatedPackageMetadata.ts"
+      ],
+      "outputs": []
+    },
+    "lint": {
+      "inputs": [
+        ".gitignore",
+        ".oxlintrc.json",
+        "package.json",
+        "package-lock.json",
+        "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "src/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "tests/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "docs/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "!docs/.vitepress/cache/**",
+        "!docs/.vitepress/dist/**",
+        "*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
+      ],
+      "outputs": []
+    },
+    "format:check": {
+      "inputs": [
+        ".oxfmtrc.json",
+        "package.json",
+        "scripts/**/*.{mjs,json,md}",
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "docs/**/*.md",
+        "*.{json,md,mjs,ts}"
+      ],
+      "outputs": []
+    },
+    "knip": {
+      "dependsOn": ["compile"],
+      "inputs": [
+        ".gitignore",
+        "knip.json",
+        "package.json",
+        "package-lock.json",
+        "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "docs/.vitepress/config.ts",
+        "*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
+      ],
+      "outputs": []
+    },
+    "jscpd": {
+      "inputs": [
+        ".gitignore",
+        ".jscpd.json",
+        "package.json",
+        "package-lock.json",
+        "scripts/ci/static-check-report.mjs",
+        "src/**",
+        "tests/**"
+      ],
+      "outputs": [".cache/static-checks/jscpd/**"]
+    },
+    "docs:check": {
+      "dependsOn": ["compile"],
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/generate-mcp-tool-catalog.mjs",
+        "scripts/generate-skill-metadata.mjs",
+        "scripts/generate-error-schema.mjs",
+        "scripts/check-doc-facts.mjs",
+        "scripts/lib/*.mjs",
+        "src/contracts/**/*.ts",
+        "src/application/templates.ts",
+        "src/application/ToolchainProvider.ts",
+        "src/domain/features.ts",
+        "docs/**",
+        "!docs/.vitepress/cache/**",
+        "!docs/.vitepress/dist/**",
+        "README*.md",
+        {
+          "mode": "dependencyOutputs",
+          "globs": ["skills/**", "docs/public/tool-catalog.json", "docs/error-contract.schema.json"]
+        }
+      ],
+      "outputs": []
+    },
+    "artifacts:tool-catalog": {
+      "dependsOn": ["compile"],
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/generate-mcp-tool-catalog.mjs",
+        "scripts/lib/generated-file.mjs",
+        "scripts/lib/paths.mjs",
+        "src/contracts/**/*.ts",
+        "src/domain/**/*.ts"
+      ],
+      "outputs": ["docs/public/tool-catalog.json"]
+    },
+    "artifacts:skills": {
+      "dependsOn": ["compile"],
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/generate-skill-metadata.mjs",
+        "scripts/lib/generated-file.mjs",
+        "scripts/lib/paths.mjs",
+        "src/contracts/**/*.ts",
+        "src/domain/**/*.ts",
+        ".agents/skills/build-libuvcpp-services/**"
+      ],
+      "outputs": ["skills/**"]
+    },
+    "artifacts:error-schema": {
+      "dependsOn": ["compile"],
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/generate-error-schema.mjs",
+        "scripts/lib/generated-file.mjs",
+        "scripts/lib/paths.mjs",
+        "src/contracts/errorSchemas.ts",
+        "src/domain/errors.ts"
+      ],
+      "outputs": ["docs/error-contract.schema.json"]
+    },
+    "test:run": {
+      "cache": false,
+      "dependsOn": ["artifacts:tool-catalog"]
+    }
+  }
+}

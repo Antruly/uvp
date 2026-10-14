@@ -1,0 +1,84 @@
+name: Documentation
+description: Report unclear, missing, or incorrect uvp documentation
+title: "[Docs] "
+labels:
+  - documentation
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report one documentation problem with the exact location and the smallest
+        useful supporting evidence. If something is unknown, write
+        `NOT_ENOUGH_INFO` and explain what is missing.
+
+        A documentation issue that says "this is wrong" without saying what is
+        right takes three times as long to resolve as one that includes both.
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues for a related documentation report.
+          required: true
+        - label: I removed credentials, tokens, and private paths.
+          required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation location
+      description: Link the page, section, command, or inline comment.
+      placeholder: README.md#quick-start or docs/mcp-contracts.md
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - Incorrect — the documentation contradicts actual behaviour
+        - Incomplete — a required step or constraint is missing
+        - Unclear — the wording can be read more than one way
+        - Outdated — it describes a previous version
+        - Broken link or example
+        - Missing entirely
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Quote or describe the current content, what is wrong with it, and how to observe the problem. State who is affected when known.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-content
+    attributes:
+      label: Expected content
+      description: Describe the accurate behaviour or example that should be documented. If you are proposing a clarification rather than reporting a contradiction, say so.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence
+      description: >
+        Include the exact passage, the command and its observed output, a
+        libuvcpp source reference, or a screenshot. For a claim that the
+        documentation contradicts the code, the code reference is the evidence. If
+        evidence is unavailable, write NOT_ENOUGH_INFO and explain what is missing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Include screenshots, an affected translation, or related issues.

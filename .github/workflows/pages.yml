@@ -1,0 +1,43 @@
+name: Documentation build
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "src/contracts/**", "README.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: documentation-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HUSKY: "0"
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Cache npm package downloads
+        id: npm-cache
+        uses: ./.github/actions/npm-cache
+      - run: npm ci
+      - run: npm run compile
+      - name: Regenerate the derived documentation inputs
+        run: npm run docs:generate
+      - run: npm run docs:build
+      - name: Upload the site
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/.vitepress/dist/
+          if-no-files-found: error
+          retention-days: 7

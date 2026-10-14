@@ -1,0 +1,189 @@
+name: Bug report
+description: Report a problem in uvp with observations or source evidence
+title: "[Bug] "
+labels:
+  - bug
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report one primary behaviour per issue. Keep answers concise and grounded
+        in evidence you actually have. Distinguish observed behaviour,
+        source-derived reasoning, and suspected causes; do not claim a
+        reproduction you did not run.
+
+        If an answer is not known, write `NOT_ENOUGH_INFO` and describe what is
+        missing. Incomplete reports and clearly labelled source-only findings are
+        welcome. Do not include credentials, private paths, or captured traffic
+        containing data you are not free to share.
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues for a related report.
+          required: true
+        - label: I removed credentials, tokens, private paths, and sensitive captured data.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Toolchain detection or the doctor
+        - Workspace generation or templates
+        - CMake configuration or compilation
+        - Running or stopping a service
+        - HTTP, HTTP/2, or WebSocket behaviour
+        - SOAP behaviour
+        - Capture, assertions, or the verification report
+        - CLI
+        - MCP or agent integration
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: Observed behavior
+      description: Describe the actual result, including the exact command or MCP call and the relevant output. Label source-only findings instead of claiming execution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the shortest steps you actually ran. State how often they reproduced the problem when known. If reproduction is unavailable, say so and provide what you have.
+      placeholder: |
+        1. uvp init ./svc --template rest-api --port 8080
+        2. uvp build ./svc
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: State the expected result or contract. Cite the documentation, the source, or a known-good version when available; mark an unverified expectation clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact-scope
+    attributes:
+      label: Impact and scope
+      description: Describe the observed impact and frequency. Leave untested scope and severity unknown rather than guessing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor-output
+    attributes:
+      label: Doctor output
+      description: Paste the output of `uvp doctor --json`. It names the compiler, CMake, and the libuvcpp build with its enabled modules, and resolves most toolchain reports immediately. Write NOT_ENOUGH_INFO if it could not run.
+      render: json
+    validations:
+      required: true
+
+  - type: dropdown
+    id: libuvcpp-route
+    attributes:
+      label: How is libuvcpp installed?
+      description: >
+        The two distribution routes ship different discovery files — a
+        `cmake --install`ed build writes a CMake package config, and the prebuilt
+        release archives ship only pkg-config. Several issues affect exactly one
+        route.
+      options:
+        - Built from source and `cmake --install`ed
+        - Unpacked from a prebuilt release archive
+        - Installed by a system package manager
+        - Not installed
+        - Not sure
+
+  - type: input
+    id: uvp-version
+    attributes:
+      label: uvp version
+      description: Use `uvp --version`, or give the source revision.
+      placeholder: Exact uvp --version output or source commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime and platform
+      description: Include Node.js, OS, architecture, compiler, CMake, and libuvcpp versions when relevant.
+      placeholder: Node 24.18; Ubuntu 24.04 x64; g++ 13.3; CMake 3.28; libuvcpp 1.7.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - CLI
+        - MCP
+        - Generated service (the C++ itself)
+        - Package or installation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: failure-stage
+    attributes:
+      label: Earliest failure stage
+      description: Where does the incorrect behaviour first become observable? Choose Unknown if this has not been established.
+      options:
+        - Input validation or workspace creation
+        - Libuvcpp detection or feature assessment
+        - CMake configure
+        - Compilation or linking
+        - Process start or readiness
+        - Request or protocol handling
+        - Assertion evaluation or reporting
+        - Cleanup, cancellation, or lifecycle
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: relevant-evidence
+    attributes:
+      label: Relevant output or evidence
+      description: Include the smallest useful output, error, generated file excerpt, screenshot, or exact source reference. Say how it was obtained and which claim it supports. If unavailable, write NOT_ENOUGH_INFO and explain what is missing.
+      placeholder: |
+        Command or MCP call actually run:
+        Relevant result or error:
+        For source-only findings, link the file and revision:
+        Remaining uncertainty:
+    validations:
+      required: true
+
+  - type: textarea
+    id: typed-outcome
+    attributes:
+      label: Typed outcome or recovery expected
+      description: Optional. What error code, next step, or reported unknown should the caller have received instead?
+
+  - type: textarea
+    id: analysis
+    attributes:
+      label: Analysis or suspected cause
+      description: Optional. Link supporting source and distinguish source-derived reasoning from a hypothesis. A root-cause analysis or proposed fix is not required.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add reduced fixtures, screenshots, or related issues. For a regression, include the last known good and first known bad versions when available.

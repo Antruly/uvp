@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    # A host with a C++ toolchain, CMake, and a prebuilt libuvcpp 1.7.0 under
+    # /opt/uvcpp. The toolchain lane compiles real C++ and cannot run on the
+    # hosted image without building libuvcpp from source first.
+    - uvp-toolchain

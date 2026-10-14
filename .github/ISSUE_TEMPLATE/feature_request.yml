@@ -1,0 +1,128 @@
+name: Feature request
+description: Propose a focused improvement to uvp
+title: "[Feature] "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe one problem and the outcome you would like. Short answers are
+        welcome — you do not need code, a finished design, or a test plan to
+        propose an idea. Choose "Not sure yet" wherever that is honest.
+
+        Read the [contribution scope](https://github.com/uvp-labs/uvp/blob/main/CONTRIBUTING.md#contribution-scope).
+        Maintainers can help resolve scope and technical questions; unresolved
+        boundaries block integration, not opening a request for discussion.
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues and pull requests for a related proposal.
+          required: true
+        - label: I understand the contribution scope must be reviewed before integration; open questions are welcome here.
+          required: true
+        - label: This request does not include credentials, private paths, or sensitive captured data.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Workspace templates or generated code
+        - libuvcpp feature coverage
+        - Toolchain provider or build
+        - Running and supervising services
+        - HTTP, WebSocket, or SOAP tooling
+        - Capture, assertions, or evidence reporting
+        - CLI
+        - MCP or agent integration
+        - Documentation
+        - Other
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-limitation
+    attributes:
+      label: Current limitation
+      description: What are you trying to do, and what is difficult today? A short example is enough.
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-outcome
+    attributes:
+      label: Desired outcome and success criteria
+      description: What would a useful result look like? Describe the output or behaviour you want; implementation details are optional.
+      placeholder: Generating a service that serves TLS on a self-signed certificate, with the certificate path reported in the verification bundle.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: new-effects
+    attributes:
+      label: New effects this would introduce
+      description: >
+        Select every effect the capability would add, including effects inherited
+        from an upstream tool. Add "Not sure yet" if anything is unclear. Use "No
+        new effects" only on its own. These selections guide discussion; they do
+        not establish scope approval.
+      multiple: true
+      options:
+        - Compile or link additional C++ code
+        - Start or supervise a process
+        - Listen on a network interface
+        - Make outbound network requests
+        - Write files outside the workspace
+        - Reach outside the local machine (container, remote host, device)
+        - Handle credentials or secrets
+        - No new effects (documentation or usability only)
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: libuvcpp-dependency
+    attributes:
+      label: libuvcpp dependency (optional)
+      description: >
+        If this depends on a libuvcpp module, name it and say how you established
+        that it exists — a header, a CMake option, or a configuration macro. A
+        feature name in a roadmap is not evidence that it shipped.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe existing uvp tools, a direct libuvcpp approach, or a workaround you considered and why it does not meet the need.
+
+  - type: dropdown
+    id: verification-readiness
+    attributes:
+      label: Verification available so far
+      description: Pick the closest match. An idea without a prototype is welcome.
+      options:
+        - Idea only; I need help defining checks
+        - I can describe a manual check
+        - I have a prototype or observed results
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: possible-direction
+    attributes:
+      label: Possible direction
+      description: Optional implementation or integration idea. Treat it as a proposal, not a requirement.
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Optional supporting examples, libuvcpp source references, measurements, or prior art. Distinguish observed results from expected benefits.

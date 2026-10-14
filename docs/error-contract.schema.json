@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uvp-labs/uvp/docs/error-contract.schema.json",
+  "title": "uvp error contract",
+  "description": "The closed shape of a uvp failure. Same contract in the CLI and over MCP; over MCP it arrives under structuredContent.error with isError set.",
+  "$defs": {
+    "uvp_error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "missing_requirement",
+            "unsupported_toolchain",
+            "toolchain_unavailable",
+            "compiler_unavailable",
+            "libuvcpp_unavailable",
+            "unsupported_target",
+            "workspace_not_found",
+            "workspace_integrity_mismatch",
+            "target_unavailable",
+            "service_unavailable",
+            "build_failed",
+            "configure_failed",
+            "launch_failed",
+            "endpoint_unreachable",
+            "timeout",
+            "cancelled",
+            "resource_constraint",
+            "truncated",
+            "artifact_modified",
+            "capture_unavailable",
+            "assertion_failed",
+            "execution_failure",
+            "cleanup_incomplete"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "invalid_input",
+            "unsupported_toolchain",
+            "unsupported_target",
+            "unavailable",
+            "build_failure",
+            "timeout",
+            "cancelled",
+            "resource_constraint",
+            "truncated",
+            "integrity_mismatch",
+            "execution_failure"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "remediation": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "minLength": 1
+            },
+            "docs": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "details": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "code",
+        "category",
+        "message",
+        "retryable",
+        "remediation"
+      ],
+      "additionalProperties": false
+    },
+    "tool_error_result": {
+      "type": "object",
+      "properties": {
+        "isError": {
+          "type": "boolean",
+          "const": true
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "text"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "structuredContent": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "invalid_request",
+                    "missing_requirement",
+                    "unsupported_toolchain",
+                    "toolchain_unavailable",
+                    "compiler_unavailable",
+                    "libuvcpp_unavailable",
+                    "unsupported_target",
+                    "workspace_not_found",
+                    "workspace_integrity_mismatch",
+                    "target_unavailable",
+                    "service_unavailable",
+                    "build_failed",
+                    "configure_failed",
+                    "launch_failed",
+                    "endpoint_unreachable",
+                    "timeout",
+                    "cancelled",
+                    "resource_constraint",
+                    "truncated",
+                    "artifact_modified",
+                    "capture_unavailable",
+                    "assertion_failed",
+                    "execution_failure",
+                    "cleanup_incomplete"
+                  ]
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "invalid_input",
+                    "unsupported_toolchain",
+                    "unsupported_target",
+                    "unavailable",
+                    "build_failure",
+                    "timeout",
+                    "cancelled",
+                    "resource_constraint",
+                    "truncated",
+                    "integrity_mismatch",
+                    "execution_failure"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "remediation": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "docs": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ],
+                  "additionalProperties": false
+                },
+                "details": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "code",
+                "category",
+                "message",
+                "retryable",
+                "remediation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "isError",
+        "content",
+        "structuredContent"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/tool_error_result"
+}

@@ -1,0 +1,128 @@
+name: Design discussion
+description: Discuss a uvp architecture, contract, or scope decision
+title: "[Design] "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a substantial decision: a new provider, a change to a public
+        or persisted contract, a new effect a tool can produce, or a change to the
+        evidence model. One question and a short explanation are enough to start.
+
+        Choose "Not sure yet" where needed. Unresolved boundaries block
+        integration, not opening a discussion. Read the
+        [contribution scope](https://github.com/uvp-labs/uvp/blob/main/CONTRIBUTING.md#contribution-scope).
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues and pull requests for a related discussion.
+          required: true
+        - label: I understand the contribution scope must be reviewed before integration; open questions are welcome here.
+          required: true
+        - label: This discussion does not include credentials, private paths, or sensitive data.
+          required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision needed
+      description: What would you like maintainers to help decide? A short question is enough.
+      placeholder: Should uvp detect libuvcpp features from the installed headers, the config header, or both?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context-evidence
+    attributes:
+      label: Context and evidence
+      description: >
+        Explain the problem and link the evidence you have. Distinguish observed
+        behaviour, source-derived reasoning, proposed behaviour, and unknowns. A
+        question without measurements or a finished design is welcome.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer affected
+      options:
+        - Domain semantics (evidence, unknown, errors)
+        - Contracts (tool input/output schemas)
+        - Application workflows
+        - Toolchain providers
+        - CLI or MCP adapters
+        - Generated code and templates
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: dropdown
+    id: new-effects
+    attributes:
+      label: Expected interaction with the local machine
+      description: >
+        Select all known effects. Add "Not sure yet" if anything is unclear. Use
+        "No new effects" only on its own. These selections help discussion and do
+        not establish scope approval.
+      multiple: true
+      options:
+        - Compile or link C++
+        - Start or supervise a process
+        - Listen on a network interface
+        - Make outbound network requests
+        - Persist captured traffic
+        - Reach outside the local machine
+        - Handle credentials or secrets
+        - No new effects
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: contract-impact
+    attributes:
+      label: Contract impact
+    description: >
+      Which tool contracts change, and does a caller see the difference? If the
+      change alters an existing output schema or the error contract, say how a
+      current caller migrates. Leave blank if you need help identifying this.
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and tradeoffs
+      description: Optional approaches or tradeoffs. One idea is enough; maintainers can help compare alternatives.
+
+  - type: textarea
+    id: honesty-impact
+    attributes:
+      label: How does this preserve the observed / derived / unknown distinction?
+      description: >
+        Every uvp tool is expected to report what it established, what it
+        inferred, and what it could not determine. Describe how the proposed
+        change keeps those separable, or where it cannot.
+
+  - type: dropdown
+    id: verification-readiness
+    attributes:
+      label: Verification available so far
+      options:
+        - Idea only; I need help defining checks
+        - I can describe a manual check
+        - I have a prototype or observed results against real libuvcpp
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Link relevant contracts, libuvcpp source (file and line), tests, or prior discussions.

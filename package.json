@@ -1,0 +1,114 @@
+{
+  "name": "uvp-agents",
+  "mcpName": "io.github.uvp-labs/uvp",
+  "version": "0.1.0",
+  "description": "Build, run, and verify libuvcpp-powered C++ web services from your terminal or agent with one CLI and MCP server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uvp-labs/uvp.git"
+  },
+  "homepage": "https://github.com/uvp-labs/uvp#readme",
+  "bugs": {
+    "url": "https://github.com/uvp-labs/uvp/issues"
+  },
+  "keywords": [
+    "libuv",
+    "libuvcpp",
+    "cpp",
+    "web-framework",
+    "mcp-server",
+    "model-context-protocol",
+    "agents",
+    "agent-skills",
+    "cli",
+    "code-generation",
+    "http",
+    "http2",
+    "http3",
+    "websocket",
+    "uvp"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "uvp": "scripts/uvp.mjs"
+  },
+  "engines": {
+    "node": "^22.19.0 || ^24.11.0 || >=26.0.0"
+  },
+  "packageManager": "npm@11.16.0",
+  "files": [
+    "dist",
+    "scripts/uvp.mjs",
+    "skills",
+    "docs/public/tool-catalog.json",
+    "docs/error-contract.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "compile": "node scripts/clean-build-output.mjs && tsc -p tsconfig.build.json",
+    "build": "npm run compile",
+    "build:cached": "turbo run compile",
+    "clean": "node scripts/clean-build-output.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "knip": "knip",
+    "jscpd": "jscpd src/ tests/ --reporters console,json --output .cache/static-checks/jscpd",
+    "jscpd:report": "node scripts/ci/static-check-report.mjs --report jscpd",
+    "test": "vitest run",
+    "test:run": "vitest run",
+    "test:fast": "node scripts/run-tests.mjs source",
+    "test:built": "node scripts/run-tests.mjs built --except toolchain",
+    "test:toolchain": "node scripts/run-tests.mjs built --only toolchain",
+    "test:packaged-mcp": "node scripts/test-packaged-mcp.mjs",
+    "test:watch": "node scripts/run-tests.mjs source --watch",
+    "test:coverage": "vitest run --coverage.enabled --coverage.provider=v8",
+    "test:mutation": "stryker run",
+    "verify:test-discovery": "node scripts/verify-test-discovery.mjs",
+    "artifacts:tool-catalog": "node scripts/generate-mcp-tool-catalog.mjs",
+    "artifacts:skills": "node scripts/generate-skill-metadata.mjs",
+    "artifacts:error-schema": "node scripts/generate-error-schema.mjs",
+    "tool-catalog:check": "node scripts/generate-mcp-tool-catalog.mjs --check",
+    "metadata:check": "node scripts/generate-package-metadata.mjs --check",
+    "docs:generate": "node scripts/generate-package-metadata.mjs && npm run artifacts:tool-catalog && npm run artifacts:skills && npm run artifacts:error-schema",
+    "docs:check": "node scripts/generate-mcp-tool-catalog.mjs --check && node scripts/generate-package-metadata.mjs --check && node scripts/generate-skill-metadata.mjs --check && node scripts/generate-error-schema.mjs --check && node scripts/check-doc-facts.mjs",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "check": "turbo run typecheck lint format:check metadata:check knip",
+    "check:ci": "turbo run typecheck lint format:check metadata:check knip jscpd docs:check",
+    "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run test:run",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "canonicalize": "3.0.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/typescript-checker": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@types/node": "26.6.4",
+    "@vitest/coverage-v8": "5.0.3",
+    "husky": "9.1.7",
+    "jscpd": "5.0.12",
+    "knip": "6.39.0",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
+    "turbo": "2.11.7",
+    "typescript": "7.0.2",
+    "vitepress": "1.6.4",
+    "vitest": "5.0.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
