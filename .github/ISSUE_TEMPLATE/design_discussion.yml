@@ -14,7 +14,7 @@ body:
 
         Choose "Not sure yet" where needed. Unresolved boundaries block
         integration, not opening a discussion. Read the
-        [contribution scope](https://github.com/uvp-labs/uvp/blob/main/CONTRIBUTING.md#contribution-scope).
+        [contribution scope](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md#contribution-scope).
 
   - type: checkboxes
     id: before-submitting

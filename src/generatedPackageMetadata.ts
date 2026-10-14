@@ -15,7 +15,7 @@ export const PACKAGE_NAME = "uvp-agents";
 export const PACKAGE_VERSION = "0.1.0"; // x-release-please-version
 
 /** The MCP registry name. Not the npm name; the two are deliberately different. */
-export const MCP_SERVER_NAME = "io.github.uvp-labs/uvp";
+export const MCP_SERVER_NAME = "io.github.Antruly/uvp";
 
 /** The MCP registry entry's human-readable title. */
 export const MCP_SERVER_TITLE = "uvp";

@@ -48,9 +48,9 @@ export default defineConfig({
       },
     ],
     search: { provider: "local" },
-    socialLinks: [{ icon: "github", link: "https://github.com/uvp-labs/uvp" }],
+    socialLinks: [{ icon: "github", link: "https://github.com/Antruly/uvp" }],
     editLink: {
-      pattern: "https://github.com/uvp-labs/uvp/edit/main/docs/:path",
+      pattern: "https://github.com/Antruly/uvp/edit/main/docs/:path",
     },
     footer: {
       message: "Released under the MIT License.",

@@ -1,11 +1,11 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.uvp-labs/uvp",
+  "name": "io.github.Antruly/uvp",
   "title": "uvp",
   "description": "Build, run, and verify libuvcpp-powered C++ web services from your terminal or agent with one CLI and MCP server.",
-  "websiteUrl": "https://github.com/uvp-labs/uvp",
+  "websiteUrl": "https://github.com/Antruly/uvp",
   "repository": {
-    "url": "https://github.com/uvp-labs/uvp",
+    "url": "https://github.com/Antruly/uvp",
     "source": "github"
   },
   "version": "0.1.0",

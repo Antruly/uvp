@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Contribution scope and integration requirements
-    url: https://github.com/uvp-labs/uvp/blob/main/CONTRIBUTING.md#contribution-scope
+    url: https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md#contribution-scope
     about: Check supported capabilities, excluded workflows, and the fail-closed integration rule before proposing a feature.
   - name: uvp documentation
-    url: https://github.com/uvp-labs/uvp#readme
+    url: https://github.com/Antruly/uvp#readme
     about: Read the README and AGENTS.md for usage and configuration details.
   - name: Question or discussion
-    url: https://github.com/uvp-labs/uvp/discussions
+    url: https://github.com/Antruly/uvp/discussions
     about: Please ask questions and start discussions here.

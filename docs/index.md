@@ -11,7 +11,7 @@ hero:
       link: /installation
     - theme: alt
       text: View on GitHub
-      link: https://github.com/uvp-labs/uvp
+      link: https://github.com/Antruly/uvp
 
 features:
   - title: Generate real C++ projects
@@ -73,4 +73,4 @@ belongs to you and depends only on libuvcpp.
 
 It is also not a benchmark of your service, a production deployment tool, or a
 sandbox. Generated services run with your permissions on your machine. See the
-[disclaimer](https://github.com/uvp-labs/uvp/blob/main/DISCLAIMER.md).
+[disclaimer](https://github.com/Antruly/uvp/blob/main/DISCLAIMER.md).

@@ -20,7 +20,7 @@
 </div>
 
 > [!IMPORTANT]
-> uvp 通过 [uvp-labs/uvp](https://github.com/uvp-labs/uvp) 分发。npm 包名
+> uvp 通过 [Antruly/uvp](https://github.com/Antruly/uvp) 分发。npm 包名
 > `uvp-agents` 为首次发布预留，**目前尚未发布** —— 在此之前请从源码检出安装。
 > 仅凭仓库名相似或 README 雷同，并不能证明某个下载来源是官方渠道。
 
@@ -63,7 +63,7 @@ npx uvp-agents setup      # 尚未发布，见上方说明
 首次发布之前，请从源码检出运行：
 
 ```bash
-git clone https://github.com/uvp-labs/uvp
+git clone https://github.com/Antruly/uvp
 cd uvp
 npm ci && npm run build:cached
 node scripts/uvp.mjs setup

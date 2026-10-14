@@ -96,7 +96,7 @@ saying so.
 | Artifact           | Where                                                        |
 | ------------------ | ------------------------------------------------------------ |
 | npm package        | `uvp-agents`                                                 |
-| MCP registry entry | `io.github.uvp-labs/uvp`                                     |
+| MCP registry entry | `io.github.Antruly/uvp`                                      |
 | Tool catalog       | `docs/public/tool-catalog.json`, also shipped in the package |
 | Documentation site | GitHub Pages, from `docs/.vitepress/dist/`                   |
 
@@ -143,7 +143,7 @@ Before merging a release PR:
 - [ ] The packaged install was run, not assumed.
 - [ ] `uvp --version` reports the new version after a packaged install.
 - [ ] The release PR's `Human owner:` line is filled in. See the
-      [AI contribution policy](https://github.com/uvp-labs/uvp/blob/main/CONTRIBUTING.md#ai-contribution-policy).
+      [AI contribution policy](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md#ai-contribution-policy).
 
 ## If a release goes wrong
 

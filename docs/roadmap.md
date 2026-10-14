@@ -128,6 +128,6 @@ is written. The `🔴`/`✅` marks on this page track the test suite, and the
 summary a new user reads first.
 
 If you want to work on something here, read
-[CONTRIBUTING.md](https://github.com/uvp-labs/uvp/blob/main/CONTRIBUTING.md)
+[CONTRIBUTING.md](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md)
 first — in particular the contribution scope, which says which changes need a
 discussion before a pull request.

@@ -29,7 +29,7 @@ npx uvp-agents doctor
 
 > [!IMPORTANT]
 > `uvp-agents` is not yet published to npm. Until it is, run from a clone:
-> `git clone https://github.com/uvp-labs/uvp && cd uvp && npm ci && npm run build && node scripts/uvp.mjs doctor`.
+> `git clone https://github.com/Antruly/uvp && cd uvp && npm ci && npm run build && node scripts/uvp.mjs doctor`.
 
 ## Install
 

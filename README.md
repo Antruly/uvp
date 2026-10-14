@@ -20,7 +20,7 @@
 </div>
 
 > [!IMPORTANT]
-> uvp is distributed from [uvp-labs/uvp](https://github.com/uvp-labs/uvp). The
+> uvp is distributed from [Antruly/uvp](https://github.com/Antruly/uvp). The
 > npm package name `uvp-agents` is reserved for the first release and is **not
 > yet published** — until it is, install from a source checkout. A similar
 > repository name or a copied README does not establish that a download is
@@ -65,7 +65,7 @@ npx uvp-agents setup      # not yet published; see the note above
 Until the first release, run from a checkout:
 
 ```bash
-git clone https://github.com/uvp-labs/uvp
+git clone https://github.com/Antruly/uvp
 cd uvp
 npm ci && npm run build:cached
 node scripts/uvp.mjs setup

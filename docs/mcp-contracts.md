@@ -18,7 +18,7 @@ The server runs over stdio. There is no uvp daemon listening on a port and no
 network service of any kind — the transport is the parent process's standard
 input and output.
 
-The registry entry is `io.github.uvp-labs/uvp`; the npm package is
+The registry entry is `io.github.Antruly/uvp`; the npm package is
 `uvp-agents`.
 
 ## The tools

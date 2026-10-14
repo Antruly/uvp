@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/uvp-labs/uvp/docs/error-contract.schema.json",
+  "$id": "https://github.com/Antruly/uvp/docs/error-contract.schema.json",
   "title": "uvp error contract",
   "description": "The closed shape of a uvp failure. Same contract in the CLI and over MCP; over MCP it arrives under structuredContent.error with isError set.",
   "$defs": {

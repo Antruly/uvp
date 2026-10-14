@@ -1,16 +1,16 @@
 {
   "name": "uvp-agents",
-  "mcpName": "io.github.uvp-labs/uvp",
+  "mcpName": "io.github.Antruly/uvp",
   "version": "0.1.0",
   "description": "Build, run, and verify libuvcpp-powered C++ web services from your terminal or agent with one CLI and MCP server.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/uvp-labs/uvp.git"
+    "url": "git+https://github.com/Antruly/uvp.git"
   },
-  "homepage": "https://github.com/uvp-labs/uvp#readme",
+  "homepage": "https://github.com/Antruly/uvp#readme",
   "bugs": {
-    "url": "https://github.com/uvp-labs/uvp/issues"
+    "url": "https://github.com/Antruly/uvp/issues"
   },
   "keywords": [
     "libuv",
