@@ -65,7 +65,9 @@
     "test": "vitest run",
     "test:run": "vitest run",
     "test:fast": "node scripts/run-tests.mjs source",
+    "test:local": "node scripts/run-tests.mjs source",
     "test:built": "node scripts/run-tests.mjs built --except toolchain",
+    "test:focused": "turbo run compile && node scripts/run-tests.mjs all",
     "test:toolchain": "node scripts/run-tests.mjs built --only toolchain",
     "test:packaged-mcp": "node scripts/test-packaged-mcp.mjs",
     "test:watch": "node scripts/run-tests.mjs source --watch",
@@ -83,6 +85,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "check": "turbo run typecheck lint format:check metadata:check knip",
+    "check:fast": "turbo run typecheck lint",
     "check:ci": "turbo run typecheck lint format:check metadata:check knip jscpd docs:check",
     "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run test:run",
     "prepare": "husky"
