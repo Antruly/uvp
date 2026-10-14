@@ -4577,6 +4577,9 @@
           "bundle_id": {
             "type": "string"
           },
+          "bundle_digest": {
+            "type": "string"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -4699,6 +4702,7 @@
           "limitations",
           "workspace_id",
           "bundle_id",
+          "bundle_digest",
           "status",
           "build",
           "service",

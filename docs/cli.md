@@ -129,6 +129,26 @@ Supervision is scoped to the session: everything uvp started is stopped when the
 session ends. `uvp stop` stops it earlier, by handle or with `--all`. It can
 signal only processes uvp started; it is not a general process killer.
 
+Scoped to the session means scoped to the _process_. The run registry is held in
+memory by the uvp process that started the service, and `uvp run` detaches by
+default, so the CLI invocation that launched a service has already exited by the
+time you would type the next command — and a later `uvp stop --all` starts a new
+process with an empty registry. It will report that nothing was running while the
+service from the previous invocation is still listening. That report is true
+about the registry and misleading about the machine, and it is the reason the
+flag reads `--all` rather than "everything".
+
+Three ways to end up with a service you can actually stop:
+
+- Run the service under the MCP server and stop it there. The server is one
+  process for the whole session, so its registry outlives the individual calls.
+- Pass `--no-detach`, which keeps `uvp run` in the foreground until you interrupt
+  it and ties the child's lifetime to it.
+- Stop the pid `uvp run` printed, with whatever your shell provides.
+
+A detached run is not lost — it is unowned. The distinction matters because
+`uvp stop --all` cannot tell you which of the two you have.
+
 ## `uvp verify`
 
 ```bash

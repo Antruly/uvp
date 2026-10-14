@@ -104,7 +104,12 @@
       "outputs": [".cache/static-checks/jscpd/**"]
     },
     "docs:check": {
-      "dependsOn": ["compile"],
+      "dependsOn": [
+        "compile",
+        "artifacts:tool-catalog",
+        "artifacts:skills",
+        "artifacts:error-schema"
+      ],
       "inputs": [
         "package.json",
         "package-lock.json",
