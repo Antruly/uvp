@@ -40,3 +40,6 @@ out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local requirements notes; not part of the repository.
+dev.md
