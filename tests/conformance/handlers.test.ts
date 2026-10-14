@@ -12,13 +12,14 @@ import { TOOL_CONTRACTS, toolContract } from "../../src/contracts/toolContracts.
 import type { ToolContract } from "../../src/contracts/toolContractTypes.js";
 import { sha256 } from "../../src/domain/identity.js";
 import { toUvpError } from "../../src/domain/errors.js";
+import { freePort } from "../support/ports.js";
 import {
   createFakeToolchain,
   createProviderWithoutLibuvcpp,
   failedBuild,
   writeFakeBinary,
 } from "./fakeToolchain.js";
-import { fixtureBinaryScript, freePort, startFixture } from "./fixtureServer.js";
+import { fixtureBinaryScript, startFixture } from "./fixtureServer.js";
 import type { FixtureServer } from "./fixtureServer.js";
 
 /**
@@ -336,6 +337,45 @@ describe("launch and stop", () => {
     TIMEOUT,
   );
 
+  it(
+    "keeps a run it did not detach in this session's registry, so it can still be stopped",
+    async () => {
+      // `detach: false` says "do not let go of the pipes", not "this process is
+      // no longer uvp's". Registering only the detached runs made the result's
+      // own limitation — "The process is still running; stop it with
+      // uvp_run_stop" — name a remedy that did not exist: the stop found an empty
+      // registry, which it reports as `stopped: []` and a `cleanup_complete`
+      // that is true of nothing.
+      const port = await freePort();
+      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
+
+      const run = await call("uvp_run", {
+        path: harness.workspace,
+        ready: { port, path: "/healthz", timeout_ms: 15_000 },
+        env: { FIXTURE_PORT: String(port) },
+        detach: false,
+      });
+      expectConforms("uvp_run", run);
+      expect(run["ready"]).toBe(true);
+      expect(run["still_running"]).toBe(true);
+      expect(run["detached"]).toBe(false);
+
+      try {
+        const stop = await call("uvp_run_stop", { run_id: run["run_id"] });
+        expectConforms("uvp_run_stop", stop);
+        const stopped = stop["stopped"] as { run_id: string; outcome: string }[];
+        expect(stopped.map((entry) => entry.run_id)).toEqual([run["run_id"]]);
+        expect(["exited", "already_gone"]).toContain(stopped[0]?.outcome);
+        expect(stop["cleanup_complete"]).toBe(true);
+      } finally {
+        // The stop above is the assertion; this is hygiene, so a failure before
+        // it cannot leave a fixture process holding a port for the next test.
+        await call("uvp_run_stop", { all: true });
+      }
+    },
+    TIMEOUT,
+  );
+
   it("reports an empty stop as complete, because nothing left running is a good answer", async () => {
     const stop = await call("uvp_run_stop", { all: true });
     expectConforms("uvp_run_stop", stop);
@@ -594,6 +634,12 @@ describe("the verification workflow", () => {
       });
       expectConforms("uvp_verify", output);
 
+      // The goal comes back. It was accepted from the contract, threaded
+      // through the handler, and read nowhere: a caller could state what the
+      // pass was for and get a bundle that did not mention it, while the
+      // domain's own bundle type requires a goal.
+      expect(output["goal"]).toBe("the conformance fixture answers as declared");
+
       // `verified` means every step that was attempted succeeded. Reaching it
       // through a real spawn, a real probe, and real requests is the whole
       // milestone-one claim.
@@ -754,6 +800,86 @@ describe("the verification workflow", () => {
   );
 });
 
+/**
+ * The other half of `uvp_verify`'s contract: what it *takes*, rather than what it
+ * reports.
+ *
+ * Kept out of the describe above because the subject is the vocabulary itself —
+ * which checks a caller may name, and which fields are refused rather than
+ * quietly dropped — and the passes above answer a different question, namely
+ * what a verdict means once the request was accepted.
+ */
+describe("the assertion vocabulary at the boundary", () => {
+  it(
+    "evaluates the kinds the contract used not to offer, and refuses a field it cannot honour",
+    async () => {
+      const port = await freePort();
+      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
+
+      // The three kinds outside the eight `uvp_verify` used to declare. They are
+      // the ones the CLI's short forms lower onto — `body_bytes<1024`,
+      // `header:<name>`, `json:<path>` — so before this contract was widened
+      // they parsed and then failed validation, and the caller saw a zod enum
+      // instead of the check they asked for.
+      const output = await call("uvp_verify", {
+        path: harness.workspace,
+        run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+        requests: [
+          {
+            name: "hello",
+            method: "GET",
+            path: "/hello",
+            assertions: [
+              { kind: "body_bytes_under", expected: 1000 },
+              { kind: "header_exists", target: "content-type" },
+              { kind: "body_json_path_exists", target: "$.service" },
+            ],
+          },
+        ],
+      });
+      expectConforms("uvp_verify", output);
+      const exchanges = output["exchanges"] as { assertions_passed: number }[];
+      expect(exchanges[0]?.assertions_passed).toBe(3);
+
+      // `negate` is the one asymmetry that is deliberate, and it is refused
+      // rather than ignored. Zod strips unknown keys by default, so a caller who
+      // sent `negate: true` used to get an affirmative check reported under an
+      // assertion they had written as a negation.
+      const negated = await failureCodeOf("uvp_verify", {
+        path: harness.workspace,
+        run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+        requests: [
+          {
+            name: "hello",
+            method: "GET",
+            path: "/hello",
+            assertions: [{ kind: "status_equals", expected: 404, negate: true }],
+          },
+        ],
+      });
+      expect(negated).toBe("invalid_request");
+
+      // And an unknown key is refused by name rather than dropped: the strict
+      // object is what makes "I set this and nothing happened" impossible.
+      expect(
+        await failureCodeOf("uvp_verify", {
+          path: harness.workspace,
+          run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+          requests: [
+            {
+              name: "hello",
+              method: "GET",
+              path: "/hello",
+              assertions: [{ kind: "status_equals", expected: 200, retries: 3 }],
+            },
+          ],
+        }),
+      ).toBe("invalid_request");
+    },
+    TIMEOUT,
+  );
+});
+
 describe("the doctor", () => {
   it("reports the toolchain, the libuvcpp it found, and a verdict per feature", async () => {
     const output = await call("uvp_doctor", {
@@ -849,11 +975,12 @@ describe("the dispatch table", () => {
   });
 
   it("offers every assertion kind the evaluator table implements, and invents none", () => {
-    // The kind vocabulary is written out three times: once as the implementation
-    // table's key type, and once inline in each contract that takes assertions.
-    // Nothing else makes those agree. A kind added to the table but to no
-    // contract is unreachable code that tests can still cover; a kind added to a
-    // contract but not the table reaches the evaluator as `undefined` and throws.
+    // The vocabulary is declared once, in `src/domain/assertionKinds.ts`, and
+    // every contract that takes assertions must offer all of it. Nothing else
+    // makes the contracts agree with the evaluator. A kind added to the table but
+    // to no contract is unreachable code that tests can still cover; a kind added
+    // to a contract but not the table reaches the evaluator as `undefined` and
+    // throws.
     const offered = new Set<string>();
     for (const contract of TOOL_CONTRACTS) {
       for (const kind of assertionKindsIn(contract.inputSchema)) offered.add(kind);
@@ -868,6 +995,21 @@ describe("the dispatch table", () => {
     // And the walk found something, so a change to the schema builders cannot
     // quietly turn this test into a tautology over an empty set.
     expect(offered.size).toBeGreaterThanOrEqual(ASSERTION_KINDS.length);
+
+    // Per contract, not just in union. `uvp_verify` listed eight of the eleven by
+    // hand while `uvp_assert_exchange` listed all eleven, and the union above
+    // covered the vocabulary either way — so this test passed while three forms
+    // the CLI's shared syntax module lowers (`body_bytes<1024`,
+    // `header:<name>`, `json:<path>`) parsed cleanly and were then rejected by
+    // the contract one layer above the check that implements them.
+    for (const contract of TOOL_CONTRACTS) {
+      const kinds = assertionKindsIn(contract.inputSchema);
+      if (kinds.length === 0) continue;
+      expect(
+        ASSERTION_KINDS.filter((kind) => !kinds.includes(kind)),
+        `${contract.name} takes assertions but offers only some of the vocabulary`,
+      ).toEqual([]);
+    }
   });
 
   it("refuses an unregistered tool by naming the ones that exist", () => {

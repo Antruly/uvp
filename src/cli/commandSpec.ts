@@ -64,6 +64,18 @@ export interface ToolCommand extends CommandShape {
   readonly inspect?:
     | ((output: Record<string, unknown>, parsed: ParsedArgv) => string | undefined)
     | undefined;
+  /**
+   * The run this command leaves in the foreground, when it leaves one.
+   *
+   * `uvp run --no-detach` prints its result and then stays: the service's open
+   * pipes are what hold this process, so the call lasts as long as the service
+   * does. That is the point of the flag, and it is the one case where an
+   * interrupt is not "cancel the call" but "stop the service" — so the runner
+   * needs to know *which* run it is holding, and only the command can read that
+   * out of its own output. Returning `undefined` means nothing is being held and
+   * the interrupt keeps its default meaning.
+   */
+  readonly heldRun?: ((output: Record<string, unknown>) => string | undefined) | undefined;
 }
 
 /**

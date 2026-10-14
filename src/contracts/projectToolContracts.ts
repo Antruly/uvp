@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
+import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { UVP_FEATURES } from "../domain/features.js";
 
 const workspaceIdSchema = z.string().regex(/^wsp_[0-9a-f]{22}$/u);
@@ -293,19 +294,34 @@ export const verifyContract = defineTool({
           body: z.string().optional(),
           assertions: z
             .array(
-              z.object({
-                kind: z.enum([
-                  "status_equals",
-                  "status_in",
-                  "header_equals",
-                  "header_matches",
-                  "body_contains",
-                  "body_json_path_equals",
-                  "body_matches",
-                  "latency_under_ms",
-                ]),
-                target: z.string().optional(),
-                expected: z.unknown(),
+              // Strict, and with `negate` declared in order to refuse it. Both
+              // halves are the same rule: a field the caller set is never
+              // dropped without being named. Zod's default is to strip unknown
+              // keys, so `negate: true` used to reach the evaluator as nothing
+              // at all and the check ran affirmatively under an assertion the
+              // caller had written as a negation.
+              z.strictObject({
+                kind: z.enum(ASSERTION_KINDS),
+                target: z
+                  .string()
+                  .optional()
+                  .describe("Header name or JSONPath, for the kinds that take one."),
+                // Optional, because two of the kinds carry no expectation:
+                // `header_exists` and `body_json_path_exists` are presence
+                // checks, which is what the CLI's `header:<name>` and
+                // `json:<path>` forms lower to. A required key rejected both of
+                // them one layer above the evaluator that implements them.
+                expected: z.unknown().optional(),
+                negate: z
+                  .boolean()
+                  .optional()
+                  .refine((value) => value !== true, {
+                    message:
+                      "uvp_verify evaluates every assertion affirmatively and has no `negate`. " +
+                      "Assert the value you expect instead, or record the exchange with " +
+                      "uvp_http_request and negate it with uvp_assert_exchange.",
+                  })
+                  .describe("Refused: uvp_verify has no negated assertions."),
               }),
             )
             .default([]),
@@ -318,6 +334,13 @@ export const verifyContract = defineTool({
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
+    /**
+     * The goal the caller gave, echoed back so the bundle says what it was for.
+     *
+     * Absent when the caller named none — not an empty string, which would read
+     * as a goal somebody stated.
+     */
+    goal: z.string().optional(),
     workspace_id: workspaceIdSchema,
     bundle_id: z.string(),
     bundle_digest: z.string(),

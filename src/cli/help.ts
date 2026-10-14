@@ -64,13 +64,3 @@ const flagLines = (flags: readonly (typeof UNIVERSAL_FLAGS)[number][]): string[]
     const value = flag.value === undefined ? "" : ` ${flag.value}`;
     return `  ${`${names}${value}`.padEnd(28)}${flag.description}`;
   });
-
-/**
- * The message for words that select nothing.
- *
- * It prints the command list rather than guessing. A typo would land on a
- * suggestion half the time and on a wrong command the other half, and there is no
- * cheap way to tell which — so this shows the list and lets the reader see it.
- */
-export const unknownCommandHelp = (words: readonly string[]): string =>
-  [`uvp: no command named "${words.join(" ")}".`, "", globalHelp()].join("\n");

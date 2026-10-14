@@ -74,10 +74,12 @@ const PROJECT_POLICIES = {
     execArgv: ["--max-old-space-size=384"],
   },
   "mcp-boundary": {
-    pool: "threads" as const,
+    pool: "forks" as const,
     maxWorkers: MAX_TEST_WORKERS,
-    // Each file opens and closes an explicit in-memory MCP session, so the
-    // module graph is immutable across files.
+    // Each file drives one `uvp mcp` child over real stdio and owns nothing
+    // process-global itself, so the module graph is immutable across files — but
+    // the children are not, and a forked worker keeps their stdio and signals out
+    // of the runner's own thread pool.
     isolate: false,
   },
   toolchain: {

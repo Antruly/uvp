@@ -12,7 +12,7 @@ import type { CommandSpec } from "../commandSpec.js";
 import { EXIT_NO, EXIT_WRONG } from "../exitCodes.js";
 import { parseAssertionList } from "../assertionSyntax.js";
 import type { AssertionInput } from "../assertionSyntax.js";
-import { bool } from "../readOutput.js";
+import { bool, str } from "../readOutput.js";
 
 /**
  * The build, run, stop, and verify commands.
@@ -147,6 +147,9 @@ export const runCommand: CommandSpec = {
   notes: [
     "Without --port the call returns as soon as the process is spawned, and no readiness question",
     "is asked — the result says so in `unknowns` rather than reporting `ready: false` as a finding.",
+    "With --no-detach the call stays in the foreground for as long as the service runs, and an",
+    "interrupt stops that service before returning — the port is free when the call ends, and the",
+    "exit code is 130 for SIGINT or 143 for SIGTERM.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp run ./svc --port 8080");
@@ -174,6 +177,16 @@ export const runCommand: CommandSpec = {
   },
   verdict: (output, parsed) =>
     asNumber(parsed, "port") !== undefined && bool(output["ready"]) !== true ? EXIT_NO : undefined,
+  // `--no-detach` is the one spelling whose lifetime this process holds, and the
+  // result says which case it is: `detached: true` means uvp let go of the pipes
+  // and is about to exit, while a service that never came up leaves nothing to
+  // hold either. The run id is what the runner stops when the wait is
+  // interrupted — the same registry `uvp stop` reads, so there is one owner of
+  // the process and not two.
+  heldRun: (output) =>
+    bool(output["detached"]) === true || bool(output["still_running"]) !== true
+      ? undefined
+      : str(output["run_id"]) || undefined,
 };
 
 export const stopCommand: CommandSpec = {
@@ -287,8 +300,9 @@ export const verifyCommand: CommandSpec = {
     "Exit codes: 0 verified, 1 failed or partial, 2 unknown (nothing was evaluated, so uvp could not",
     "put the question to the service at all).",
     "",
-    "Assertion syntax: status=200, status=2xx, json:$.path=value, header:name=value, body~=substring,",
-    "latency<250ms, or a JSON object for the full evaluator vocabulary. `uvp verify` does not support",
+    "Assertion syntax: status=200, status=2xx, json:$.path=value, header:name=value, body~=regex,",
+    "latency<250ms, body_bytes<1024, header:name or json:$.path on their own to check that the field",
+    "is present, or a JSON object for the full evaluator vocabulary. `uvp verify` does not support",
     "negated assertions; use `uvp assert` for those.",
   ],
   input: (parsed) => {
@@ -377,8 +391,9 @@ const collectRequests = (parsed: ParsedArgv): RequestDraft[] => {
       for (const assertion of parseAssertionList(occurrence.values)) {
         if (assertion.negate === true) {
           flagError(
-            "uvp verify does not support negated assertions: uvp_verify's contract has no `negate` " +
-              "field, so it would be dropped silently. Use `uvp assert` against the exchange instead.",
+            "uvp verify does not support negated assertions: uvp_verify evaluates every assertion " +
+              "affirmatively and refuses `negate`. Record the exchange and use `uvp assert` " +
+              "against it instead.",
           );
         }
         current.assertions.push(assertion);

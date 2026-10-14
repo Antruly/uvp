@@ -21,6 +21,9 @@ const MAX_CAPTURES = 16;
 const fakeProcess = (): SupervisedProcess => ({
   pid: 4242,
   command: "node server.js",
+  // A stub for a service that started: the store never asks, so the promise is
+  // resolved rather than absent — the interface has no "not applicable".
+  whenStarted: () => Promise.resolve(),
   isRunning: () => true,
   exitInfo: () => undefined,
   stdoutTail: () => "",

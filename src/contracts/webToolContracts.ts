@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
+import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 
 const exchangeIdSchema = z.string().regex(/^exc_[0-9a-f]{22}$/u);
 const captureIdSchema = z.string().regex(/^cap_[0-9a-f]{22}$/u);
@@ -453,19 +454,9 @@ export const assertExchangeContract = defineTool({
     assertions: z
       .array(
         z.object({
-          kind: z.enum([
-            "status_equals",
-            "status_in",
-            "header_equals",
-            "header_matches",
-            "header_exists",
-            "body_contains",
-            "body_matches",
-            "body_json_path_equals",
-            "body_json_path_exists",
-            "body_bytes_under",
-            "latency_under_ms",
-          ]),
+          // The vocabulary is declared once, in `domain`, because the evaluator,
+          // this contract, and `uvp_verify`'s all name the same closed set.
+          kind: z.enum(ASSERTION_KINDS),
           target: z.string().optional().describe("Header name, JSONPath, or regex, as applicable."),
           expected: z.unknown().optional(),
           negate: z.boolean().default(false),

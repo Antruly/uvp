@@ -44,7 +44,8 @@ export interface VerifyRequest {
   readonly assertions: readonly {
     readonly kind: AssertionSpec["kind"];
     readonly target?: string | undefined;
-    readonly expected: unknown;
+    /** Absent for the presence checks, which carry nothing to compare against. */
+    readonly expected?: unknown;
   }[];
 }
 
@@ -75,6 +76,8 @@ export interface VerifyContext {
 }
 
 export interface VerifyResult {
+  /** The goal the caller stated, when it stated one. See `goalOf`. */
+  goal?: string;
   workspace_id: string;
   bundle_id: string;
   /** Content digest of the pass; see `bundleDigest`. Equal digests mean equal findings. */
@@ -111,6 +114,21 @@ export const verificationStatus = (init: {
   if (init.unanswered > 0 || init.unknownCount > 0) return "partial";
   return "verified";
 };
+
+/**
+ * The goal the caller named, as a bundle field.
+ *
+ * Echoed rather than kept: a bundle is "the goal it was given, everything it
+ * established, and everything it did not", and a bundle that does not say what
+ * it was for is one a reader has to reconstruct from the exchange names. The
+ * field was accepted all the way from the CLI and the contract and then read
+ * nowhere, so `uvp verify --goal …` changed nothing about the output.
+ *
+ * Absent when the caller named none. An empty string would look like a goal
+ * somebody stated, which is a claim about the pass that nobody made.
+ */
+const goalOf = (input: VerifyInput): { goal?: string } =>
+  input.goal === undefined ? {} : { goal: input.goal };
 
 export const verify = async (input: VerifyInput, context: VerifyContext): Promise<VerifyResult> => {
   const recorder = createRecorder(context.now);
@@ -167,6 +185,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
           "Nothing was launched: the build failed, so nothing about the service was observed.",
         ],
       }),
+      ...goalOf(input),
       workspace_id: buildResult.workspaceId,
       bundle_id: newId("bundle"),
       bundle_digest: bundleDigest({ status: "unknown", exchanges: [], unverified }),
@@ -228,6 +247,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
           `The service was started but ${input.run.ready_path} on port ${String(input.run.port)} never answered.`,
         ],
       }),
+      ...goalOf(input),
       workspace_id: runResult.workspaceId,
       bundle_id: newId("bundle"),
       bundle_digest: bundleDigest({ status: "unknown", exchanges: [], unverified }),
@@ -384,6 +404,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
 
   return {
     ...envelopeOf(recorder, { tool: "uvp_verify", provider: context.identity, limitations }),
+    ...goalOf(input),
     workspace_id: runResult.workspaceId,
     bundle_id: newId("bundle"),
     bundle_digest: bundleDigest({ status, exchanges: exchangeResults, unverified }),

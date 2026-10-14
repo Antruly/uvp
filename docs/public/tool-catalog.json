@@ -4365,21 +4365,29 @@
                           "status_in",
                           "header_equals",
                           "header_matches",
+                          "header_exists",
                           "body_contains",
-                          "body_json_path_equals",
                           "body_matches",
+                          "body_json_path_equals",
+                          "body_json_path_exists",
+                          "body_bytes_under",
                           "latency_under_ms"
                         ]
                       },
                       "target": {
+                        "description": "Header name or JSONPath, for the kinds that take one.",
                         "type": "string"
                       },
-                      "expected": {}
+                      "expected": {},
+                      "negate": {
+                        "description": "Refused: uvp_verify has no negated assertions.",
+                        "type": "boolean"
+                      }
                     },
                     "required": [
-                      "kind",
-                      "expected"
-                    ]
+                      "kind"
+                    ],
+                    "additionalProperties": false
                   }
                 }
               },
@@ -4569,6 +4577,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "goal": {
+            "type": "string"
           },
           "workspace_id": {
             "type": "string",

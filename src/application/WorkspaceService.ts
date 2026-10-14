@@ -248,6 +248,24 @@ export class WorkspaceService {
       env: input.env,
     });
 
+    // The kernel's answer, not an assumption. A binary that is missing or not
+    // executable never becomes a process, and every field below — the pid, the
+    // readiness probe, `still_running` — is a claim about a process. Waiting for
+    // the spawn outcome is what keeps a workspace that was never built from being
+    // reported as a service that is up.
+    try {
+      await process_.whenStarted();
+    } catch (cause) {
+      throw new UvpFailure({
+        code: "launch_failed",
+        message: `${binaryPath} could not be started: ${cause instanceof Error ? cause.message : String(cause)}`,
+        remediation: {
+          action: `Build it first (\`uvp build ${root}\`), or pass --binary with a path that exists and is executable.`,
+        },
+        details: { command: binaryPath, cwd: root },
+      });
+    }
+
     let ready = false;
     let startupMs: number | undefined;
     if (endpoint !== undefined && input.ready !== undefined) {
@@ -257,7 +275,13 @@ export class WorkspaceService {
     }
 
     const runId = newId("run");
-    if (input.detach && process_.isRunning()) {
+    // Registered whenever the service is still running — `detach` says whether
+    // this call lets go of the pipes, not whether the process stops being uvp's
+    // to stop. Registering only the detached ones made the result's own advice
+    // false: a `--no-detach` run was reported as stoppable with `uvp_run_stop`
+    // and was in no registry, so a foreground service could be left listening
+    // with nothing but a pid to kill it by.
+    if (process_.isRunning()) {
       const record: SupervisedRun = {
         runId,
         workspaceId: workspaceIdOf(root),

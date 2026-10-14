@@ -76,6 +76,40 @@ const createCapture = (maxBytes: number) => {
 };
 
 /**
+ * A path or value as a shell would have to be told it.
+ *
+ * Only when needed: quoting every value would make the common recorded line
+ * harder to read than the command it describes, and quoting none of them would
+ * break on the first prefix that has a space in it — which is a path someone
+ * has. Single quotes are used because nothing inside them is special to a POSIX
+ * shell; a value that contains one is closed, escaped, and reopened.
+ */
+const shellQuote = (value: string): string =>
+  /^[A-Za-z0-9_@%+=:,./-]+$/u.test(value) ? value : `'${value.replaceAll("'", String.raw`'\''`)}'`;
+
+/**
+ * The command as a line a caller can re-run, environment included.
+ *
+ * The environment is part of the command when one was set, and it is not
+ * decoration. A build points CMake at the libuvcpp install uvp discovered, and
+ * that travels in `CMAKE_PREFIX_PATH` and `PKG_CONFIG_PATH` — so a recorded line
+ * without them re-runs against whatever the caller's shell happens to hold and
+ * reports a missing library for a build that failed on something else entirely.
+ * The variables recorded are the ones this call set, which is the difference
+ * between what the caller had and what the child got; the rest of the
+ * environment was inherited and is not restated here.
+ */
+const renderCommand = (options: RunProcessOptions): string => {
+  const line = [options.command, ...options.args].join(" ");
+  const environment = Object.entries(options.env ?? {}).sort(([left], [right]) =>
+    left < right ? -1 : 1,
+  );
+  if (environment.length === 0) return line;
+  const assignments = environment.map(([name, value]) => `${name}=${shellQuote(value)}`).join(" ");
+  return `env ${assignments} ${line}`;
+};
+
+/**
  * Run a command to completion.
  *
  * Never rejects for a non-zero exit: the caller asked for the outcome, and an
@@ -135,7 +169,7 @@ export const runProcess = async (options: RunProcessOptions): Promise<ProcessOut
   const err = errCapture.finish();
 
   return {
-    command: [options.command, ...options.args].join(" "),
+    command: renderCommand(options),
     exitCode,
     signal,
     timedOut,
@@ -160,6 +194,17 @@ export const runProcess = async (options: RunProcessOptions): Promise<ProcessOut
 export interface SupervisedProcess {
   readonly pid: number | undefined;
   readonly command: string;
+  /**
+   * Resolves once the kernel has accepted the spawn; rejects when it has not.
+   *
+   * `spawn` is asynchronous about failure: a binary that does not exist, or is
+   * not executable, produces an `error` event on a later turn of the loop rather
+   * than a throw. Until one of the two events has arrived the honest answer to
+   * "did this start?" is *not known yet*, and every other answer is a claim about
+   * a process that may never have existed. So a caller that reports anything
+   * about the launch waits for this first.
+   */
+  whenStarted(): Promise<void>;
   isRunning(): boolean;
   exitInfo(): { code: number | null; signal: string | null } | undefined;
   stdoutTail(): string;
@@ -216,15 +261,29 @@ export const startSupervised = (options: StartSupervisedOptions): SupervisedProc
   };
   child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
   child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
-  // A supervised service that dies must not take the host process with it.
-  child.on("error", () => undefined);
 
-  // Held in a mutable record rather than a bare `let`: the exit handler runs in
-  // a nested closure, and a bare `let` would be flow-narrowed to `undefined` at
-  // every read inside `stop()`.
-  const lifecycle: { exited: { code: number | null; signal: string | null } | undefined } = {
-    exited: undefined,
-  };
+  // Held in a mutable record rather than a bare `let`: the handlers run in nested
+  // closures, and a bare `let` would be flow-narrowed to `undefined` at every read
+  // inside `stop()`.
+  const lifecycle: {
+    exited: { code: number | null; signal: string | null } | undefined;
+    startError: Error | undefined;
+  } = { exited: undefined, startError: undefined };
+
+  const started = new Promise<void>((resolve, reject) => {
+    // `spawn` means the kernel accepted the child; `error` means it did not.
+    // Exactly one of them arrives, which is what makes this settle.
+    child.once("spawn", () => resolve());
+    child.once("error", (cause: Error) => {
+      lifecycle.startError = cause;
+      reject(cause);
+    });
+  });
+  // Not every caller waits — one that only polls `isRunning()` never does — and an
+  // unobserved rejection would take the host process with it. The derived promise
+  // marks the rejection handled without swallowing it for a caller that awaits.
+  started.catch(() => undefined);
+
   child.once("exit", (code, signal) => {
     lifecycle.exited = { code, signal };
   });
@@ -250,12 +309,21 @@ export const startSupervised = (options: StartSupervisedOptions): SupervisedProc
 
   return {
     pid: child.pid,
-    command: [options.command, ...options.args].join(" "),
-    isRunning: () => lifecycle.exited === undefined && child.exitCode === null,
+    command: renderCommand(options),
+    whenStarted: () => started,
+    // A process that never started is not running, whatever the child handle's
+    // `exitCode` still says.
+    isRunning: () =>
+      lifecycle.startError === undefined &&
+      lifecycle.exited === undefined &&
+      child.exitCode === null,
     exitInfo: () => lifecycle.exited,
     stdoutTail: () => tails.stdout,
     stderrTail: () => tails.stderr,
     stop: async (graceMs, force) => {
+      // A process that never started has nothing to signal, and `killed: true` for
+      // it would be the same false claim as reporting it as running.
+      if (lifecycle.startError !== undefined) return { outcome: "already_gone", killed: false };
       if (lifecycle.exited !== undefined) return outcomeOf(false);
       child.kill("SIGTERM");
       await waitForExit(Date.now() + graceMs);

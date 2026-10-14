@@ -187,9 +187,14 @@ export const renderRun = (output: Record<string, unknown>): string[] => {
   // Stated in the rendering, not only in `limitations`. `still_running: yes`
   // beside `detached: yes` is the one combination whose consequence a reader
   // would otherwise have to infer, and the consequence is that nothing is
-  // watching the service any more.
+  // watching the service any more. The other combination has a consequence too,
+  // and it is the opposite one: this call is waiting on the service, and the
+  // interrupt a person is about to reach for ends the *service*, not just the
+  // wait.
   if (bool(output["detached"]) === true) {
     lines.push(row("supervision", "released — nothing observes this process now"));
+  } else if (bool(output["still_running"]) === true) {
+    lines.push(row("supervision", "held — this call waits, and an interrupt stops the service"));
   }
 
   const stdout = str(output["stdout_tail"]);
@@ -218,7 +223,11 @@ export const renderRunStop = (output: Record<string, unknown>): string[] => {
 };
 
 export const renderVerify = (output: Record<string, unknown>): string[] => {
+  const goal = str(output["goal"]);
   const lines = [
+    // First, because it is the frame everything below answers to: a reader who
+    // asked for a specific thing wants to see what uvp understood the ask to be.
+    ...(goal === "" ? [] : [row("goal", goal)]),
     row("status", str(output["status"])),
     row(
       "build",

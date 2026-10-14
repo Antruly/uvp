@@ -232,8 +232,10 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     let firstByteAt: number | undefined;
     let status = 0;
     let headers: Record<string, string> = {};
+    let responded = false;
 
     stream.on("response", (responseHeaders) => {
+      responded = true;
       status = Number(responseHeaders[":status"] ?? 0);
       headers = {};
       for (const [key, value] of Object.entries(responseHeaders)) {
@@ -255,6 +257,17 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     stream.on("error", fail);
     stream.on("end", () => {
       if (settled) return;
+      // A stream that ends without a response header block never delivered an
+      // answer; the peer took the connection and hung up. Resolving here would
+      // report `status: 0` as something observed, and a caller comparing
+      // statuses would read "no response" as "the service answered with
+      // something unusual" — which is the one reading the bytes do not support.
+      // HTTP/1.1 cannot reach this state, because it resolves from inside the
+      // response callback; this is the h2 shape of the same rule.
+      if (!responded) {
+        fail(new Error(`${authority} closed the connection before sending a response.`));
+        return;
+      }
       settled = true;
       const socket = client.socket as unknown as Parameters<typeof peerCertificateInfo>[0];
       client.close();

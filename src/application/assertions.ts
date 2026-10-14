@@ -1,3 +1,5 @@
+import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
+import type { AssertionKind } from "../domain/assertionKinds.js";
 import type { ExchangeRecord } from "./sessionStore.js";
 
 /**
@@ -9,20 +11,14 @@ import type { ExchangeRecord } from "./sessionStore.js";
  * tells the caller whether the request even completed.
  */
 
-export const ASSERTION_KINDS = [
-  "status_equals",
-  "status_in",
-  "header_equals",
-  "header_matches",
-  "header_exists",
-  "body_contains",
-  "body_matches",
-  "body_json_path_equals",
-  "body_json_path_exists",
-  "body_bytes_under",
-  "latency_under_ms",
-] as const;
-export type AssertionKind = (typeof ASSERTION_KINDS)[number];
+/**
+ * The vocabulary itself lives in `domain`, because the contracts that validate a
+ * request and the CLI syntax that lowers onto it name the same closed set. This
+ * module implements it; it does not declare it. Re-exported here so the
+ * evaluator's own callers keep one import for "the assertions module".
+ */
+export { ASSERTION_KINDS };
+export type { AssertionKind };
 
 export interface AssertionSpec {
   readonly kind: AssertionKind;
@@ -253,13 +249,31 @@ const jsonPathValue = (
   return { ok: true, value: result.value, path };
 };
 
+/**
+ * A value as a caller reads it in a message.
+ *
+ * `undefined` is not a JSON word, and it is what a template literal produces for
+ * an absent path — `$.nope = undefined`, which reads as a value the body held.
+ * The path is absent, and saying so is the whole point of reporting it.
+ */
+const shown = (value: unknown): string => (value === undefined ? "absent" : JSON.stringify(value));
+
 const bodyJsonPathEquals: RawEvaluator = (record, spec) => {
   const resolved = jsonPathValue(record, spec);
   if (!resolved.ok) return { passed: false, observed: undefined, message: resolved.message };
+  // The expectation is in the message, as it is in every sibling evaluator's.
+  // In a verification bundle the message is the *only* place a failure is
+  // described — `exchanges[].failures` is a list of strings — so a message that
+  // reports what was there and not what was asked for leaves a reader who did
+  // not write the assertion with nothing to compare against.
+  const expectation = shown(spec.expected);
   return {
     passed: looseEquals(resolved.value, spec.expected),
     observed: resolved.value,
-    message: `${resolved.path} = ${JSON.stringify(resolved.value)}`,
+    message:
+      resolved.value === undefined
+        ? `${resolved.path} is absent, expected ${expectation}`
+        : `${resolved.path} = ${shown(resolved.value)}, expected ${expectation}`,
   };
 };
 

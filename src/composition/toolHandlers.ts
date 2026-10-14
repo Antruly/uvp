@@ -127,9 +127,20 @@ const recordBuild = (
     derived: { from_cache: outcome.fromCache },
     coverage: { scope: "build", status: "complete" },
     sources: outcome.commands.map((command) => ({ kind: "command" as const, ref: command })),
+    // Which limitation applies is decided by what was actually parsed, not by the
+    // exit code. A failed build whose output held no recognisable diagnostic has
+    // not been explained, and saying "the diagnostics describe what the compiler
+    // rejected" about an empty list would credit this tool with an answer it does
+    // not have. The commands are recorded as sources either way, so a caller that
+    // needs the raw text knows where to run it.
     limitations: outcome.succeeded
       ? []
-      : ["The build did not succeed; the diagnostics describe what the compiler rejected."],
+      : outcome.diagnostics.length > 0
+        ? ["The build did not succeed; the diagnostics describe what the compiler rejected."]
+        : [
+            "The build did not succeed and no diagnostic was recognised in the tool's output; " +
+              "the commands recorded as sources are what to re-run to read it.",
+          ],
   });
 };
 
@@ -235,7 +246,12 @@ export const createToolHandlers = (
               ? [
                   "A successful build is not a running service. Launch it with uvp_run to observe it.",
                 ]
-              : ["The diagnostics below are the compiler's own output, reproduced as data."]),
+              : built.outcome.diagnostics.length > 0
+                ? ["The diagnostics below are the compiler's own output, reproduced as data."]
+                : [
+                    "The build failed and no diagnostic in the tool's output was recognisable; " +
+                      "the commands below are what to re-run to read it in full.",
+                  ]),
             ...(libuvcpp.found
               ? []
               : [

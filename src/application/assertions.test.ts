@@ -298,6 +298,23 @@ describe("JSON path assertions", () => {
     });
     expect(outcome.passed).toBe(false);
     expect(outcome.observed).toBe(false);
+    // Both halves, because in a verification bundle this string is all a caller
+    // is given: the expectation is not carried anywhere else in the output.
+    expect(outcome.message).toBe("$.ok = false, expected true");
+  });
+
+  it("says a missing path is absent rather than resolving to a value", () => {
+    // `JSON.stringify(undefined)` is `undefined`, so the message used to read
+    // `$.nope = undefined` — a value the body might plausibly have held, when
+    // the fact is that the path is not there at all.
+    const outcome = only(withJson({ ok: true }), {
+      kind: "body_json_path_equals",
+      target: "$.nope",
+      expected: 1,
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.observed).toBeUndefined();
+    expect(outcome.message).toBe("$.nope is absent, expected 1");
   });
 
   it("body_json_path_equals fails when the body is not JSON at all", () => {

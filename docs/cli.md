@@ -21,6 +21,16 @@ not ask it".
 where there is one. A schema violation is `invalid_request` naming the field, not
 a usage dump.
 
+**No command.** Bare `uvp` prints the command list on stdout and exits `2`: a
+person who typed `uvp` wants the list, and the code says the question was not
+finished being asked. `--help` asks for the same text and exits `0`. Under
+`--json` there is no such case — there is no result to print, so stdout stays
+empty and the failure contract goes to stderr, because a caller piping into a
+parser must never be handed prose. A word that matches no command is a refusal
+naming it (`uvp buidl` reports `No command named "buidl".`), and a word that
+matches the start of a two-word command names the whole thing
+(`uvp capture statr`).
+
 ## `uvp doctor`
 
 ```bash
@@ -125,9 +135,13 @@ and the startup output. It does not return until the service is listening or the
 startup timeout expires — a service that is about to fail does not get reported
 as running.
 
-Supervision is scoped to the session: everything uvp started is stopped when the
-session ends. `uvp stop` stops it earlier, by handle or with `--all`. It can
-signal only processes uvp started; it is not a general process killer.
+`detach: true` — the default — leaves the service running and returns. With
+`--no-detach` the call stays in the foreground for as long as the service runs,
+holding it under supervision, so an interrupt stops it rather than abandoning it.
+
+Supervision is scoped to the session: uvp can stop anything it started, by handle
+or with `uvp stop --all`, for as long as the process that started it is running.
+It can signal only processes uvp started; it is not a general process killer.
 
 Scoped to the session means scoped to the _process_. The run registry is held in
 memory by the uvp process that started the service, and `uvp run` detaches by
@@ -142,8 +156,12 @@ Three ways to end up with a service you can actually stop:
 
 - Run the service under the MCP server and stop it there. The server is one
   process for the whole session, so its registry outlives the individual calls.
-- Pass `--no-detach`, which keeps `uvp run` in the foreground until you interrupt
-  it and ties the child's lifetime to it.
+- Pass `--no-detach`, which keeps `uvp run` in the foreground for as long as the
+  service runs. An interrupt then stops the service before the call returns:
+  Ctrl-C gives a free port and exit 130, SIGTERM exit 143, and either way the
+  line on stderr says which run was stopped and what became of it. The service is
+  started in its own process group, so the terminal's signal reaches the CLI and
+  not the service — the CLI stopping it is what ties the two lifetimes together.
 - Stop the pid `uvp run` printed, with whatever your shell provides.
 
 A detached run is not lost — it is unowned. The distinction matters because
@@ -179,21 +197,42 @@ half of it was not examined.
 | `status=200`                           | Response status                      |
 | `status=2xx`                           | Status class                         |
 | `json:$.value=first`                   | A JSON path, compared after parsing  |
+| `json:$.value`                         | That the JSON path is present        |
 | `header:content-type=application/json` | A response header                    |
+| `header:content-type`                  | That the response header is present  |
+| `header:content-type~=<regex>`         | A response header, as a regex        |
+| `body=substring`                       | A substring of the raw body          |
 | `body~=<regex>`                        | A regular expression in the raw body |
+| `body_bytes<1024`                      | The size of the raw body             |
 | `latency<250ms`                        | Elapsed time for the exchange        |
+
+The short forms cover the common cases; `--assert '{"kind": …}'` takes a JSON
+object and reaches the whole evaluator vocabulary, which is also how the kinds
+that need a set rather than a single value are written — `{"kind":"status_in",
+"expected":[200,201]}`, where `status=2xx` would have to do.
 
 `~=` matches a regular expression, so a plain substring is a valid pattern. It is
 only accepted against a header and the raw body: no assertion in the vocabulary
 matches a regular expression against a JSON path, so `json:$.value~=^a` is
 refused rather than quietly widened to a whole-body check. Use `json:$.value=<v>`
-to compare the parsed value. A leading `!` negates any form, including a JSON
-object.
+to compare the parsed value.
 
-A JSON path that does not exist is a failure with `actual: null` and the path in
-the message — not an error. The difference matters: "the field is absent" is an
-answer, and it is the answer an agent needs to distinguish a missing field from a
-malformed body.
+Negation is the one thing the two assertion surfaces do not share. A leading `!`
+negates any form, including a JSON object, and `uvp assert` accepts it. `uvp
+verify` refuses it: `uvp_verify` evaluates every assertion affirmatively and
+reports the value it observed, so a negated check would be a check the bundle
+described as one thing and ran as another. Both the CLI and the tool contract
+refuse it — the contract declares `negate` in order to reject it, because
+dropping the field silently is the failure mode being avoided.
+
+A JSON path that does not exist is a failure with the path and `is absent` in the
+message — not an error, and not a `= undefined` that reads as a value the body
+held. The difference matters: "the field is absent" is an answer, and it is the
+answer an agent needs to distinguish a missing field from a malformed body, which
+says `not valid JSON` instead. Each failure names both what was there and what
+was asked for, because in a bundle `failures` is a list of strings and nothing
+else in the output repeats the expectation. (`uvp assert exchange` carries the
+same pair as structured `observed` and `expected` fields.)
 
 ## Web commands
 

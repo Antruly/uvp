@@ -100,13 +100,16 @@ export interface BuildRequest {
   readonly timeoutMs: number;
   readonly configureOnly: boolean;
   /**
-   * The libuvcpp install to build against, when one was discovered.
+   * The libuvcpp install to build against, when the caller already knows one.
    *
-   * Handed to the toolchain rather than left to the ambient environment. uvp
-   * already reports which install it found; if it then invoked CMake without
-   * pointing at it, a workspace would configure against a different libuvcpp than
-   * the one `uvp doctor` described — or, for a prebuilt archive outside every
-   * search path, against none at all.
+   * A caller that names a prefix is taken at its word. A caller that names none
+   * gets the install the toolchain found for itself — the same one `uvp doctor`
+   * reports — because the alternative is worse than it looks: uvp would describe
+   * one install and then invoke CMake with no pointer to it, so a workspace would
+   * configure against a different libuvcpp than the one uvp described, or, for a
+   * prebuilt archive outside every search path, against none at all. Discovery
+   * therefore lives in the toolchain rather than with the caller, so no caller
+   * can omit it by forgetting.
    */
   readonly libuvcppPrefix?: string;
   readonly signal: AbortSignal;

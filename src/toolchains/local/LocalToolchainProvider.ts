@@ -7,7 +7,6 @@ import type {
   BuildArtifact,
   BuildDiagnostic,
   BuildOutcome,
-  BuildPhase,
   BuildRequest,
   BuildSystemDescriptor,
   CompilerDescriptor,
@@ -18,6 +17,7 @@ import type {
   ToolchainProvider,
 } from "../../application/ToolchainProvider.js";
 import { sha256 } from "../../domain/identity.js";
+import { parseDiagnostics } from "./diagnostics.js";
 import { runProcess } from "./processRunner.js";
 
 const isWindows = process.platform === "win32";
@@ -201,84 +201,6 @@ const libuvcppVersionOf = async (
   return undefined;
 };
 
-/**
- * Diagnostics parsers.
- *
- * GCC/Clang and MSVC disagree about almost everything, including how a
- * diagnostic is spelled. Both formats are parsed here because a caller
- * debugging a build must not have to re-read raw compiler text, and because an
- * unparsed diagnostic is indistinguishable from no diagnostic at all.
- */
-const GCC_DIAGNOSTIC =
-  /^(?<file>[^:\n]+):(?<line>\d+):(?:(?<column>\d+):)?\s*(?<severity>error|warning|note|fatal error):\s*(?<message>.*)$/u;
-const MSVC_DIAGNOSTIC =
-  /^(?<file>[^(]+)\((?<line>\d+)(?:,(?<column>\d+))?\)\s*:\s*(?<severity>error|warning|note)\s+[A-Z]+\d+:\s*(?<message>.*)$/u;
-
-const SEVERITIES = new Set(["error", "warning", "note"]);
-
-/** A positive integer from a capture group, or undefined when it is absent or junk. */
-const optionalNumber = (value: string | undefined): number | undefined => {
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-};
-
-/**
- * Parse one line, or return undefined when it is not a diagnostic.
- *
- * Most lines in a build log are not diagnostics, so "not one of ours" is the
- * ordinary path and is not worth an exception or a partial object.
- */
-const parseDiagnosticLine = (line: string, phase: BuildPhase): BuildDiagnostic | undefined => {
-  const match = GCC_DIAGNOSTIC.exec(line) ?? MSVC_DIAGNOSTIC.exec(line);
-  const groups = match?.groups;
-  if (groups === undefined) return undefined;
-
-  // GCC spells it "fatal error"; the contract has three severities, and a fatal
-  // error is an error.
-  const severity = groups["severity"] === "fatal error" ? "error" : groups["severity"];
-  if (severity === undefined || !SEVERITIES.has(severity)) return undefined;
-
-  const file = groups["file"]?.trim();
-  const lineNumber = optionalNumber(groups["line"]);
-  const columnNumber = optionalNumber(groups["column"]);
-
-  return {
-    severity: severity as BuildDiagnostic["severity"],
-    ...(file === undefined || file === "" ? {} : { file }),
-    ...(lineNumber === undefined ? {} : { line: lineNumber }),
-    ...(columnNumber === undefined ? {} : { column: columnNumber }),
-    message: groups["message"]?.trim() ?? "",
-    phase,
-  };
-};
-
-export const parseDiagnostics = (
-  stdout: string,
-  stderr: string,
-  phase: BuildPhase,
-): readonly BuildDiagnostic[] => {
-  const diagnostics: BuildDiagnostic[] = [];
-  const seen = new Set<string>();
-  // Diagnostics normally go to stderr, but a compiler invoked through a wrapper
-  // can put them on stdout, and a missing diagnostic is worse than a duplicate.
-  for (const rawLine of `${stderr}\n${stdout}`.split("\n")) {
-    const diagnostic = parseDiagnosticLine(rawLine.trimEnd(), phase);
-    if (diagnostic === undefined) continue;
-    const key = [
-      diagnostic.severity,
-      diagnostic.file ?? "",
-      diagnostic.line ?? "",
-      diagnostic.column ?? "",
-      diagnostic.message,
-    ].join("|");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    diagnostics.push(diagnostic);
-  }
-  return diagnostics;
-};
-
 export const discoverArtifacts = async (buildDir: string): Promise<readonly BuildArtifact[]> => {
   const { readdir, stat: statFile } = await import("node:fs/promises");
   const found: BuildArtifact[] = [];
@@ -412,42 +334,7 @@ export class LocalToolchainProvider implements ToolchainProvider {
     workspacePath: string | undefined,
     signal: AbortSignal,
   ): Promise<LibuvcppBuild> {
-    for (const root of libuvcppSearchRoots(workspacePath)) {
-      if (signal.aborted) return { found: false, modules: [], note: "cancelled" };
-      try {
-        const info = await stat(root);
-        if (!info.isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      const modules = await readModules(root);
-      const hasConfig =
-        modules.length > 0 ||
-        (await stat(join(root, "lib", "cmake", "uvcpp", "uvcppConfig.cmake")).then(
-          () => true,
-          () => false,
-        ));
-      if (!hasConfig) continue;
-      const version = await libuvcppVersionOf(root);
-      return {
-        found: true,
-        ...(version === undefined
-          ? {}
-          : { version: version.version, versionSource: version.source }),
-        installPrefix: root,
-        modules,
-        ...(modules.length === 0
-          ? { note: "Found CMake package files but no uvcpp_config.h; module list is unknown." }
-          : {}),
-      };
-    }
-    return {
-      found: false,
-      modules: [],
-      note:
-        "No libuvcpp installation found. Set UVCPP_ROOT, or unpack a release and add its " +
-        "prefix to CMAKE_PREFIX_PATH.",
-    };
+    return await findLibuvcpp(workspacePath, signal);
   }
 
   createClient(): ToolchainClient {
@@ -455,10 +342,79 @@ export class LocalToolchainProvider implements ToolchainProvider {
   }
 }
 
+/**
+ * Which libuvcpp this machine has, and what that build supports.
+ *
+ * A module-level function rather than a method so the *build* can consult it
+ * too: the tools that report on a library and the build that compiles against
+ * one have to answer from the same place, or they answer differently. They did —
+ * `uvp build` discovered the install and passed its prefix to CMake, while
+ * `uvp verify`, which builds inside its own workflow, did not, so the whole
+ * closure failed on any install that is not already on CMake's search path. A
+ * release archive unpacked anywhere the user liked is exactly that case, and is
+ * what uvp's own instructions tell a user to do.
+ *
+ * The first root that has either a `UVCPP_*` config header or a CMake package
+ * file wins, and the search order is the caller's environment first. The note
+ * for "found nothing" names the two ways to fix that, because that is the only
+ * thing a caller can do about it.
+ */
+const findLibuvcpp = async (
+  workspacePath: string | undefined,
+  signal: AbortSignal,
+): Promise<LibuvcppBuild> => {
+  for (const root of libuvcppSearchRoots(workspacePath)) {
+    if (signal.aborted) return { found: false, modules: [], note: "cancelled" };
+    try {
+      const info = await stat(root);
+      if (!info.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const modules = await readModules(root);
+    const hasConfig =
+      modules.length > 0 ||
+      (await stat(join(root, "lib", "cmake", "uvcpp", "uvcppConfig.cmake")).then(
+        () => true,
+        () => false,
+      ));
+    if (!hasConfig) continue;
+    const version = await libuvcppVersionOf(root);
+    return {
+      found: true,
+      ...(version === undefined ? {} : { version: version.version, versionSource: version.source }),
+      installPrefix: root,
+      modules,
+      ...(modules.length === 0
+        ? { note: "Found CMake package files but no uvcpp_config.h; module list is unknown." }
+        : {}),
+    };
+  }
+  return {
+    found: false,
+    modules: [],
+    note:
+      "No libuvcpp installation found. Set UVCPP_ROOT, or unpack a release and add its " +
+      "prefix to CMAKE_PREFIX_PATH.",
+  };
+};
+
 class LocalToolchainClient implements ToolchainClient {
   constructor(readonly identity: ToolchainIdentity) {}
 
   async build(request: BuildRequest): Promise<BuildOutcome> {
+    // A caller that named a prefix is taken at its word; otherwise the build
+    // uses the install this toolchain found, which is the same answer
+    // `uvp doctor` reports. Not a convenience: a build that leaves CMake to
+    // search for itself finds nothing for a release archive unpacked anywhere
+    // outside the default search paths, which is what the project's own
+    // instructions produce. The workflow that builds inside itself — `uvp verify`
+    // — passed no prefix, so the whole closure failed at configure for exactly
+    // those users while `uvp build`, which did pass one, worked. Deciding here
+    // means no caller can forget.
+    const libuvcppPrefix =
+      request.libuvcppPrefix ??
+      (await findLibuvcpp(request.workspacePath, request.signal)).installPrefix;
     const configureStart = Date.now();
     const jobs = request.jobs === undefined ? [] : ["-j", String(request.jobs)];
     const configure = await runProcess({
@@ -471,9 +427,7 @@ class LocalToolchainClient implements ToolchainClient {
         `-DCMAKE_BUILD_TYPE=${request.buildType}`,
         ...generatorArgs(request.generator),
       ],
-      ...(request.libuvcppPrefix === undefined
-        ? {}
-        : { env: prefixEnvironment(request.libuvcppPrefix) }),
+      ...(libuvcppPrefix === undefined ? {} : { env: prefixEnvironment(libuvcppPrefix) }),
       timeoutMs: request.timeoutMs,
       signal: request.signal,
     });

@@ -1,42 +1,21 @@
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
+
+import { freePort } from "../support/ports.js";
 
 /**
  * Starting and stopping the conformance target.
  *
- * Two ways to get a port, and both are needed. `freePort` reserves a number so a
- * *child* process can be told where to listen before it starts — which is what
- * `uvp_run` needs, since its readiness probe is aimed at the port before the
- * binary exists. `startFixture` runs the fixture in-process for the web tools,
- * which need a target that is already up.
- *
- * The port reservation is a bind-then-release, so in principle another process
- * can take the number in the gap. The window is microseconds and the failure is
- * a clear `EADDRINUSE` rather than a wrong answer, which is the trade a test can
- * afford; a fixed port number would instead collide with whatever else is on the
- * machine.
+ * Two ways to get a port, and both are needed. `freePort`, in `tests/support/`,
+ * reserves a number so a *child* process can be told where to listen before it
+ * starts — which is what `uvp_run` needs, since its readiness probe is aimed at
+ * the port before the binary exists. `startFixture` runs the fixture in-process
+ * for the web tools, which need a target that is already up.
  */
 
 export const FIXTURE_SCRIPT = fileURLToPath(
   new URL("./fixtures/fixtureServer.mjs", import.meta.url),
 );
-
-export const freePort = async (): Promise<number> =>
-  await new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (address === null || typeof address === "string") {
-        probe.close();
-        reject(new Error("the port probe did not return a numeric address"));
-        return;
-      }
-      const { port } = address;
-      probe.close(() => resolve(port));
-    });
-  });
 
 export interface FixtureServer {
   readonly port: number;
