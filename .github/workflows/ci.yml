@@ -99,6 +99,13 @@ jobs:
       - name: Verify that every action is pinned to a commit
         if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
         run: npm run verify:actions
+      # The same pair of lanes, for the same reason: the rule is about this file
+      # and the checker lives under `scripts/`. This is the step that would have
+      # failed on the documentation-only push whose `test` job downloaded an
+      # artifact `build` never uploaded.
+      - name: Verify that no lane reads an artifact its change may not build
+        if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
+        run: npm run verify:artifact-guards
       - name: Check formatting when no code changed
         if: needs.changes.outputs.code != 'true'
         run: npm run format:check
@@ -214,6 +221,16 @@ jobs:
   test:
     name: Portable tests
     needs: [changes, test-source, test-shard]
+    # Runs whenever the run is not cancelled rather than only when the `code`
+    # lane is selected, so that a shard failure still produces a merged report
+    # and the coverage artifact — a job whose `needs` failed is skipped under the
+    # default `success()`, which is the opposite of what merging is for.
+    #
+    # Every step that needs a build or a shard report is therefore guarded on
+    # `code` individually. Unguarded, they made the job fail on any change that
+    # selects no code lane: it downloaded `uvp-test-runtime`, which `build` only
+    # uploads when `code` or `package` is selected, and the run went red on a
+    # documentation-only commit whose every other lane was correctly skipped.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -226,18 +243,33 @@ jobs:
         id: npm-cache
         uses: ./.github/actions/npm-cache
       - run: npm ci
+      # Said out loud, because a job that runs and verifies nothing looks exactly
+      # like one that passed. `CI required` accepts a skipped lane, so the honest
+      # alternative would be to skip this job — but it cannot, since the merge
+      # below has to run when a shard fails.
+      - name: Say what this lane is doing
+        run: |
+          if [ "${{ needs.changes.outputs.code }}" = "true" ]; then
+            echo "The code lane was selected; the shard reports below are merged."
+          else
+            echo "No code lane was selected by this change, so there is nothing to merge."
+            echo "The artifact steps below are skipped rather than failing on artifacts never built."
+          fi
       - name: Download the built runtime
+        if: needs.changes.outputs.code == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: uvp-test-runtime
           path: .
       - name: Download the shard reports
+        if: needs.changes.outputs.code == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: vitest-report-*
           path: .vitest/blob
           merge-multiple: true
       - name: Merge the reports
+        if: needs.changes.outputs.code == 'true'
         run: |
           npm exec -- vitest --merge-reports \
             --coverage.enabled --coverage.provider=v8 \

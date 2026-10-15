@@ -634,8 +634,8 @@ without naming the skip reporter. The flags replace what `vitest.config.ts`
 registers rather than adding to it, so the step loses the names and keeps the
 count — green, and unreadable. It is the same defect the discovery check exists
 for, one level down: a lane that reports nothing looks like a lane that passed.
-All three repository checks are scripts rather than turbo tasks, and all three
-run in the static job.
+These repository checks are scripts rather than turbo tasks, and each one runs in
+the static job.
 
 **Action pins.** `npm run verify:actions` fails if a `uses:` under `.github/`
 names a third-party action by anything but a 40-hex commit SHA with the release
@@ -646,6 +646,18 @@ read. It also fails on the one form it cannot read, a `uses:` whose value starts
 on the next line, because a reference nobody read is a reference nobody checked.
 `.github/dependabot.yml` keeps the pins current; it is the same change for the
 same reason, since an unmaintained pin is a stale action that looks reviewed.
+
+**Artifact guards.** `npm run verify:artifact-guards` fails when a step that
+downloads an artifact is gated on a condition that can be true while the job
+uploading that artifact is skipped — the reader's `if:` has to imply the
+writer's. The comparison is a parsed implication rather than a text match, so
+`code` reading an artifact `code || package` uploads is accepted, which is the
+shape CI actually uses. A step's effective condition is its job's condition
+**and** its own, since a step narrows its job rather than replacing it; reading
+one as the other is what the check got wrong first. `actionlint` checks what a
+workflow says about itself and cannot see any of this: no single job's condition
+is wrong, so nothing is wrong until two of them are read together. See
+[the roadmap](roadmap.md#artifact-guards) for the run that made it necessary.
 
 **Generated files.** The tool catalog, package metadata, skill metadata, and
 error schema are generated from source. CI regenerates them and fails on a diff,

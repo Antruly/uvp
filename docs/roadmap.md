@@ -421,6 +421,7 @@ implicit.
 | ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down. Six major bumps now sit open as Dependabot pull requests (`#1`–`#6`, per [the pins above](#action-pins)), each of which is where this would be addressed; two of those bodies name Node.js 24 in their release notes and four do not mention a runtime at all, so which majors clear the warning is unobserved                                                                                                                                                                                                                                                                                              |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | Whether `uvp_verify`'s `exchanges[].results[]` should carry `evaluated` beside `passed`, or a `status: met \| unmet \| undetermined` reusing the capability vocabulary. The third state currently reaches a caller through `unverified` and `unknowns`; two spellings of one answer is how they drift. An additive change, but a change to a tool's output schema, so it waits for the design discussion CONTRIBUTING requires                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ✅  | A workflow job whose own `if:` is wider than its steps assume: `test` runs whenever the run is not cancelled, so that a failed shard still produces a merged report, but it downloaded `uvp-test-runtime`, which `build` uploads only when `code` or `package` is selected. Two documentation-only pushes (`315d494`, `0dcbd94`) went red in _Portable tests_ at `Download the built runtime` while every lane that job depends on was correctly skipped, and the guard the job does carry sits below the download. The three artifact steps are guarded on `code` individually, a step above them says which of the two cases the run is in, and `npm run verify:artifact-guards` now compares every reader's condition against its writer's as a logical implication. See [below](#artifact-guards)                                                                                                     |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
 rather than as a bug report. It has been seen three times, each time as the only
@@ -1069,6 +1070,115 @@ scope exists so that no reader has to work out which statement was made. The lan
 also do not replace the captured-fixture tests beside them: bytes a socket on this
 host actually produced are evidence about Node and about the peer, and generated
 bytes are not. The two files say which is which in their own headers.
+
+### A lane reading what the change never built {#artifact-guards}
+
+The lane plan selects jobs; each job's own `if:` decides whether it runs; nothing
+compared the two. `.github/workflows/ci.yml`'s `test` job runs whenever the run is
+not cancelled rather than only when `code` is selected, and deliberately so: a
+shard that failed has to still produce the merged report and the coverage
+artifact, and a job whose `needs` failed is skipped under the default `success()`.
+Its artifact steps, though, were written as if the job only ran for a code change.
+`build` uploads `uvp-test-runtime` when `code` or `package` is selected.
+
+So the first push whose range was documentation alone went red. Run `38812006721`
+(2026-10-15T21:43:22Z, `315d494`) reported `plan: 1 changed file(s)`, `lanes:
+docs`, and:
+
+```
+Portable tests               failure    (step: Download the built runtime)
+Build package                skipped
+Source tests                 skipped
+Test shard                   skipped
+Real libuvcpp lane           skipped
+CI required                  failure    (step: Require every selected lane to pass)
+```
+
+Every lane the change did not need was skipped correctly. The failure is that one
+job ran anyway and reached for an artifact nobody had built — and the guard that
+job _does_ carry, `CODE_REQUIRED`, is asserted by a step further down, so it never
+executed. `0dcbd94` repeated it exactly. The job cannot simply be skipped instead:
+the merge is the reason it runs unconditionally.
+
+**Why it had not fired before**, which is the part worth keeping. Earlier
+documentation-only commits were green, and the mechanism is the lane plan's diff
+range rather than those commits: `plan.mjs` compares the previous push's head with
+the new one, so a push that carries one documentation commit over an earlier code
+commit is a _code_ change. Run `38811687534` pushed `b508621`, whose own commit
+touches only `docs/roadmap.md`, and reported `plan: 14 changed file(s)` — `lanes:
+code, docs, package, toolchain, workflows` — so `build` ran, uploaded the runtime,
+and the download found it. Run `38812006721` reported `1 changed file(s)`. Nothing
+about the two commits differs; only the range does. The defect was live from the
+moment those artifact steps landed and waited for a push whose range was
+documentation and nothing else.
+
+**The fix.** Each of the three artifact steps in `test` is guarded on `code`, and a
+step above them prints which of the two cases the run is in — a guarded step that
+silently does nothing reads exactly like one that passed, which is the failure mode
+the skip reporter exists for. Per-step rather than one job-level guard, because a
+job-level `if` cannot express "run for the merge, download only for a code change".
+The same audit over all ten jobs found `test` to be the only one whose condition is
+wider than what its steps assume, so this is one job and not a pattern.
+
+**The check, shipped with the fix**, following `verify:actions` and
+`verify:reporters`: a rule that lands without the check that enforces it is a rule
+that lasts until the next edit. `npm run verify:artifact-guards` reads every
+`actions/download-artifact` step, finds what uploads the artifact it names — the job
+carrying the upload, conjoined with that step's own `if:` — and fails when the
+reader's condition can be true while the writer's is false.
+
+**Exact, not textual.** The obvious rule — require the reader to name every output
+the writer names — rejects the correct `code ⇒ code || package`, which is the shape
+the `test-shard` job next door actually uses. So both conditions are parsed (`||`,
+`&&`, `!`, parentheses, `==`/`!=` against `'true'`/`'false'`, `always()`,
+`cancelled()`) and checked by enumerating every assignment of the outputs they
+mention, with a counterexample reported. Removing the guard from either download
+step makes it say this, which is the whole point:
+
+```
+test → "Download the built runtime": reads uvp-test-runtime, uploaded by build
+(needs.changes.outputs.code == 'true' || needs.changes.outputs.package == 'true'),
+but this step runs when (!cancelled()) — the change code false, package false
+selects this step and skips build
+```
+
+**Removing each guard in turn is what found the check's own bug.** It caught the
+first download and passed the second, and the reason was not the download: the
+artifact that step reads is uploaded by a step whose own `if:` is
+`${{ !cancelled() }}`, inside a job gated on `code`. The first version of
+`effectiveCondition` read a step's `if:` as _replacing_ its job's, so that artifact
+looked unconditional — and an artifact that looks unconditional can never be too
+narrow for the step that reads it, which is every violation there is. A step's
+condition is the job's **and** its own; the two are conjoined, and a fixture in the
+self-check now pins that, because a rule about who gates whom is exactly the kind
+of thing that reverts quietly. Nothing but a mutation test would have found this:
+on the workflow as it stands the check had already reported a clean file, and it
+was still reporting one.
+
+**Fail-closed, and never by accident.** A condition using anything outside that
+grammar is reported as unreadable rather than read as one this file cannot judge,
+and so is a line the scan cannot read at all. And a fixed list of the reads that
+exist today fails if one stops being recognised — which is also what fails an empty
+scan, since "nothing to complain about" and "read nothing" are the same output.
+That list is what put the scan against the real workflow, and the first thing it hit
+was `cannot read the step "changes"`: `needs:`' items are indented exactly like
+steps, and refusing to read one is the only reason this was a failed run rather than
+a `required` job holding two steps called `build` and `test`. The position rule — a
+step is a step only inside `steps:` — is what the self-check's fixture now pins.
+
+**What it does not check**, stated rather than left to be inferred. Only
+`.github/workflows/ci.yml`, because that is where artifacts are passed between
+jobs. Only `download-artifact` steps — and that limit has a named instance rather
+than being theoretical: the step that merges the downloaded shard reports is also
+guarded on `code`, removing _that_ guard is not caught, and telling a step that
+consumes an artifact from one that only reports on the run is not something a rule
+can do textually. An artifact three jobs upload and nobody ever reads —
+`static-check-reports`, `test-results`, and `toolchain-lane-<n>` are collected by a
+person after a failure — has no reader that could be too wide. And only conditions
+that can affect a verdict: a step-output comparison such as
+`steps.openssl-cache.outputs.cache-hit != 'true'` is recorded and not parsed, since
+parsing it would make the check refuse to run on workflows holding expressions it
+has no business judging.
 
 ## Not planned
 
