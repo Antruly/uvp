@@ -271,7 +271,7 @@ test under the suite it was skipped by, which is where the reason sits for a
 whole-suite skip. It is registered in `vitest.config.ts` for a local run and
 named in the CI test steps, whose explicit `--reporter` flags would otherwise
 replace the config — a lane that prints a count and no reason is a lane that
-cannot be read.
+cannot be read. `npm run verify:reporters` is what keeps the two in step.
 
 ### A build that fails
 
@@ -589,6 +589,14 @@ that let that through would have missed the only instance there was.
 **Test discovery.** `npm run verify:test-discovery` fails if a `*.test.ts` file
 on disk is not claimed by any project. A test file that runs in no project is a
 test that silently is not running, which is worse than one that fails.
+
+**Reporter flags.** `npm run verify:reporters` fails if a `run:` step under
+`.github/`, or a script in `package.json`, passes its own `--reporter` flags
+without naming the skip reporter. The flags replace what `vitest.config.ts`
+registers rather than adding to it, so the step loses the names and keeps the
+count — green, and unreadable. It is the same defect the discovery check exists
+for, one level down: a lane that reports nothing looks like a lane that passed.
+Both are scripts rather than turbo tasks, and both run in the static job.
 
 **Generated files.** The tool catalog, package metadata, skill metadata, and
 error schema are generated from source. CI regenerates them and fails on a diff,

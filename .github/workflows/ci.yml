@@ -87,6 +87,12 @@ jobs:
       - name: Verify that every test project is discoverable
         if: needs.changes.outputs.code == 'true'
         run: npm run verify:test-discovery
+      # Guarded on `workflows` as well as `code`, unlike the step above: a new
+      # job's test step is the case this exists for, and a workflow-only change
+      # classifies as `workflows` alone — the gate above would not even run.
+      - name: Verify that every test run keeps the skip list
+        if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
+        run: npm run verify:reporters
       - name: Check formatting when no code changed
         if: needs.changes.outputs.code != 'true'
         run: npm run format:check
