@@ -31,7 +31,7 @@ import {
  * - **A compile failure**, produced by the compiler. Its diagnostics are GCC's,
  *   which the toolchain layer has always parsed; this file holds that parsing
  *   still works through the whole chain — `uvp build` as a process, not the parser
- *   directly, which `src/toolchains/local/diagnostics.test.ts` covers.
+ *   directly, which `src/toolchains/diagnostics.test.ts` covers.
  * - **A configure failure**, produced by CMake itself. CMake's errors are not
  *   compiler diagnostics in any spelling, and the parser knew only the compiler
  *   formats: a configure failure came back as `succeeded: false`,

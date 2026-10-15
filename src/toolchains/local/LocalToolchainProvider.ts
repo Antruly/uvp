@@ -3,7 +3,6 @@ import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 
 import type {
-  BuildArtifact,
   BuildDiagnostic,
   BuildOutcome,
   BuildRequest,
@@ -16,10 +15,10 @@ import type {
   ToolchainProvider,
 } from "../../application/ToolchainProvider.js";
 import { cancelledFailure } from "../../domain/errors.js";
-import { sha256 } from "../../domain/identity.js";
+import { discoverArtifacts } from "../artifacts.js";
+import { parseDiagnostics } from "../diagnostics.js";
 import { isWindows, versionOf, whichOnPath } from "../host.js";
 import { runProcess } from "../processRunner.js";
-import { parseDiagnostics } from "./diagnostics.js";
 
 /**
  * What a cancelled inspection, discovery, or build reports.
@@ -180,43 +179,6 @@ const libuvcppVersionOf = async (
     if (match?.[1] !== undefined) return { version: match[1], source };
   }
   return undefined;
-};
-
-export const discoverArtifacts = async (buildDir: string): Promise<readonly BuildArtifact[]> => {
-  const { readdir, stat: statFile } = await import("node:fs/promises");
-  const found: BuildArtifact[] = [];
-  const walk = async (dir: string, depth: number): Promise<void> => {
-    if (depth > 4) return;
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      let info;
-      try {
-        info = await statFile(full);
-      } catch {
-        continue;
-      }
-      if (info.isDirectory()) {
-        if (entry === "CMakeFiles" || entry.startsWith(".")) continue;
-        await walk(full, depth + 1);
-        continue;
-      }
-      const artifactLike =
-        process.platform === "win32"
-          ? entry.endsWith(".exe") || entry.endsWith(".dll")
-          : !entry.includes(".") && (info.mode & 0o111) !== 0;
-      if (!artifactLike || info.size === 0) continue;
-      const bytes = await readFile(full);
-      found.push({ path: full, bytes: info.size, digest: sha256(bytes) });
-    }
-  };
-  await walk(buildDir, 0);
-  return found;
 };
 
 const generatorArgs = (generator: BuildRequest["generator"]): readonly string[] => {

@@ -1,4 +1,4 @@
-import type { BuildDiagnostic, BuildPhase } from "../../application/ToolchainProvider.js";
+import type { BuildDiagnostic, BuildPhase } from "../application/ToolchainProvider.js";
 
 /**
  * Reading a build's failures out of the text the tools printed.

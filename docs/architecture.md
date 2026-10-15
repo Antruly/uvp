@@ -128,6 +128,22 @@ The pattern to notice is that both cases looked like a private helper and were
 really a shared capability filed under whichever provider needed it first. The
 test is whether the module mentions the provider it sits under. Neither does.
 
+Two more moved for the same reason once a container provider was being written:
+`toolchains/diagnostics.ts`, which reads a build's failures out of CMake's and
+the compilers' own output, and `toolchains/artifacts.ts`, which decides which
+files a build directory produced. Both were under `local/`, and neither is about
+the local provider — a container build that bind-mounts the workspace at the same
+absolute path produces a build directory that is an ordinary host directory, so
+it asks the same two questions with the same answers. The artifact heuristic
+still uses `process.platform`, which looks local and is not: the files being
+hashed are host files whichever side of the container boundary compiled them.
+
+That is four modules in one change, which is worth saying plainly rather than
+tidying into a single anecdote. The reason there were four is that "the local
+provider" was the only provider for long enough that anything generic written
+during that time landed inside it, and nothing distinguished a local fact from a
+host fact because there was no second host.
+
 ## The case that shaped the rules: `UvpFeature`
 
 The feature vocabulary — `tls`, `http2`, `http3`, `grpc`, `websocket`, `soap`,
