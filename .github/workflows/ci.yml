@@ -199,7 +199,7 @@ jobs:
         uses: ./.github/actions/npm-cache
       - run: npm ci
       - name: Download the built runtime
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: uvp-test-runtime
           path: .
@@ -257,13 +257,13 @@ jobs:
           fi
       - name: Download the built runtime
         if: needs.changes.outputs.code == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: uvp-test-runtime
           path: .
       - name: Download the shard reports
         if: needs.changes.outputs.code == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: vitest-report-*
           path: .vitest/blob
@@ -539,7 +539,7 @@ jobs:
         uses: ./.github/actions/npm-cache
       - run: npm ci
       - name: Download the built runtime
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: uvp-test-runtime
           path: .
