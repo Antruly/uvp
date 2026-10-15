@@ -173,9 +173,11 @@ package 时走 `find_package(uvcpp 1.7.0 CONFIG)`，不存在时回退到 `pkg-c
 
 CLI 与 MCP 服务端都已经建好，而且两者都是作为**进程**被检验，而不是作为模块：
 `tests/boundary/cli/cliContract.test.ts` 运行 CLI，检查它打印出什么、以什么码退出；
-`tests/boundary/mcp/mcpSurface.test.ts` 用 stdio 协议与服务端对话。CI 随后会把打包好的
-tarball 装进一个空 prefix，再从安装后的副本执行 CLI 的首批命令和 MCP 握手 ——
-`files[]` 里漏了文件，就是在这里暴露出来的。
+`tests/boundary/mcp/mcpSurface.test.ts` 用 stdio 协议与服务端对话。CI 会在干净机器上跑同样的
+lane，其中的打包 lane 还会把打包好的 tarball 装进一个空 prefix，再从安装后的副本执行 CLI 的
+首批命令和 MCP 握手 —— `files[]` 里漏了文件，就是在这里暴露出来的。每条 CI lane **实际**报告了
+什么，记在 [docs/roadmap.md](../roadmap.md) 里，而不是在这里假定：第一次真正跑到测试的 CI run
+在那里找到了四个缺陷就停了，而「声称覆盖、但尚未被看到」的 lane，也就在旁边被标成那样。
 
 WebSocket 探测跑在两种栈上：默认是 Node 客户端，另一种是 `uvcpp-probe` —— 一个说
 C ABI 的小型 C++ 程序 —— 走 libuvcpp 自己的客户端。第二种栈回答的正是

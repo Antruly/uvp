@@ -188,9 +188,13 @@ The CLI and the MCP server are both built, and both are exercised as processes
 rather than as modules: `tests/boundary/cli/cliContract.test.ts` runs the CLI and
 checks what it prints and what it exits with, and
 `tests/boundary/mcp/mcpSurface.test.ts` speaks the stdio protocol to the server.
-CI then installs the packed tarball into an empty prefix and runs the CLI's first
-commands and the MCP handshake from the installed copy, which is where a file
-missing from `files[]` shows up.
+CI runs the same lanes on a clean machine, and its packaged lane also installs the
+packed tarball into an empty prefix and runs the CLI's first commands and the MCP
+handshake from the installed copy, which is where a file missing from `files[]`
+shows up. What each CI lane has _actually_ reported is tracked in
+[docs/roadmap.md](docs/roadmap.md) rather than assumed here: the first run that
+reached a test at all found four defects and stopped there, and a lane whose
+coverage is claimed and not yet seen is marked as such next to it.
 
 The WebSocket probe runs on two stacks: a Node client by default, and libuvcpp's
 own client through `uvcpp-probe`, a small C++ program that speaks the C ABI. That

@@ -352,17 +352,19 @@ carries `UV_THREADPOOL_SIZE` for a caller who has measured their own workload.
 Known gaps in the project's own engineering, tracked here rather than left
 implicit.
 
-|     |                                                                                                                                                                                       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⬜  | Pin third-party GitHub Actions to commit SHAs. Workflows currently reference major version tags (`actions/checkout@v4`); full SHA pinning needs the SHAs verified rather than guessed |
-| ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                    |
-| ⬜  | Renovate or Dependabot with grouped, reviewed updates                                                                                                                                 |
-| ⬜  | Reproducible builds for the packaged tarball                                                                                                                                          |
-| ⬜  | An SBOM in the release artifacts                                                                                                                                                      |
-| ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                          |
-| ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                      |
-| ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                      |
-| ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                      |
+|     |                                                                                                                                                                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⬜  | Pin third-party GitHub Actions to commit SHAs. Workflows currently reference major version tags (`actions/checkout@v4`); full SHA pinning needs the SHAs verified rather than guessed                                                                                                                     |
+| ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                        |
+| ⬜  | Renovate or Dependabot with grouped, reviewed updates                                                                                                                                                                                                                                                     |
+| ⬜  | Reproducible builds for the packaged tarball                                                                                                                                                                                                                                                              |
+| ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                          |
+| ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                                                                                                                                              |
+| ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                          |
+| ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                          |
+| ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                          |
+| ⬜  | CI's database and HTTP/3 coverage is requested but unobserved: the real-libuvcpp lane has built libuvcpp with `-DUVCPP_ENABLE_DB=ON` and with a from-source OpenSSL 3.5 for QUIC only since 2026-10-16, and no run has yet reported what that lane did with either                                        |
+| ⬜  | `npm run build:native-probe` needs the HTTP/3 C headers in the install, because the probe compiles `http3_exchange.cpp` unconditionally — so a libuvcpp built without HTTP3/QUIC cannot build the probe at all, and the WebSocket half loses its native stack for a reason that has nothing to do with it |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
 rather than as a bug report. It has been seen three times, each time as the only
@@ -428,6 +430,127 @@ start. The new `src/application/**` rule in `.oxlintrc.json` is the part that
 generalises: a scratch file importing `toolchains/local` from `application` was
 confirmed to fail the lint both as a value import and as a type-only one.
 
+### The run that showed CI had never tested anything
+
+Every Actions run before `ebda64e` (2026-10-16) failed in its first step, `npm ci`,
+on a lock file missing rolldown's darwin-x64 optional binding — npm validates the
+whole optional set, not only the platform it is installing for. Twenty-five runs,
+twenty-five failures, no lane past installation. Until that commit, every sentence
+in this repository about what CI does was a description of a workflow file rather
+than an observation of one.
+
+Run `38796990242` is the first observation, at `ebda64e`. Six lanes had never run
+before and passed on their first attempt — Classify changes, Static checks, Build
+package, and all three test shards. Six failed:
+
+| lane               | what it reported                                                     |
+| ------------------ | -------------------------------------------------------------------- |
+| Documentation      | `Found dead link ./../README in file roadmap.md`                     |
+| Source tests       | `UvpFailure: Port 33097 is already in use` — 705 of 706 tests passed |
+| Packaged rehearsal | `npm pack --pack-destination .cache` → ENOENT                        |
+| Real libuvcpp lane | `pkg-config --modversion uvcpp` → no such file                       |
+| Portable tests     | consequential — see below                                            |
+| CI required        | consequential — it exists to fail when any selected lane fails       |
+
+Four were defects. Each is fixed in the tree rather than recorded here:
+
+- **The dead link.** The roadmap pointed at `../README.md`, which is outside the
+  VitePress site root; it now uses the absolute blob URL, which is what this file
+  already did everywhere else it points outside the docs.
+- **The port.** `tests/support/ports.ts` asked the kernel for port 0, which returns
+  an _ephemeral_ port — the same pool a TCP client's own source port is drawn
+  from. A port free when it was probed can therefore be taken by any outbound
+  connection the suite opens a moment later, and the child that was told to listen
+  there gets `EADDRINUSE` for a number nobody chose. The file now reads
+  `ip_local_port_range` and walks candidates just below it, where the kernel never
+  hands out source ports, and says in its own comment what it does on a host where
+  that range cannot be read.
+- **The tarball.** `npm pack` writes its tarball but does not create
+  `--pack-destination`, and `.cache/` is gitignored, so in a fresh checkout the
+  directory was not there. The step now creates it.
+- **The evidence step in the toolchain lane.** Two mistakes in four lines, both of
+  which made it record nothing while looking like it had: it required
+  `pkg-config --modversion uvcpp`, which a `cmake --install` of libuvcpp does not
+  write (that install carries a CMake package and no `uvcpp.pc`; the prebuilt
+  archives are the other way round, so the lane demanded the one form the CI build
+  does not produce), and its `grep -E '^#define UVCPP_\w+_ENABLE'` matched none of
+  the header's defines, which are indented `#  define` — the `|| true` on the end
+  then hid the fact that it had printed nothing. It now prints every module macro,
+  requires the modules its configure line asks for, and reports which discovery
+  routes are on disk without deciding which one the generated project will use.
+
+The two consequential failures are worth naming because they are the reason to
+read a red run's dependencies before its lanes: Portable tests merges the source
+lane's report and then requires the source lane to have passed, so it fails
+whenever that lane does, and CI required aggregates. Both went red without a
+defect of their own.
+
+Fixing the fourth put the lane's real coverage in view, and the news was worse
+than one flag. CI's libuvcpp was built with `UVCPP_BUILD_WEB`, `UVCPP_BUILD_WEBAPP`
+and `UVCPP_ENABLE_CAPI` and nothing else, while the lane below it builds **all six
+templates** and the native probe:
+
+- `UVCPP_ENABLE_DB` defaults to `OFF` in libuvcpp, so there was no database module
+  and `tests/toolchain/database.test.ts` — the lane behind Milestone 3's database
+  row — was skipping in the only lane that could have run it.
+- With no OpenSSL, QUIC or HTTP/3, `http3-service` had no transport to be built
+  against, and the probe could not be built at all: it compiles its h3 translation
+  unit unconditionally, and with the module off libuvcpp does not install
+  `capi/uvcpp_c_http3.h`. That one was verified here rather than argued — a
+  from-source install without those modules fails `npm run build:native-probe` with
+  `fatal error: capi/uvcpp_c_http3.h: no such file or directory`, which would have
+  been the next red step after the one being fixed.
+
+The configure line now asks for everything a template or the probe needs, and the
+reason it is not a two-line change is QUIC: HTTP/3 runs on QUIC, QUIC runs on
+TLS 1.3, and libuvcpp's configure step wants an OpenSSL at or above 3.2 with
+`SSL_set_quic_tls_cbs`. Ubuntu 24.04's 3.0.13 is not one, and libuvcpp forces QUIC
+off — and HTTP/3 with it — rather than producing a library that cannot link
+against ngtcp2. So the lane builds OpenSSL 3.5.0 from source into a prefix of its
+own and points `OPENSSL_ROOT_DIR` at it, exactly as libuvcpp's own `quic` and
+`http3` CI legs do, and puts that prefix on `LD_LIBRARY_PATH` for the steps that
+run a generated service — its soname is `libssl.so.3`, the same name the runner's
+3.0.13 has, so without it a service resolves the dependency out of `/usr/lib` and
+the loader refuses it by version: `libssl.so.3: version 'OPENSSL_3.5.0' not found
+(required by .../libuvcpp.so)`. That is the shape this failure takes, and it is
+worth knowing that it is a refusal to start rather than a missing QUIC symbol
+somewhere into a handshake. Both prefixes are cached and both cache keys name
+their flag set, so a changed configure line is never served the previous install.
+
+Rehearsing that lane here turned up two more dependencies the lane had been
+missing, neither of them about uvp:
+
+- **The libuvcpp prefix belongs on `LD_LIBRARY_PATH` too.** The prebuilt release
+  archive's `libuvcpp.so` is self-contained — `libc`, `libstdc++`, `libm`,
+  `libgcc` — which is why the real-* lanes never needed a loader entry for it. A
+  source install links libuv, libllhttp, libssl, libcrypto and libsqlite3
+  dynamically and gives the library no `RUNPATH` of its own, and a binary's
+  `RUNPATH` is not consulted for its dependencies' dependencies: the probe found
+  `libuvcpp.so` through its own `RUNPATH` on the prefix and then died on
+  `libllhttp.so.9.2: cannot open shared object file`, with the file sitting in the
+  very directory the `RUNPATH` pointed at.
+- **libuv has to be installed, not fetched.** libuvcpp prefers a system libuv and
+  otherwise fetches v1.51.0 into its build tree, and the runner image ships
+  neither libuv1 nor its headers — its package list has no libuv entry. A fetched
+  libuv is linked as a shared library, so the install carries a `libuv.so.1`
+  dependency whose only copy is in a build directory nothing puts on the loader
+  path, and the failure lands on the first generated service that starts. The apt
+  step installs `libuv1-dev` so that dependency is a package the runner resolves.
+
+Neither is visible from the configure line, which is the argument for rehearsing a
+lane on the host that will run it rather than reading it.
+
+That lane's coverage of the db and h3 rows is requested from here on; it is not
+yet observed, and the row above says so until a run reports it. What _is_ observed
+is the same lane run locally against a libuvcpp built the way the workflow now
+builds it — source install, `WEB`, `WEBAPP`, `CAPI`, `DB`, `OPENSSL`, `QUIC`,
+`HTTP3`, OpenSSL 3.5.0 from source, libuv 1.48.0 from Ubuntu's packages, the
+runner's OpenSSL 3.0.13 alongside: 47 tests across 6 files, all passing, including
+`http3-service` opening both legs, the probe completing an HTTP/3 exchange against
+a generated service, and the database template keeping a value across a restart.
+The runner is not this host, so that is evidence about the lane and not a
+prediction about the run.
+
 ## Not planned
 
 Saying no is part of the roadmap.
@@ -453,8 +576,8 @@ endpoint, no account, and no telemetry.
 
 An item is done when a test that would fail without it passes — not when the code
 is written. The `🔴`/`✅` marks on this page track the test suite, and the
-[Current status](../README.md#current-status) section of the README is the
-summary a new user reads first.
+[Current status](https://github.com/Antruly/uvp/blob/main/README.md#current-status)
+section of the README is the summary a new user reads first.
 
 If you want to work on something here, read
 [CONTRIBUTING.md](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md)
