@@ -201,6 +201,7 @@ describe("the built output's import surface", () => {
         "cli/",
       ],
       "dist/contracts/": ["application/", "toolchains/", "composition/", "server/", "cli/"],
+      "dist/application/": ["toolchains/", "composition/", "server/", "cli/"],
     };
 
     const violations: string[] = [];

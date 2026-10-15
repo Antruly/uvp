@@ -126,6 +126,14 @@ A tool that needs to build, run, or inspect a toolchain depends on the
 in `src/application/ToolchainProvider.ts`; the only implementation lives in
 `src/toolchains/local/`; the binding happens in `src/composition/`.
 
+The same rule covers the other thing a workflow needs from the host: starting and
+stopping a process. `src/application/ProcessSupervisor.ts` defines that port for
+the same reason, and for a while the code did not — `WorkspaceService` imported
+`startSupervised` from `toolchains/local/` directly, which made "run this
+service" mean "run it on this machine" inside a layer forbidden to know the
+difference. When a workflow needs something from the host, the question to ask is
+not "where is the function" but "which layer is allowed to name it".
+
 This is what makes a second provider — a container, a remote SSH target — an
 adapter rather than a rewrite. The requirement a provider has to meet is not
 "work like the local one" but "report your gaps honestly":

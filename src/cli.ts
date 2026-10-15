@@ -12,7 +12,7 @@ import { createUvpServices } from "./composition/uvpServices.js";
 import type { UvpServices } from "./composition/uvpServices.js";
 import { UvpFailure, toUvpError } from "./domain/errors.js";
 import type { StopResult } from "./application/WorkspaceService.js";
-import { describeStop } from "./toolchains/local/processRunner.js";
+import { describeStop } from "./application/ProcessSupervisor.js";
 
 /**
  * The CLI entry point.

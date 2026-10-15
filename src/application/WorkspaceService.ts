@@ -14,7 +14,8 @@ import type { SupervisedRun } from "./sessionStore.js";
 import { SessionStore } from "./sessionStore.js";
 import { renderTemplate, type TemplateId } from "./templates.js";
 import type { UvpFeature } from "../domain/features.js";
-import { describeStop, startSupervised } from "../toolchains/local/processRunner.js";
+import { describeStop } from "./ProcessSupervisor.js";
+import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
 
 export interface CreatedFile {
@@ -154,6 +155,21 @@ export class WorkspaceService {
   constructor(
     private readonly store: SessionStore,
     private readonly client: ToolchainClient,
+    /**
+     * Required, with no default, and that is deliberate.
+     *
+     * This class starts a service and can stop it, which only the host's process
+     * table can do. Reaching into `toolchains/local` for it made "run this
+     * service" a workflow that only ever meant "on this machine". Through the
+     * port it means whatever supervisor the composition root wired.
+     *
+     * A default would have read as convenience and behaved as a trap: a wiring
+     * mistake would compile, and surface later as a service that cannot start
+     * while the code that forgot the argument looks correct. `now` can default,
+     * because a clock's default is the real clock; there is no such thing for a
+     * supervisor.
+     */
+    private readonly supervisor: ProcessSupervisor,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -280,7 +296,7 @@ export class WorkspaceService {
         ? undefined
         : `http://127.0.0.1:${String(input.ready.port)}${input.ready.path}`;
 
-    const process_ = startSupervised({
+    const process_ = this.supervisor({
       command: binaryPath,
       args: input.args,
       cwd: root,

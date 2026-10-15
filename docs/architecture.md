@@ -60,7 +60,8 @@ the generated catalog, and the shipped skill.
 **`src/application/`** — the workflows: creating a workspace, assessing a
 toolchain, building, supervising a process, issuing requests, evaluating
 assertions, assembling a verification bundle. This layer defines the ports it
-needs (`ToolchainProvider`) and never knows which provider implements them.
+needs (`ToolchainProvider`, `ProcessSupervisor`) and never knows which
+implementation it was handed.
 
 **`src/toolchains/`** — provider adapters. `local/` is the only one implemented.
 A provider reports what it _can_ do before it is asked to do anything, and
@@ -80,8 +81,30 @@ other is a bug in the adapter, not a design decision.
 
 `src/domain/` may not import from `application`, `contracts`, `toolchains`, or
 the adapters. `src/contracts/` may import from `domain` and nothing above it.
-Both are enforced by `no-restricted-imports` in `.oxlintrc.json`, so a violation
-is a lint error rather than a review comment.
+`src/application/` may not import from `toolchains`, `composition`, or the
+adapters — it defines the ports it needs and is handed implementations.
+All three are enforced by `no-restricted-imports` in `.oxlintrc.json`, so a
+violation is a lint error rather than a review comment, and the rule covers
+type-only imports as well as value ones.
+
+The third rule is the newest, and it exists because of what its absence cost.
+`application` imported `startSupervised` from `toolchains/local/processRunner`
+for as long as `local/` was the only provider, and `sessionStore` imported that
+module's `SupervisedProcess` type. Nothing was wrong with either line at the
+time; what was wrong was that "run this service" quietly meant "run it on this
+machine", in a layer that is not allowed to know which provider it is using. The
+supervision port fixed it, and the lint rule is what will notice next time —
+which is the point the roadmap made when it recorded the row: the refactor
+without the rule is a fix, and the rule is the prevention.
+
+The inverted import is worth reading as a case rather than an anecdote. It was
+not a mistake about types or about the direction of the arrow; it was a
+convenience that happened to be correct while there was one implementation, and
+the layering rule was enforced only where its violation would have been obvious.
+`contracts` importing `application` breaks immediately, because a vocabulary
+would need a workflow. `application` importing `toolchains` breaks only when
+somebody adds the second provider — that is, at exactly the moment the port was
+supposed to pay off.
 
 ## The case that shaped the rules: `UvpFeature`
 

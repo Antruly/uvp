@@ -41,15 +41,21 @@
       }
     },
     {
-      "files": ["src/application/**/*.test.ts"],
+      "files": ["src/application/**/*.ts"],
       "rules": {
         "no-restricted-imports": [
           "error",
           {
             "patterns": [
               {
-                "group": ["**/server/**", "**/cli.*", "**/main.*"],
-                "message": "Service tests must use application ports rather than CLI or MCP entrypoints."
+                "group": [
+                  "**/toolchains/**",
+                  "**/composition/**",
+                  "**/server/**",
+                  "**/cli.*",
+                  "**/main.*"
+                ],
+                "message": "Application workflows depend on domain, contracts, and their own ports — not on a provider, on composition, or on an entrypoint. Inject a port instead: `ProcessSupervisor` exists because `WorkspaceService` used to import `toolchains/local`, and `ToolchainProvider` because the toolchain is chosen at the composition root."
               }
             ]
           }

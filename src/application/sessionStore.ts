@@ -1,4 +1,4 @@
-import type { SupervisedProcess } from "../toolchains/local/processRunner.js";
+import type { SupervisedProcess } from "./ProcessSupervisor.js";
 
 /**
  * Session-scoped state.

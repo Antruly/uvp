@@ -4,6 +4,7 @@ import { WebService } from "../application/WebService.js";
 import { CaptureService } from "../application/CaptureService.js";
 import { DoctorService } from "../application/DoctorService.js";
 import { LocalToolchainProvider } from "../toolchains/local/LocalToolchainProvider.js";
+import { startSupervised } from "../toolchains/local/processRunner.js";
 import { NativeProbeRunner } from "../toolchains/native/NativeProbeRunner.js";
 import type { NativeWebSocketProbe } from "../application/NativeWebSocketProbe.js";
 import type { ToolchainProvider } from "../application/ToolchainProvider.js";
@@ -65,7 +66,7 @@ export const createUvpServices = (options: UvpServiceOptions = {}): UvpServices 
     store,
     providers,
     primary,
-    workspace: new WorkspaceService(store, client, now),
+    workspace: new WorkspaceService(store, client, startSupervised, now),
     web: new WebService({
       store,
       now,

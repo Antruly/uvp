@@ -383,7 +383,12 @@ Some of these are tests, some are lint. Both fail a build.
 
 **Layering.** `no-restricted-imports` in `.oxlintrc.json`: `src/domain/` may not
 import from `application`, `contracts`, `toolchains`, or the adapters;
-`src/contracts/` may import from `domain` and nothing above it.
+`src/contracts/` may import from `domain` and nothing above it; `src/application/`
+may not import from `toolchains`, `composition`, or the adapters, because it
+defines the ports it needs and is handed the implementations. The `application`
+rule covers type-only imports, which is not incidental — the violation that
+prompted it was `sessionStore` importing a `SupervisedProcess` type, and a rule
+that let that through would have missed the only instance there was.
 
 **Test discovery.** `npm run verify:test-discovery` fails if a `*.test.ts` file
 on disk is not claimed by any project. A test file that runs in no project is a

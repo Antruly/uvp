@@ -8,7 +8,7 @@ import {
   retainCaptureExchange,
 } from "./sessionStore.js";
 import type { CaptureSession, ExchangeRecord, SupervisedRun } from "./sessionStore.js";
-import type { SupervisedProcess } from "../toolchains/local/processRunner.js";
+import type { SupervisedProcess } from "./ProcessSupervisor.js";
 
 /**
  * The session store is the only place uvp keeps what it observed, and it is

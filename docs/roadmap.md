@@ -127,15 +127,52 @@ implicit.
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                      |
 | ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                          |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                      |
-| ⬜  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                      |
+| ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                      |
+| ⬜  | `oxlint` once failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                           |
 
-The supervision row is the one place the dependency direction is inverted today.
-`WorkspaceService` calls `startSupervised` from `toolchains/local/processRunner`,
-and `sessionStore` imports that module's `SupervisedProcess` type, which the
-[layer rule](architecture.md#the-rule-enforced) says cannot happen. Nothing fails
-when it spreads, because `.oxlintrc.json` enforces that rule for `domain` and
-`contracts` only — so the row is not just the refactor, it is the lint rule that
-would have caught it.
+The `dist/` row is an observation with no diagnosis attached, recorded as such
+rather than as a bug report. On 2026-10-15 `npm run check:pr` failed in the `lint`
+task with exactly one error and no rule name:
+
+```
+x Failed to open file .../dist/toolchains/local/processRunner.js with error
+  "No such file or directory (os error 2)"
+Found 22 warnings and 1 error.
+```
+
+`compile` deletes and rewrites `dist/` and runs concurrently with `lint` in
+`check:ci`, which is the only suspicious fact available. It is not a diagnosis:
+a stable `dist/` **is** skipped — a file with a deliberate `no-var` violation
+placed in `dist/` is not reported, and `dist/` is in both `.gitignore` and
+`.oxlintrc.json`'s `ignorePatterns` — and three reproduction attempts (74 oxlint
+runs concurrent with an actively churning `dist/`, including one against a real
+`npm run compile`) produced no failure at all. Re-running the identical gate on
+the identical tree passed 11 of 11 tasks, 22 warnings and 0 errors, 604 tests.
+
+So the honest state is: seen once, not understood, not reproduced. Worth a row
+because an intermittent gate teaches people to re-run until it is green, which
+is how a real failure gets waved through — but the next person should start from
+"it happened once and nobody knows why" rather than from a mechanism this row
+invented.
+
+The supervision row was the one place the dependency direction was inverted:
+`WorkspaceService` called `startSupervised` from `toolchains/local/processRunner`,
+and `sessionStore` imported that module's `SupervisedProcess` type, which the
+[layer rule](architecture.md#the-rule-enforced) said cannot happen. Nothing failed
+while it spread, because `.oxlintrc.json` enforced that rule for `domain` and
+`contracts` only — so the row was not just the refactor, it was the lint rule that
+would have caught it, and both landed together.
+
+`src/application/ProcessSupervisor.ts` now holds what `application` needs from a
+supervisor: the `SupervisedProcess` type, the three stop outcomes, and
+`describeStop`, the one function that puts an outcome into words. `startSupervised`
+stayed in `toolchains/local/`, annotated with the port type so the compiler checks
+the implementation against the port at the definition, and `WorkspaceService` takes
+a supervisor as a required constructor argument — no default, because a default
+would have let a wiring mistake compile and surface later as a service that cannot
+start. The new `src/application/**` rule in `.oxlintrc.json` is the part that
+generalises: a scratch file importing `toolchains/local` from `application` was
+confirmed to fail the lint both as a value import and as a type-only one.
 
 ## Not planned
 
