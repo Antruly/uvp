@@ -515,12 +515,44 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$PWD/.cache/prefix/bin:$PATH"
-          uvp --version
+          # The release checklist reads `uvp --version` to confirm an install, so
+          # the tarball's own version is the thing it has to agree with. Checked
+          # from outside the process: this is the one place the promise is made
+          # to a user, and a stale generated version is invisible from inside.
+          expected="uvp-agents $(node -p 'require("./package.json").version')"
+          reported="$(uvp --version)"
+          if [ "$reported" != "$expected" ]; then
+            echo "uvp --version printed '$reported', expected '$expected'"
+            exit 1
+          fi
           uvp --help
-          # The doctor is the first thing a new user runs and the one command
-          # that must work with no libuvcpp installed. It reports the gap rather
-          # than failing, so a non-zero exit here is a real defect.
-          uvp doctor --json
+          # The doctor is the one command that must work with no libuvcpp
+          # installed, and "works" means it answers. A missing prerequisite is an
+          # answer of no, so the documented code is 1 (docs/cli.md: 1 is "the
+          # operation ran and the answer is no"), and 2 is the code for a doctor
+          # that could not look at all. This step asserted 0 until a run showed
+          # it exiting 1 with `libuvcpp: {found: false}` — which is what this
+          # runner has, so the expectation was the defect and not the doctor.
+          #
+          # The code is asserted rather than tolerated: `|| true` would pass just
+          # as well on a crash. The report is read, because "exited 1" and
+          # "reported the gap" are different claims and only the second is the
+          # one this step is here to make.
+          doctor_status=0
+          uvp doctor --json > .cache/doctor.json || doctor_status=$?
+          if [ "$doctor_status" -ne 1 ]; then
+            echo "uvp doctor exited $doctor_status; expected 1 on a runner with no libuvcpp"
+            exit 1
+          fi
+          node -e '
+            const report = JSON.parse(require("node:fs").readFileSync(".cache/doctor.json", "utf8"));
+            const found = report.libuvcpp?.found;
+            if (found !== false) {
+              console.error(`the doctor reported libuvcpp.found = ${JSON.stringify(found)}, and this runner has none`);
+              process.exit(1);
+            }
+            console.log("uvp doctor reports the missing libuvcpp rather than failing on it");
+          '
       - name: Exercise the stdio MCP contract from the installed copy
         run: npm run test:packaged-mcp
         env:
