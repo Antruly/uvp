@@ -181,7 +181,10 @@ exchange, and the digests behind them.
 **`uvp_assert_exchange`** — Assert over a recorded exchange.
 Evaluates assertions against an exchange captured earlier — status, headers, a
 JSON path, a body substring. Splitting assertions from requests means a failure
-can be re-examined without re-issuing the request.
+can be re-examined without re-issuing the request. An assertion the record cannot
+answer is a third outcome: it is named in `unknowns` with the reason, left out of
+`passed` and `failed`, and counted as unexamined in the evidence's `coverage`, so
+neither counter is ever a claim about a check that never ran.
 
 ### Workflow
 

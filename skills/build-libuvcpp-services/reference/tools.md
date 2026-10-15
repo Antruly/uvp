@@ -1,7 +1,7 @@
 # uvp tool reference
 
 Generated from the tool contracts. 15 tools; catalog digest
-`512dfea370dca755d7408184e36a999a1d10929860042405598264ff73015cac`.
+`ca475fc48d4cf53aba9ba2b43576bcc25e00f8ac6e6371a033f0d354e781dd2d`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -244,7 +244,7 @@ Example:
 
 ## `uvp_assert_exchange` — Assert over a recorded exchange
 
-Evaluate assertions against an exchange recorded earlier in this session, without sending any traffic. Returns each assertion's outcome with the observed value behind it, so a failure shows what was actually there rather than only that it differed.
+Evaluate assertions against an exchange recorded earlier in this session, without sending any traffic. Returns each assertion's outcome with the observed value behind it, so a failure shows what was actually there rather than only that it differed. An assertion the record cannot answer — a header the client never read, a body that was never recorded — is reported as an unknown with the reason and left out of both counts, because `passed` and `failed` are claims about checks that ran.
 
 - **Kind:** web
 - **Effects:** readsFilesystem

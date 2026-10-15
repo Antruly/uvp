@@ -94,13 +94,16 @@ describe("status_equals", () => {
     expect(outcome.message).toContain("500");
   });
 
-  it("treats an unrecorded status as a failure, not a match", () => {
+  it("reports an unrecorded status as a check that could not run", () => {
     // A request that never produced a response line has no status. Comparing
-    // `undefined` to `undefined` must not read as success.
+    // `undefined` to `undefined` must not read as success — and reading it as a
+    // *mismatch* is the same defect one step along: it reports a service that
+    // answered with the wrong status when nothing answered at all.
     const outcome = only(exchange({ status: undefined }), {
       kind: "status_equals",
       expected: 200,
     });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("no response status");
@@ -128,10 +131,13 @@ describe("status_in", () => {
     expect(outcome.message).toContain("204");
   });
 
-  it("fails when no status was recorded, even if the set is empty", () => {
-    expect(
-      only(exchange({ status: undefined }), { kind: "status_in", expected: [200] }).passed,
-    ).toBe(false);
+  it("does not test membership when no status was recorded", () => {
+    const outcome = only(exchange({ status: undefined }), { kind: "status_in", expected: [200] });
+    expect(outcome.evaluated).toBe(false);
+    expect(outcome.passed).toBe(false);
+    // The set is still named, so a reader of the verdict knows what the check
+    // would have been.
+    expect(outcome.message).toContain("200");
   });
 });
 
@@ -205,14 +211,17 @@ describe("header assertions", () => {
     expect(outcome.observed).toBe("text/plain");
   });
 
-  it("header_matches reports an invalid pattern as a failure rather than throwing", () => {
+  it("header_matches reports an invalid pattern as unevaluated rather than throwing", () => {
     // A caller-supplied pattern is untrusted input. An exception here would abort
-    // the whole assertion run, hiding the other results with it.
+    // the whole assertion run, hiding the other results with it — and a failure
+    // would hide it differently: "the header did not match" is a statement about
+    // a comparison that never ran.
     const outcome = only(withHeaders({ "content-type": "text/plain" }), {
       kind: "header_matches",
       target: "content-type",
       expected: "(",
     });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.message).toContain("invalid regular expression");
   });
@@ -250,6 +259,7 @@ describe("header assertions", () => {
       ["header_matches", { kind: "header_matches", target: "x-request-id", expected: "^a" }],
     ] as const)("%s names the gap rather than the service", (kind, spec) => {
       const outcome = only(narrowed({}, ["content-type", "date"]), spec as AssertionSpec);
+      expect(outcome.evaluated, kind).toBe(false);
       expect(outcome.passed).toBe(false);
       expect(outcome.message, kind).toContain("was not looked at");
       // Both halves matter: what happened, and which names a caller *can* assert
@@ -276,8 +286,39 @@ describe("header assertions", () => {
         target: "Content-Type",
         expected: "text/plain",
       });
+      expect(outcome.evaluated).toBe(true);
       expect(outcome.passed).toBe(true);
       expect(outcome.observed).toBe("text/plain");
+    });
+
+    it("distinguishes a name nobody looked at from one the peer left out", () => {
+      // Both come back with `observed: undefined`, and the whole point of the
+      // field is that they are different facts: the first is a gap in the
+      // client, the second is a fact about the response.
+      const unread = only(narrowed({}, ["content-type"]), {
+        kind: "header_exists",
+        target: "x-request-id",
+      });
+      const absent = only(narrowed({}, ["content-type"]), {
+        kind: "header_exists",
+        target: "content-type",
+      });
+      expect([unread.evaluated, absent.evaluated]).toEqual([false, true]);
+      expect(unread.message).not.toBe(absent.message);
+    });
+
+    it("does not negate a name nobody looked at into a pass", () => {
+      // `!header:…` against a name outside the client's list used to pass: the
+      // check never ran, `passed` was false, and negation turned that false into
+      // a true — the strongest claim in the vocabulary resting on nothing.
+      const outcome = only(narrowed({}, ["content-type"]), {
+        kind: "header_exists",
+        target: "x-request-id",
+        negate: true,
+      });
+      expect(outcome.evaluated).toBe(false);
+      expect(outcome.passed).toBe(false);
+      expect(outcome.message.startsWith("negated: ")).toBe(true);
     });
 
     it("treats an absent list as the whole response, which is what the other paths read", () => {
@@ -313,12 +354,17 @@ describe("body assertions", () => {
     expect(outcome.message).toContain("degraded");
   });
 
-  it("body_contains fails, rather than matching, when no body was recorded", () => {
+  it("body_contains reports a missing body instead of a length for it", () => {
     // `String(undefined)` is "undefined", so a body check against a missing body
-    // must short-circuit instead of searching a string that does not exist.
+    // must short-circuit instead of searching a string that does not exist. The
+    // message used to read `body length 0` — a length for a body nobody
+    // recorded, and the number that made `body_bytes_under` pass.
     const outcome = only(exchange(), { kind: "body_contains", expected: "healthy" });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.observed).toBeUndefined();
+    expect(outcome.message).toContain("no response body was recorded");
+    expect(outcome.message).not.toContain("length 0");
   });
 
   it("body_matches passes when the body matches the pattern", () => {
@@ -336,8 +382,9 @@ describe("body assertions", () => {
     expect(outcome.observed).toBe("not ready");
   });
 
-  it("body_matches reports an invalid pattern as a failure rather than throwing", () => {
+  it("body_matches reports an invalid pattern as unevaluated rather than throwing", () => {
     const outcome = only(withBody("anything"), { kind: "body_matches", expected: "[" });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.message).toContain("invalid regular expression");
   });
@@ -384,14 +431,37 @@ describe("JSON path assertions", () => {
     expect(outcome.message).toBe("$.nope is absent, expected 1");
   });
 
-  it("body_json_path_equals fails when the body is not JSON at all", () => {
+  it("body_json_path_equals reports a body that is not JSON as unevaluated", () => {
     const outcome = only(exchange({ responseBody: Buffer.from("<html>", "utf8") }), {
       kind: "body_json_path_equals",
       target: "$.ok",
       expected: true,
     });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.message).toContain("not valid JSON");
+  });
+
+  it("separates a body that is not JSON from one that was never recorded", () => {
+    // "response body is not valid JSON" about a body nobody recorded is a claim
+    // about content that does not exist, and it sends the caller looking for a
+    // serialization bug instead of a response that never arrived.
+    const outcome = only(exchange({ responseBody: undefined }), {
+      kind: "body_json_path_equals",
+      target: "$.ok",
+      expected: true,
+    });
+    expect(outcome.evaluated).toBe(false);
+    expect(outcome.message).toContain("no response body was recorded");
+  });
+
+  it("treats an empty body as absent rather than as invalid JSON", () => {
+    const outcome = only(exchange({ responseBody: Buffer.alloc(0) }), {
+      kind: "body_json_path_exists",
+      target: "$.ok",
+    });
+    expect(outcome.evaluated).toBe(false);
+    expect(outcome.message).toContain("no response body was recorded");
   });
 
   it("body_json_path_exists passes for a key that resolves", () => {
@@ -415,6 +485,7 @@ describe("JSON path assertions", () => {
       kind: "body_json_path_exists",
       target: "ok",
     });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.message).toContain("unsupported JSONPath");
   });
@@ -435,15 +506,44 @@ describe("measurement assertions", () => {
       kind: "body_bytes_under",
       expected: 4,
     });
+    expect(outcome.evaluated).toBe(true);
     expect(outcome.passed).toBe(false);
     expect(outcome.observed).toBe(4);
     expect(outcome.message).toContain("4");
   });
 
+  it("does not measure the size of a body nobody recorded", () => {
+    // `record.responseBody?.byteLength ?? 0` read an absent body as zero bytes,
+    // and zero is under every positive limit: this assertion passed on an
+    // exchange whose request never completed. The size of a body that is not
+    // there is not a number, so no limit can be compared against it.
+    const outcome = only(exchange({ responseBody: undefined }), {
+      kind: "body_bytes_under",
+      expected: 10,
+    });
+    expect(outcome.evaluated).toBe(false);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.observed).toBeUndefined();
+    expect(outcome.message).toContain("no response body was recorded");
+  });
+
+  it("does not compare a failed request's duration to a latency limit", () => {
+    // A record with no status is a request that never got a response line; the
+    // duration it carries is the time until it failed. Comparing that to a
+    // latency limit reports a connection failure as a fast service.
+    const outcome = only(exchange({ status: undefined, durationMs: 3 }), {
+      kind: "latency_under_ms",
+      expected: 100,
+    });
+    expect(outcome.evaluated).toBe(false);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.message).toContain("no response was recorded");
+  });
+
   it("latency_under_ms passes when the recorded duration is under the limit", () => {
-    expect(
-      only(exchange({ durationMs: 5 }), { kind: "latency_under_ms", expected: 10 }).passed,
-    ).toBe(true);
+    const outcome = only(exchange({ durationMs: 5 }), { kind: "latency_under_ms", expected: 10 });
+    expect(outcome.evaluated).toBe(true);
+    expect(outcome.passed).toBe(true);
   });
 
   it("latency_under_ms fails at or above the limit, naming the observed latency", () => {
@@ -499,6 +599,7 @@ describe("http_version_equals", () => {
       kind: "http_version_equals",
       expected: "2.0",
     });
+    expect(outcome.evaluated).toBe(false);
     expect(outcome.passed).toBe(false);
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("no http version was recorded");
@@ -543,6 +644,51 @@ describe("negate", () => {
     expect(outcome.passed).toBe(true);
     expect(outcome.observed).toBe(500);
     expect(outcome.expected).toBe(200);
+  });
+
+  it("does not manufacture a pass out of a check that never ran", () => {
+    // The one place where the third state was dangerous. A not-evaluated
+    // outcome carries `passed: false`, `!false` is `true`, and so a negated
+    // assertion over an exchange the engine could not read reported a pass —
+    // the strongest claim in the vocabulary resting on a request that never
+    // completed. Negation inverts a verdict; there was no verdict here.
+    const outcome = only(exchange({ status: undefined }), {
+      kind: "status_equals",
+      expected: 200,
+      negate: true,
+    });
+    expect(outcome.evaluated).toBe(false);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.message.startsWith("negated: ")).toBe(true);
+  });
+});
+
+describe("evaluated", () => {
+  it("is true for every kind on a record that carries every fact they need", () => {
+    // The control for the third state: if an evaluator's guard were widened,
+    // every assertion would quietly become "could not run" and the counts
+    // would read as clean. This pins the other end.
+    const complete = exchange({
+      status: 200,
+      httpVersion: "1.1",
+      responseHeaders: { "content-type": "application/json", "x-request-id": "abc" },
+      responseBody: Buffer.from('{"ok":true}', "utf8"),
+      durationMs: 5,
+    });
+    for (const kind of ASSERTION_KINDS) {
+      expect(only(complete, { kind, target: "$.ok", expected: 1 }).evaluated, kind).toBe(true);
+    }
+  });
+
+  it("is decided per assertion, not per exchange", () => {
+    // One exchange can answer one question and not another, and a single flag
+    // for the record would collapse the two into one verdict.
+    const outcomes = evaluateAssertions(exchange({ responseBody: undefined }), [
+      { kind: "status_equals", expected: 200 },
+      { kind: "body_bytes_under", expected: 10 },
+    ]);
+    expect(outcomes.map((outcome) => outcome.evaluated)).toEqual([true, false]);
+    expect(outcomes.map((outcome) => outcome.passed)).toEqual([true, false]);
   });
 });
 

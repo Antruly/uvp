@@ -1316,6 +1316,49 @@ describe("capture and assertion", () => {
     TIMEOUT,
   );
 
+  it(
+    "reports an assertion it could not evaluate as unanswered, not as a failure",
+    async () => {
+      // The check asks about a path the engine cannot walk, which is a limit of
+      // the check rather than a value that differed. Counted as a failure it
+      // reports the service as having answered something else, and counted as a
+      // pass it reports a check nobody performed.
+      const output = await call("uvp_http_request", {
+        url: `${fixture.origin}/hello`,
+        method: "GET",
+      });
+      const exchangeId = String(output["exchange_id"]);
+
+      const asserted = await call("uvp_assert_exchange", {
+        exchange_id: exchangeId,
+        assertions: [
+          { kind: "status_equals", expected: 200 },
+          { kind: "body_json_path_equals", target: "message", expected: "Hello, AI" },
+        ],
+      });
+      expectConforms("uvp_assert_exchange", asserted);
+      expect(asserted["passed"]).toBe(1);
+      expect(asserted["failed"]).toBe(0);
+      // One row per assertion that ran, so `passed + failed` is the row count
+      // rather than a number a reader has to reconcile against it.
+      expect((asserted["results"] as unknown[]).length).toBe(1);
+
+      const unknowns = asserted["unknowns"] as { question: string; blocked_by?: string }[];
+      expect(unknowns).toHaveLength(1);
+      expect(unknowns[0]?.question).toContain("body_json_path_equals");
+      expect(unknowns[0]?.blocked_by).toContain("unsupported JSONPath");
+
+      // The evidence says how much of what was asked for was examined, which is
+      // the field that stops a partial check reading as a whole one.
+      const coverage = (asserted["evidence"] as { coverage: Record<string, unknown> }[])[0]
+        ?.coverage;
+      expect(coverage?.["status"]).toBe("partial");
+      expect(coverage?.["examined"]).toBe(1);
+      expect(coverage?.["total"]).toBe(2);
+    },
+    TIMEOUT,
+  );
+
   it("refuses an exchange id that was never recorded, rather than inventing one", async () => {
     const code = await failureCodeOf("uvp_assert_exchange", {
       exchange_id: "exc_0000000000000000000000",
@@ -1818,6 +1861,102 @@ describe("the verification workflow", () => {
       const unknowns = output["unknowns"] as { reason: string; blocked_by?: string }[];
       expect(unknowns.length).toBeGreaterThan(0);
       expect(unknowns.map((entry) => entry.blocked_by).join(" ")).toContain("build failed");
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * Assertions the pass could not evaluate, kept out of the workflow's own
+ * describe because the subject is not what a verdict means but which checks are
+ * allowed to produce one.
+ *
+ * `failed` is a claim about the service and `verified` is a claim about the
+ * goal. A check that never ran can support neither, so it has to reach the
+ * caller as a third state — and these are the two ends of that slope: part of
+ * the goal unexamined, and all of it.
+ */
+describe("a verification pass whose assertions could not all be evaluated", () => {
+  it(
+    "does not count an assertion it could not evaluate as a failure, and says so",
+    async () => {
+      // `target: "message"` is not a JSONPath, so the engine cannot walk it and
+      // compares nothing. Before this was modelled, the pass reported
+      // `assertions_failed: 1` and status `failed` — a finding about the
+      // service derived from a limit of the check, which is the direction of
+      // error this framework exists to prevent.
+      const port = await freePort();
+      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
+
+      const output = await call("uvp_verify", {
+        path: harness.workspace,
+        run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+        requests: [
+          {
+            name: "hello",
+            method: "GET",
+            path: "/hello",
+            assertions: [
+              { kind: "status_equals", expected: 200 },
+              { kind: "body_json_path_equals", target: "message", expected: "Hello, AI" },
+            ],
+          },
+        ],
+      });
+      expectConforms("uvp_verify", output);
+      // Not `failed`, which is the defect; and not `verified`, which would be
+      // the same defect wearing the other face. The pass examined part of what
+      // it was asked to examine, and `partial` is that fact.
+      expect(output["status"]).toBe("partial");
+
+      const exchanges = output["exchanges"] as {
+        assertions_passed: number;
+        assertions_failed: number;
+        failures: string[];
+      }[];
+      expect(exchanges[0]?.assertions_passed).toBe(1);
+      expect(exchanges[0]?.assertions_failed).toBe(0);
+      // The reason belongs to the check, so it is not a failure of the service
+      // and has no place in the list of things the service did wrong.
+      expect(exchanges[0]?.failures).toEqual([]);
+
+      // It is still stated. A pass that quietly dropped the question would be
+      // reporting less than it was asked about without saying which part.
+      const unverified = output["unverified"] as { question: string; reason: string }[];
+      expect(unverified).toHaveLength(1);
+      expect(unverified[0]?.question).toContain("body_json_path_equals");
+      expect(unverified[0]?.question).toContain("hello");
+      expect(unverified[0]?.reason).toContain("could not be evaluated");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reports a pass whose every assertion was unevaluable as unknown, not as verified",
+    async () => {
+      // The end of the same slope. Nothing was compared, so nothing was
+      // established, and the pass says so rather than reporting the absence of
+      // failures as success.
+      const port = await freePort();
+      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
+
+      const output = await call("uvp_verify", {
+        path: harness.workspace,
+        run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+        requests: [
+          {
+            name: "hello",
+            method: "GET",
+            path: "/hello",
+            assertions: [{ kind: "body_json_path_exists", target: "message" }],
+          },
+        ],
+      });
+      expectConforms("uvp_verify", output);
+      expect(output["status"]).toBe("unknown");
+      const exchanges = output["exchanges"] as { assertions_passed: number }[];
+      expect(exchanges[0]?.assertions_passed).toBe(0);
+      expect((output["unverified"] as unknown[]).length).toBe(1);
     },
     TIMEOUT,
   );

@@ -29,6 +29,7 @@ import {
   websocketProbeContract,
 } from "../contracts/webToolContracts.js";
 import { toolNames } from "../contracts/toolContracts.js";
+import { unevaluatedQuestion } from "../application/assertions.js";
 import { verify } from "../application/VerificationService.js";
 import { readSavedBundle, reportedSide } from "../application/bundleFile.js";
 import type { SavedBundle } from "../application/bundleFile.js";
@@ -975,11 +976,46 @@ export const createToolHandlers = (
           })),
         });
 
+        // One unknown per assertion the engine could not run, asked the way the
+        // caller asked it. Without these, `passed: 0, failed: 0, results: []`
+        // over an exchange that recorded nothing is indistinguishable from a
+        // clean pass — the two states this framework exists to keep apart.
+        for (const outcome of evaluated.not_evaluated) {
+          recordUnknown(
+            recorder,
+            unevaluatedQuestion(outcome, "for this exchange"),
+            "not_attempted",
+            {
+              blockedBy: outcome.message,
+            },
+          );
+        }
+
+        const total = evaluated.results.length + evaluated.not_evaluated.length;
         record(recorder, {
           kind: "assertion",
           subject: { exchange_id: input.exchange_id },
-          observed: { passed: evaluated.passed, failed: evaluated.failed },
-          coverage: { scope: "assertions", status: "complete" },
+          observed: {
+            evaluated: evaluated.results.length,
+            passed: evaluated.passed,
+            failed: evaluated.failed,
+            not_evaluated: evaluated.not_evaluated.length,
+          },
+          // `partial` rather than `complete`, with the count, because the scope
+          // was named and only part of it was examined — which is the one thing
+          // `complete` must never mean.
+          coverage:
+            evaluated.not_evaluated.length === 0
+              ? { scope: "assertions", status: "complete" }
+              : {
+                  scope: "assertions",
+                  status: "partial",
+                  note:
+                    `${String(evaluated.not_evaluated.length)} of ${String(total)} assertion(s) could not be ` +
+                    "evaluated against this exchange; each one names its own reason",
+                  examined: evaluated.results.length,
+                  total,
+                },
           sources: [],
         });
 
@@ -991,7 +1027,10 @@ export const createToolHandlers = (
               "The assertions were evaluated against a recorded exchange, not against a live service.",
             ],
           }),
-          ...evaluated,
+          exchange_id: evaluated.exchange_id,
+          passed: evaluated.passed,
+          failed: evaluated.failed,
+          results: evaluated.results,
         };
       },
     ),

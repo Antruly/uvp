@@ -31,6 +31,19 @@ export interface AssertionOutcome {
   readonly kind: AssertionKind;
   readonly target: string | undefined;
   readonly passed: boolean;
+  /**
+   * Whether the check ran at all.
+   *
+   * Two states were not enough. An exchange whose request never completed has no
+   * status to compare, an HTTP/3 record carries only the response headers the
+   * probe asked for by name, and a caller-supplied pattern can be invalid — in
+   * all three the engine did not reach a verdict, and `passed: false` reports
+   * that as a verdict against the service. The caller's next move differs in
+   * each case, so the difference is a field rather than a word inside
+   * `message`: a bundle counts failed assertions, and a check that never ran
+   * must not be counted among them.
+   */
+  readonly evaluated: boolean;
   readonly observed: unknown;
   readonly expected: unknown;
   readonly message: string;
@@ -87,13 +100,26 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const bodyText = (record: ExchangeRecord): string | undefined =>
   record.responseBody === undefined ? undefined : record.responseBody.toString("utf8");
 
-const parseJsonBody = (record: ExchangeRecord): { parsed: boolean; value: unknown } => {
+/**
+ * Parse the body, or say why there is nothing to parse.
+ *
+ * An absent body and an unparseable one are separate reasons: `<html>` is a body
+ * the service sent that is not JSON, while an empty body is not a JSON document
+ * that failed to parse. Both stop a JSONPath assertion, and a caller reading
+ * "not valid JSON" about a body that was never recorded is reading a claim about
+ * content that does not exist.
+ */
+const parseJsonBody = (
+  record: ExchangeRecord,
+): { parsed: true; value: unknown } | { parsed: false; reason: string } => {
   const text = bodyText(record);
-  if (text === undefined || text.length === 0) return { parsed: false, value: undefined };
+  if (text === undefined || text.length === 0) {
+    return { parsed: false, reason: "no response body was recorded" };
+  }
   try {
     return { parsed: true, value: JSON.parse(text) };
   } catch {
-    return { parsed: false, value: undefined };
+    return { parsed: false, reason: "response body is not valid JSON" };
   }
 };
 
@@ -114,11 +140,44 @@ const looseEquals = (actual: unknown, expected: unknown): boolean => {
  */
 interface RawOutcome {
   readonly passed: boolean;
+  /** False when the evaluator never reached a verdict, and so never read the fact it compares. */
+  readonly evaluated: boolean;
   readonly observed: unknown;
   readonly message: string;
 }
 
 type RawEvaluator = (record: ExchangeRecord, spec: AssertionSpec) => RawOutcome;
+
+/**
+ * The verdict of a check that ran.
+ *
+ * A helper rather than three literals at each site, because `evaluated: true` is
+ * the claim each evaluator is making: it read the fact it was asked about and
+ * the fact decided the outcome. A site that cannot make that claim returns
+ * `notEvaluated` instead, and the two functions are the only way to build a
+ * `RawOutcome`.
+ */
+const verdict = (passed: boolean, observed: unknown, message: string): RawOutcome => ({
+  passed,
+  evaluated: true,
+  observed,
+  message,
+});
+
+/**
+ * A check that could not run, with the reason and nothing else.
+ *
+ * `passed` is false here in the sense of "not a pass" rather than "a failure":
+ * the message carries the difference, and `evaluated` is what a caller reads to
+ * tell the two apart. Everything routed through this function is a fact about
+ * the record or the request, never about the service.
+ */
+const notEvaluated = (message: string, observed: unknown = undefined): RawOutcome => ({
+  passed: false,
+  evaluated: false,
+  observed,
+  message,
+});
 
 const asText = (value: unknown): string => (typeof value === "string" ? value : String(value));
 
@@ -135,28 +194,27 @@ const matchPattern = (pattern: string, subject: string): { matched: boolean; inv
 
 const statusEquals: RawEvaluator = (record, spec) => {
   const observed = record.status;
-  if (observed === undefined) {
-    return { passed: false, observed, message: "no response status was recorded" };
-  }
-  return {
-    passed: looseEquals(observed, spec.expected),
-    observed,
-    message: `status ${String(observed)}`,
-  };
+  // No status line was parsed, so there was no status to compare. Reading
+  // `undefined` as "not 200" reports a request that never completed as a
+  // response of the wrong status, which is a finding about the service.
+  if (observed === undefined) return notEvaluated("no response status was recorded");
+  return verdict(looseEquals(observed, spec.expected), observed, `status ${String(observed)}`);
 };
 
 const statusIn: RawEvaluator = (record, spec) => {
   const allowed = Array.isArray(spec.expected) ? spec.expected : [];
   const observed = record.status;
-  return {
-    passed: observed !== undefined && allowed.some((value) => looseEquals(observed, value)),
+  const membership = `expected one of [${allowed.map(String).join(", ")}]`;
+  if (observed === undefined) return notEvaluated(`no response status was recorded, ${membership}`);
+  return verdict(
+    allowed.some((value) => looseEquals(observed, value)),
     observed,
     // Observation, then expectation. Phrased the other way round — "status 418
     // in [200, 204]" — the text reads as a true statement about a membership
     // test that just failed, and this message is what a caller is shown as the
     // reason for the failure.
-    message: `status ${String(observed)}, expected one of [${allowed.map(String).join(", ")}]`,
-  };
+    `status ${String(observed)}, ${membership}`,
+  );
 };
 
 /**
@@ -200,75 +258,70 @@ const notLookedAt = (record: ExchangeRecord, name: string): string =>
 
 const headerEquals: RawEvaluator = (record, spec) => {
   const { name, observed, lookedAt } = headerOf(record, spec);
-  if (!lookedAt) return { passed: false, observed, message: notLookedAt(record, name) };
-  if (observed === undefined)
-    return { passed: false, observed, message: `header ${name} is absent` };
-  return {
-    passed: looseEquals(observed, spec.expected),
-    observed,
-    message: `header ${name}=${observed}`,
-  };
+  if (!lookedAt) return notEvaluated(notLookedAt(record, name), observed);
+  // The name was read and the peer did not send it: a fact about the response,
+  // and a failure of this assertion.
+  if (observed === undefined) return verdict(false, observed, `header ${name} is absent`);
+  return verdict(looseEquals(observed, spec.expected), observed, `header ${name}=${observed}`);
 };
 
 const headerExists: RawEvaluator = (record, spec) => {
   const { name, observed, lookedAt } = headerOf(record, spec);
-  if (!lookedAt) return { passed: false, observed, message: notLookedAt(record, name) };
-  return {
-    passed: observed !== undefined,
+  if (!lookedAt) return notEvaluated(notLookedAt(record, name), observed);
+  return verdict(
+    observed !== undefined,
     observed,
     // The outcome decides the wording. A `header_exists` assertion fails
     // precisely when the header is absent, so a message that always reads
     // "present" would report the opposite of what was found.
-    message: observed === undefined ? `header ${name} is absent` : `header ${name} is present`,
-  };
+    observed === undefined ? `header ${name} is absent` : `header ${name} is present`,
+  );
 };
 
 const headerMatches: RawEvaluator = (record, spec) => {
   const { name, observed, lookedAt } = headerOf(record, spec);
-  if (!lookedAt) return { passed: false, observed, message: notLookedAt(record, name) };
-  if (observed === undefined)
-    return { passed: false, observed, message: `header ${name} is absent` };
+  if (!lookedAt) return notEvaluated(notLookedAt(record, name), observed);
+  if (observed === undefined) return verdict(false, observed, `header ${name} is absent`);
   const pattern = typeof spec.expected === "string" ? spec.expected : "";
   const { matched, invalid } = matchPattern(pattern, observed);
+  // A pattern that does not compile is a check that did not run. Reported as a
+  // failure it would read as "the header did not match", which is a statement
+  // about a value nobody compared — and under `negate` it read as a pass.
   if (invalid !== undefined) {
-    return { passed: false, observed, message: `invalid regular expression: ${invalid}` };
+    return notEvaluated(`invalid regular expression: ${invalid}`, observed);
   }
-  return {
-    passed: matched,
-    observed,
-    message: `header ${name}=${observed}, expected /${pattern}/`,
-  };
+  return verdict(matched, observed, `header ${name}=${observed}, expected /${pattern}/`);
 };
 
 const bodyContains: RawEvaluator = (record, spec) => {
   const observed = bodyText(record);
   const needle = asText(spec.expected);
-  return {
-    passed: observed !== undefined && observed.includes(needle),
-    observed: observed === undefined ? undefined : observed.slice(0, 512),
-    message: `body length ${String(observed?.length ?? 0)}, expected to contain ${JSON.stringify(needle)}`,
-  };
+  const expectation = `expected to contain ${JSON.stringify(needle)}`;
+  // The body is what a substring search needs and it is not here. Reading the
+  // absent body as zero bytes reported `body length 0` — a length for a body
+  // that was never recorded, and the number that makes a `body_bytes_under`
+  // assertion pass.
+  if (observed === undefined) return notEvaluated(`no response body was recorded, ${expectation}`);
+  return verdict(
+    observed.includes(needle),
+    observed.slice(0, 512),
+    `body length ${String(observed.length)}, ${expectation}`,
+  );
 };
 
 const bodyMatches: RawEvaluator = (record, spec) => {
   const observed = bodyText(record);
-  if (observed === undefined) {
-    return { passed: false, observed: undefined, message: "no response body was recorded" };
-  }
+  if (observed === undefined) return notEvaluated("no response body was recorded");
   const pattern = typeof spec.expected === "string" ? spec.expected : "";
   const { matched, invalid } = matchPattern(pattern, observed);
   if (invalid !== undefined) {
-    return {
-      passed: false,
-      observed: undefined,
-      message: `invalid regular expression: ${invalid}`,
-    };
+    return notEvaluated(`invalid regular expression: ${invalid}`, observed.slice(0, 512));
   }
-  return {
-    passed: matched,
-    observed: observed.slice(0, 512),
-    message: `body length ${String(observed.length)}, expected to match /${pattern}/`,
-  };
+  return verdict(
+    matched,
+    observed.slice(0, 512),
+    `body length ${String(observed.length)}, expected to match /${pattern}/`,
+  );
 };
 
 /** Resolve the JSONPath both JSON assertions share, or explain why it did not run. */
@@ -277,9 +330,9 @@ const jsonPathValue = (
   spec: AssertionSpec,
 ): { ok: true; value: unknown; path: string } | { ok: false; message: string } => {
   const path = spec.target ?? "$";
-  const { parsed, value } = parseJsonBody(record);
-  if (!parsed) return { ok: false, message: "response body is not valid JSON" };
-  const result = evaluateJsonPath(value, path);
+  const body = parseJsonBody(record);
+  if (!body.parsed) return { ok: false, message: body.reason };
+  const result = evaluateJsonPath(body.value, path);
   if (result.unsupported !== undefined) {
     return { ok: false, message: `unsupported JSONPath: ${result.unsupported}` };
   }
@@ -297,54 +350,68 @@ const shown = (value: unknown): string => (value === undefined ? "absent" : JSON
 
 const bodyJsonPathEquals: RawEvaluator = (record, spec) => {
   const resolved = jsonPathValue(record, spec);
-  if (!resolved.ok) return { passed: false, observed: undefined, message: resolved.message };
+  // Nothing was resolved, so nothing was compared: the body is absent, is not
+  // JSON, or holds a path this engine cannot walk. All three are limits of the
+  // check, not values that differed from the expectation.
+  if (!resolved.ok) return notEvaluated(resolved.message);
   // The expectation is in the message, as it is in every sibling evaluator's.
   // In a verification bundle the message is the *only* place a failure is
   // described — `exchanges[].failures` is a list of strings — so a message that
   // reports what was there and not what was asked for leaves a reader who did
   // not write the assertion with nothing to compare against.
   const expectation = shown(spec.expected);
-  return {
-    passed: looseEquals(resolved.value, spec.expected),
-    observed: resolved.value,
-    message:
-      resolved.value === undefined
-        ? `${resolved.path} is absent, expected ${expectation}`
-        : `${resolved.path} = ${shown(resolved.value)}, expected ${expectation}`,
-  };
+  return verdict(
+    looseEquals(resolved.value, spec.expected),
+    resolved.value,
+    resolved.value === undefined
+      ? `${resolved.path} is absent, expected ${expectation}`
+      : `${resolved.path} = ${shown(resolved.value)}, expected ${expectation}`,
+  );
 };
 
 const bodyJsonPathExists: RawEvaluator = (record, spec) => {
   const resolved = jsonPathValue(record, spec);
-  if (!resolved.ok) return { passed: false, observed: undefined, message: resolved.message };
-  return {
-    passed: resolved.value !== undefined,
-    observed: resolved.value,
-    message:
-      resolved.value === undefined
-        ? `${resolved.path} is absent`
-        : `${resolved.path} = ${JSON.stringify(resolved.value)}`,
-  };
+  if (!resolved.ok) return notEvaluated(resolved.message);
+  return verdict(
+    resolved.value !== undefined,
+    resolved.value,
+    resolved.value === undefined
+      ? `${resolved.path} is absent`
+      : `${resolved.path} = ${JSON.stringify(resolved.value)}`,
+  );
 };
 
 const bodyBytesUnder: RawEvaluator = (record, spec) => {
-  const observed = record.responseBody?.byteLength ?? 0;
   const limit = asNumber(spec.expected);
-  return {
-    passed: observed < limit,
+  // `?? 0` reported a body nobody recorded as zero bytes, and zero is under
+  // every positive limit — so this assertion passed on an exchange whose
+  // request never completed. The size of a body that is not there is not a
+  // number, and no limit can be measured against it.
+  const observed = record.responseBody?.byteLength;
+  if (observed === undefined) {
+    return notEvaluated(`no response body was recorded, limit ${String(limit)} bytes`);
+  }
+  return verdict(
+    observed < limit,
     observed,
-    message: `body ${String(observed)} bytes, limit ${String(limit)}`,
-  };
+    `body ${String(observed)} bytes, limit ${String(limit)}`,
+  );
 };
 
 const latencyUnderMs: RawEvaluator = (record, spec) => {
   const observed = record.durationMs;
   const limit = asNumber(spec.expected);
-  return {
-    passed: observed < limit,
+  // A record with no status is a request that never got a response line, and
+  // the duration it carries is the time until it failed. Comparing that to a
+  // latency limit reports a connection failure as a fast service.
+  if (record.status === undefined) {
+    return notEvaluated(`no response was recorded, limit ${String(limit)} ms`, observed);
+  }
+  return verdict(
+    observed < limit,
     observed,
-    message: `latency ${String(observed)} ms, limit ${String(limit)}`,
-  };
+    `latency ${String(observed)} ms, limit ${String(limit)}`,
+  );
 };
 
 /**
@@ -359,20 +426,16 @@ const httpVersionEquals: RawEvaluator = (record, spec) => {
   const observed = record.httpVersion;
   const expectation = shown(spec.expected);
   if (observed === undefined) {
-    return {
-      passed: false,
-      observed,
-      message: `no http version was recorded, expected ${expectation}`,
-    };
+    return notEvaluated(`no http version was recorded, expected ${expectation}`);
   }
-  return {
-    passed: observed === spec.expected,
+  return verdict(
+    observed === spec.expected,
     observed,
     // Exact, not `looseEquals`: `"2.0"` and `"2"` are the observed and the
     // requested spellings of one protocol, and treating them as equal here is
     // exactly the confusion this assertion exists to catch.
-    message: `http version ${observed}, expected ${expectation}`,
-  };
+    `http version ${observed}, expected ${expectation}`,
+  );
 };
 
 /**
@@ -407,7 +470,13 @@ export const evaluateAssertion = (
     kind: spec.kind,
     target: spec.target,
     expected: spec.expected,
-    passed: negated ? !raw.passed : raw.passed,
+    // Negation is not applied to a check that did not run. `!false` is `true`,
+    // so a negated assertion over an exchange the engine could not read
+    // reported a pass — the one outcome here that claims the most while resting
+    // on nothing. A `!header:…` against a name nobody looked at, and a
+    // `!body~=…` against a body that was never recorded, both used to pass.
+    passed: raw.evaluated && (negated ? !raw.passed : raw.passed),
+    evaluated: raw.evaluated,
     observed: raw.observed,
     message: negated ? `negated: ${raw.message}` : raw.message,
   };
@@ -417,6 +486,36 @@ export const evaluateAssertions = (
   record: ExchangeRecord,
   specs: readonly AssertionSpec[],
 ): readonly AssertionOutcome[] => specs.map((spec) => evaluateAssertion(record, spec));
+
+/** A value as it fits in a question, capped so a document cannot become one. */
+const brief = (value: unknown): string => {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length <= 80 ? text : `${text.slice(0, 80)}…`;
+};
+
+/**
+ * The question a check that could not run leaves behind.
+ *
+ * Written from the caller's own assertion rather than from the engine's message,
+ * because the message is the *reason* and goes in the `blocked_by` of the
+ * unknown this becomes; the question is the line a reader sees first, and it has
+ * to name the check that was asked for and not made. `subject` says which
+ * exchange it was asked of, since one verification pass asks the same assertion
+ * of several, and a list of identical questions would be unreadable.
+ */
+export const unevaluatedQuestion = (
+  outcome: {
+    readonly kind: string;
+    readonly target?: string | undefined;
+    readonly expected?: unknown;
+  },
+  subject: string,
+): string =>
+  `Does ${[
+    `\`${outcome.kind}\``,
+    ...(outcome.target === undefined ? [] : [`on \`${outcome.target}\``]),
+    ...(outcome.expected === undefined ? [] : [`(${brief(outcome.expected)})`]),
+  ].join(" ")} hold ${subject}?`;
 
 /** Percentile over an already-collected sample, using nearest-rank. */
 export const percentile = (sortedSamples: readonly number[], fraction: number): number => {

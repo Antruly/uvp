@@ -1365,6 +1365,22 @@ export class WebService {
       expected?: unknown;
       message: string;
     }[];
+    /**
+     * The assertions this exchange could not answer, with the engine's reason.
+     *
+     * Separate from `results` rather than a `false` inside it, so that the
+     * counts a caller reads are counts of checks that ran: `passed + failed`
+     * equals `results.length`, which it would not if an unevaluable assertion
+     * sat in `results` while being absent from `failed`. The handler turns each
+     * of these into an envelope unknown, which is where this framework says
+     * what it did not establish.
+     */
+    not_evaluated: {
+      kind: string;
+      target?: string;
+      expected?: unknown;
+      message: string;
+    }[];
   } {
     const record = this.options.store.exchange(input.exchange_id);
     if (record === undefined) {
@@ -1389,11 +1405,12 @@ export class WebService {
       })),
     );
 
+    const evaluated = outcomes.filter((outcome) => outcome.evaluated);
     return {
       exchange_id: input.exchange_id,
-      passed: outcomes.filter((outcome) => outcome.passed).length,
-      failed: outcomes.filter((outcome) => !outcome.passed).length,
-      results: outcomes.map((outcome) => ({
+      passed: evaluated.filter((outcome) => outcome.passed).length,
+      failed: evaluated.filter((outcome) => !outcome.passed).length,
+      results: evaluated.map((outcome) => ({
         kind: outcome.kind,
         ...(outcome.target === undefined ? {} : { target: outcome.target }),
         passed: outcome.passed,
@@ -1401,6 +1418,14 @@ export class WebService {
         ...(outcome.expected === undefined ? {} : { expected: outcome.expected }),
         message: outcome.message,
       })),
+      not_evaluated: outcomes
+        .filter((outcome) => !outcome.evaluated)
+        .map((outcome) => ({
+          kind: outcome.kind,
+          ...(outcome.target === undefined ? {} : { target: outcome.target }),
+          ...(outcome.expected === undefined ? {} : { expected: outcome.expected }),
+          message: outcome.message,
+        })),
     };
   }
 }

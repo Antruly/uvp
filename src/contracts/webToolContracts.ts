@@ -776,7 +776,10 @@ export const assertExchangeContract = defineTool({
   description:
     "Evaluate assertions against an exchange recorded earlier in this session, without sending " +
     "any traffic. Returns each assertion's outcome with the observed value behind it, so a " +
-    "failure shows what was actually there rather than only that it differed.",
+    "failure shows what was actually there rather than only that it differed. An assertion the " +
+    "record cannot answer — a header the client never read, a body that was never recorded — is " +
+    "reported as an unknown with the reason and left out of both counts, because `passed` and " +
+    "`failed` are claims about checks that ran.",
   kind: "web",
   inputSchema: z.object({
     exchange_id: exchangeIdSchema,

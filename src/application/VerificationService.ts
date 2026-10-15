@@ -1,6 +1,7 @@
 import { canonicalJson, newId, sha256 } from "../domain/identity.js";
 import {
   coverageComplete,
+  coveragePartial,
   coverageUnknown,
   createRecorder,
   endpointSource,
@@ -11,7 +12,7 @@ import {
   recordUnknown,
 } from "./evidenceHelpers.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
-import { evaluateAssertions } from "./assertions.js";
+import { evaluateAssertions, unevaluatedQuestion } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
 import type { TlsVerification } from "./httpClient.js";
 import type { ToolchainIdentity } from "./ToolchainProvider.js";
@@ -417,11 +418,32 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
             })),
           );
 
-    evaluated += outcomes.length;
+    // A check that could not run is neither passed nor failed, and the two
+    // counters below are what `verificationStatus` reads. Counting an
+    // unevaluable assertion as a pass was the whole of this defect: the bundle
+    // reported `verified` for a pass that compared nothing.
+    const unrun = outcomes.filter((outcome) => !outcome.evaluated);
+    const passedCount = outcomes.filter((outcome) => outcome.passed).length;
+    evaluated += outcomes.length - unrun.length;
     const failures = outcomes
-      .filter((outcome) => !outcome.passed)
+      .filter((outcome) => outcome.evaluated && !outcome.passed)
       .map((outcome) => outcome.message);
     failed += failures.length;
+
+    for (const outcome of unrun) {
+      const question = unevaluatedQuestion(
+        outcome,
+        `for ${spec.name} (${spec.method} ${spec.path})`,
+      );
+      // Both places, for the same reason the request-failure branch above
+      // writes both: `unverified` is what a reader of the bundle sees, and the
+      // envelope's `unknowns` is what a reader of the tool result sees.
+      unverified.push({
+        question,
+        reason: `the assertion could not be evaluated: ${outcome.message}`,
+      });
+      recordUnknown(recorder, question, "not_attempted", { blockedBy: outcome.message });
+    }
 
     if (spec.assertions.length === 0) {
       unverified.push({
@@ -439,14 +461,23 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       observed: {
         status: exchange.status,
         assertions: outcomes.length,
-        passed: outcomes.length - failures.length,
+        passed: passedCount,
         failed: failures.length,
+        not_evaluated: unrun.length,
       },
       derived: { elapsed_ms: Date.now() - startedAt },
       coverage:
         outcomes.length === 0
           ? coverageUnknown(`${spec.name} assertions`, "no assertions were supplied")
-          : coverageComplete(`${spec.name} assertions`),
+          : unrun.length === 0
+            ? coverageComplete(`${spec.name} assertions`)
+            : coveragePartial(
+                `${spec.name} assertions`,
+                `${String(unrun.length)} of ${String(outcomes.length)} assertion(s) could not be evaluated ` +
+                  "against this exchange; each one names its own reason",
+                passedCount + failures.length,
+                outcomes.length,
+              ),
       sources: [endpointSource(url)],
       limitations: failures,
     });
@@ -459,7 +490,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       // request for `2` reached a service that only speaks `1.1`.
       http_version: exchange.http_version,
       elapsed_ms: Date.now() - startedAt,
-      assertions_passed: outcomes.length - failures.length,
+      assertions_passed: passedCount,
       assertions_failed: failures.length,
       failures,
       ...certificateOf(exchange.tls),
