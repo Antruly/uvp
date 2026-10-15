@@ -1,8 +1,8 @@
 import { accessSync, constants } from "node:fs";
 import { resolve } from "node:path";
 
-import { runProcess } from "../local/processRunner.js";
-import type { ProcessOutcome, RunProcessOptions } from "../local/processRunner.js";
+import { runProcess } from "../processRunner.js";
+import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { closeFrameReceived } from "./closeCodes.js";
 import type {
   NativeProbeAvailability,

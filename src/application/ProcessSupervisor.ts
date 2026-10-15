@@ -11,10 +11,12 @@
  * matter what the toolchain port promises.
  *
  * So the *shape* lives here, in the layer that needs it, and the implementation
- * stays in `toolchains/local/`. What moves is small — a type, an options bag, the
- * three stop outcomes, and the one function that puts an outcome into words.
- * `runProcess` and `startSupervised` do not move: they are Node's `spawn`, and
- * that is a provider detail.
+ * stays below it in `toolchains/`. What moves is small — a type, an options bag,
+ * the three stop outcomes, and the one function that puts an outcome into words.
+ * `runProcess` and `startSupervised` stay out of `application`: they are Node's
+ * `spawn`, which is a host detail rather than a workflow one. They have since
+ * moved within `toolchains/` — see `toolchains/processRunner.ts` for why they are
+ * no longer filed under `local/`.
  *
  * ## Why `describeStop` is here rather than in a caller
  *

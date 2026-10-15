@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import { runProcess } from "../../../src/toolchains/local/processRunner.js";
+import { runProcess } from "../../../src/toolchains/processRunner.js";
 
 /**
  * What the kernel reports back.

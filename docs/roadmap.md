@@ -128,32 +128,47 @@ implicit.
 | ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                          |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                      |
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                      |
-| ⬜  | `oxlint` once failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                           |
+| ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                      |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
-rather than as a bug report. On 2026-10-15 `npm run check:pr` failed in the `lint`
-task with exactly one error and no rule name:
+rather than as a bug report. It has been seen twice, both times as the only error
+in the `lint` task, with no rule name:
 
 ```
 x Failed to open file .../dist/toolchains/local/processRunner.js with error
-  "No such file or directory (os error 2)"
+  "No such file or directory (os error 2)"          # 2026-10-15, first
+x Failed to open file .../dist/toolchains/processRunner.js with error
+  "No such file or directory (os error 2)"          # 2026-10-15, second
 Found 22 warnings and 1 error.
 ```
 
-`compile` deletes and rewrites `dist/` and runs concurrently with `lint` in
-`check:ci`, which is the only suspicious fact available. It is not a diagnosis:
-a stable `dist/` **is** skipped — a file with a deliberate `no-var` violation
-placed in `dist/` is not reported, and `dist/` is in both `.gitignore` and
-`.oxlintrc.json`'s `ignorePatterns` — and three reproduction attempts (74 oxlint
-runs concurrent with an actively churning `dist/`, including one against a real
-`npm run compile`) produced no failure at all. Re-running the identical gate on
-the identical tree passed 11 of 11 tasks, 22 warnings and 0 errors, 604 tests.
+Read the two lines as one observation rather than two: the name tracks whatever
+path that file occupies at the time, so it is not a stale reference to a file
+that has moved. In both cases the file existed and was readable immediately
+afterwards, and in both cases `dist/` had been rebuilt out of band shortly
+before the gate — which is consistent with, but does not establish, a window in
+which a just-written file is not yet openable.
 
-So the honest state is: seen once, not understood, not reproduced. Worth a row
+What the task graph does say is that `compile` runs _inside_ `check:ci` and
+concurrently with `lint`: `knip` and `docs:check` both `dependsOn: ["compile"]`,
+and `compile` is `clean-build-output.mjs` (which deletes `dist/`) followed by
+`tsc` (which rewrites it). An earlier version of this row said `compile` was not
+part of the gate at all; that was wrong, and the graph is the check.
+
+It is still not a diagnosis. A stable `dist/` **is** skipped — a file with a
+deliberate `no-var` violation placed in `dist/` is not reported, and `dist/` is
+in both `.gitignore` and `.oxlintrc.json`'s `ignorePatterns` — and three
+reproduction attempts (74 oxlint runs concurrent with an actively churning
+`dist/`, including one against a real `npm run compile`) produced no failure at
+all. Both times, re-running the identical gate on the identical tree passed: 11
+of 11 tasks, 22 warnings and 0 errors, and on the second occasion 617 tests.
+
+So the honest state is: seen twice, not understood, not reproduced. Worth a row
 because an intermittent gate teaches people to re-run until it is green, which
 is how a real failure gets waved through — but the next person should start from
-"it happened once and nobody knows why" rather than from a mechanism this row
-invented.
+"it has happened twice and nobody knows why" rather than from a mechanism this
+row invented. The two occurrences are alike enough to be one bug and alike
+enough to be the same file, which is the most that can be said.
 
 The supervision row was the one place the dependency direction was inverted:
 `WorkspaceService` called `startSupervised` from `toolchains/local/processRunner`,

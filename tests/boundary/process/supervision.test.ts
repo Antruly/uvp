@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import { runProcess, startSupervised } from "../../../src/toolchains/local/processRunner.js";
-import type { ProcessOutcome } from "../../../src/toolchains/local/processRunner.js";
+import { runProcess, startSupervised } from "../../../src/toolchains/processRunner.js";
+import type { ProcessOutcome } from "../../../src/toolchains/processRunner.js";
 
 /**
  * Supervision: start, stop, and the process that outlives the supervisor.

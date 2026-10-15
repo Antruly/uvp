@@ -8,7 +8,7 @@ import type {
   NativeProbeOutcome,
   NativeProbeReport,
 } from "../../application/NativeWebSocketProbe.js";
-import type { ProcessOutcome, RunProcessOptions } from "../local/processRunner.js";
+import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 
 /**
  * The runner, with the child scripted.

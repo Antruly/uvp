@@ -1,5 +1,4 @@
-import { access, readFile, stat } from "node:fs/promises";
-import { constants } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -18,8 +17,9 @@ import type {
 } from "../../application/ToolchainProvider.js";
 import { cancelledFailure } from "../../domain/errors.js";
 import { sha256 } from "../../domain/identity.js";
+import { isWindows, versionOf, whichOnPath } from "../host.js";
+import { runProcess } from "../processRunner.js";
 import { parseDiagnostics } from "./diagnostics.js";
-import { runProcess } from "./processRunner.js";
 
 /**
  * What a cancelled inspection, discovery, or build reports.
@@ -34,9 +34,6 @@ const DISCOVERY_CANCELLED =
   "The libuvcpp search was cancelled before it finished, so whether one is installed is unknown.";
 const BUILD_CANCELLED =
   "The build was cancelled before it finished, so it says nothing about whether this workspace compiles.";
-
-const isWindows = process.platform === "win32";
-const EXE = isWindows ? ".exe" : "";
 
 const COMPILER_CANDIDATES: readonly { id: string; commands: readonly string[] }[] = isWindows
   ? [
@@ -55,37 +52,6 @@ const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[
   { id: "ninja", commands: ["ninja"] },
   { id: "make", commands: ["make", "gmake"] },
 ];
-
-const whichOnPath = async (command: string): Promise<string | undefined> => {
-  const pathValue = process.env["PATH"];
-  if (pathValue === undefined) return undefined;
-  for (const dir of pathValue.split(delimiter)) {
-    if (dir === "") continue;
-    const candidate = join(dir, command + (isWindows && !command.endsWith(EXE) ? EXE : ""));
-    try {
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Not here; keep looking.
-    }
-  }
-  return undefined;
-};
-
-const versionOf = async (command: string, args: readonly string[]): Promise<string | undefined> => {
-  const outcome = await runProcess({ command, args, timeoutMs: 10_000 }).catch(() => undefined);
-  if (
-    outcome === undefined ||
-    (outcome.exitCode !== 0 && outcome.stdout === "" && outcome.stderr === "")
-  ) {
-    return undefined;
-  }
-  const firstLine = `${outcome.stdout}\n${outcome.stderr}`
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return firstLine;
-};
 
 /**
  * Candidate roots for a libuvcpp installation.

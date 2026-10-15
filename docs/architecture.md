@@ -106,6 +106,28 @@ would need a workflow. `application` importing `toolchains` breaks only when
 somebody adds the second provider — that is, at exactly the moment the port was
 supposed to pay off.
 
+### The same species one layer down
+
+Fixing the port left the module where it was, and the module was in the wrong
+place for the same reason. `toolchains/local/processRunner.ts` was not about the
+local provider: `toolchains/native/NativeProbeRunner.ts` already imported
+`runProcess` from it, so the `local` in that path was already a lie. It is how
+this host starts a process at all, which is what every provider needs to run a
+compiler, a probe, or a service.
+
+It now lives at `toolchains/processRunner.ts`, beside `toolchains/host.ts` — the
+`whichOnPath` and `versionOf` that `local/` had kept private and that a
+`container/` provider looking for `docker` needs just as much. `local/` imports
+both rather than declaring its own, which is the part that matters: two
+implementations of "is this command on the path" would eventually disagree about
+`PATHEXT`, about an empty `PATH` entry, or about a file that exists and is not
+executable, and the disagreement would surface as one provider finding a compiler
+the other cannot — reading as a toolchain bug rather than a lookup bug.
+
+The pattern to notice is that both cases looked like a private helper and were
+really a shared capability filed under whichever provider needed it first. The
+test is whether the module mentions the provider it sits under. Neither does.
+
 ## The case that shaped the rules: `UvpFeature`
 
 The feature vocabulary — `tls`, `http2`, `http3`, `grpc`, `websocket`, `soap`,

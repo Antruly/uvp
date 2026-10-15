@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import type { ProcessSupervisor, StopOutcome } from "../../application/ProcessSupervisor.js";
+import type { ProcessSupervisor, StopOutcome } from "../application/ProcessSupervisor.js";
 
 /**
  * Subprocess supervision, in one place.
@@ -10,6 +10,19 @@ import type { ProcessSupervisor, StopOutcome } from "../../application/ProcessSu
  * reinvented versions disagree about whether a timeout is an exit code, a
  * signal, or a throw. uvp needs one answer, because a build that timed out must
  * be distinguishable from a build that failed.
+ *
+ * ## Why this is at the `toolchains/` root rather than under `local/`
+ *
+ * It was under `local/` until a second provider needed it. `native/` already
+ * imported `runProcess` from `../local/processRunner`, so the "local" in that
+ * path was already a lie: the file is how this host starts a process at all, and
+ * every provider that runs a compiler, a probe, or a service needs exactly it.
+ * Left where it was, each new provider would import the local provider to get a
+ * generic capability, and the third one would be tempted to copy it instead.
+ *
+ * Nothing here is `local`-specific, which is the test for the location: no paths
+ * of its own, no command lookup of its own (it hands a command to `spawn` and
+ * lets that resolve it), and no assumption about what the child is.
  */
 export interface ProcessOutcome {
   readonly command: string;

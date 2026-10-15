@@ -1,4 +1,4 @@
-import { startSupervised } from "../../../../dist/toolchains/local/processRunner.js";
+import { startSupervised } from "../../../../dist/toolchains/processRunner.js";
 
 /**
  * A detached service and the parent that let go of it.
