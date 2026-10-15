@@ -242,9 +242,17 @@ export const websocketCommand: ToolCommand = {
   summary: "Open a WebSocket, send frames, and report the handshake and frame log.",
   usage:
     "uvp ws URL [--send TEXT]... [--header NAME:VALUE]... [--subprotocol NAME]...\n" +
-    "       [--max-frames N] [--idle-timeout MS] [--expect-frame TEXT]... [--no-tls] [--json]",
+    "       [--stack node|libuvcpp] [--max-frames N] [--idle-timeout MS] [--expect-frame TEXT]...\n" +
+    "       [--no-tls] [--json]",
   positionals: [{ name: "URL", description: "ws:// or wss:// URL." }],
   flags: [
+    {
+      name: "stack",
+      type: "string" as const,
+      value: "NAME",
+      description:
+        "Which WebSocket client probes: node (default) or libuvcpp, the stack services link against.",
+    },
     {
       name: "send",
       type: "list",
@@ -286,9 +294,15 @@ export const websocketCommand: ToolCommand = {
     "A rejected upgrade exits 1: the probe ran, and `upgraded: false` with the handshake response is",
     "its answer.",
     "",
-    "--expect-frame is sent to the probe, which matches it against received frames only and reports",
-    "which expectation failed. It exits 1 when one did, and the frame log is printed either way — a",
-    "failed expectation still leaves you the evidence.",
+    "--expect-frame is matched by uvp, once, against received frames only — a frame uvp sent is not",
+    "evidence that the peer spoke — and the result names which expectation failed. It exits 1 when",
+    "one did, and the frame log is printed either way: a failed expectation still leaves you the",
+    "evidence.",
+    "",
+    "--stack libuvcpp probes with the WebSocket client a generated service links against, as a",
+    "separate process. It cannot do wss://, --header, --subprotocol, or a paced send, and it reports",
+    "no handshake status or headers: those are listed as not observable rather than omitted. The",
+    "probe process is built by `npm run build:native-probe`; a host without it exits 2, saying so.",
   ],
   input: (parsed) => {
     const url = requirePositional(parsed, 0, "a WebSocket URL", "uvp ws ws://127.0.0.1:8080/echo");
@@ -297,6 +311,7 @@ export const websocketCommand: ToolCommand = {
     return {
       url,
       ...headersSection(parsed),
+      ...optional("stack", asString(parsed, "stack")),
       ...(subprotocols.length === 0 ? {} : { subprotocols }),
       ...(sends.length === 0 ? {} : { send: sends.map((payload) => ({ payload })) }),
       ...optional("max_frames", asNumber(parsed, "max-frames")),

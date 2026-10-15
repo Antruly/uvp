@@ -208,8 +208,10 @@ cmake --install libuvcpp/build
 ```
 
 `UVCPP_ENABLE_CAPI=ON` is not needed for generated projects. It is on in CI
-because `uvcpp-probe.node` — the native probe module — reaches libuvcpp through
-its C ABI rather than through C++ name mangling.
+because `uvcpp-probe` — the program that answers the WebSocket probe's
+`libuvcpp` stack — reaches libuvcpp through its C ABI rather than through C++
+name mangling. It is built separately from uvp (`npm run build:native-probe`)
+and is not needed to use any other tool.
 
 To confirm what you built, ask the config header directly:
 

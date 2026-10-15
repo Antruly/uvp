@@ -6,12 +6,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { ASSERTION_KINDS } from "../../src/application/assertions.js";
+import type {
+  NativeProbeAvailability,
+  NativeWebSocketProbe,
+} from "../../src/application/NativeWebSocketProbe.js";
 import { createToolHandlers, handlerFor } from "../../src/composition/toolHandlers.js";
 import { createUvpServices } from "../../src/composition/uvpServices.js";
 import { TOOL_CONTRACTS, toolContract } from "../../src/contracts/toolContracts.js";
 import type { ToolContract } from "../../src/contracts/toolContractTypes.js";
 import { sha256 } from "../../src/domain/identity.js";
 import { toUvpError } from "../../src/domain/errors.js";
+import { NativeProbeRunner } from "../../src/toolchains/native/NativeProbeRunner.js";
 import { freePort } from "../support/ports.js";
 import {
   createFakeToolchain,
@@ -626,6 +631,413 @@ describe("the websocket probe", () => {
       // 1000 — would turn "the peer vanished" into "the peer said goodbye".
       expect(output["closed_cleanly"]).toBe(false);
       expect("close" in output).toBe(false);
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * Reports the real probe wrote, recorded rather than invented.
+ *
+ * Each was produced by `native/uvcpp-probe` — built against libuvcpp 1.7.0 —
+ * driven against the conformance fixture, and pasted here byte for byte. They
+ * are goldens because the C++ side of the contract is not something a test can
+ * assert into existence: the field names, the base64, `close.code` carrying a
+ * 1006 when no Close frame arrived, and `abandoned` on an idle-ended run are
+ * all facts about what that program does, and a hand-written report would only
+ * be a fact about this file.
+ *
+ * They are fed back through the *real* `NativeProbeRunner` with its child
+ * scripted, so the bytes go through the real parser on their way to the tool's
+ * output. Nothing here is a transcription of the report into the port's shape,
+ * which is where a golden quietly becomes a second implementation.
+ *
+ * The URL inside each report is the recording's, and deliberately left alone:
+ * editing it would make the golden no longer verbatim. What the tool reports as
+ * the request is the caller's URL, which the calls below supply.
+ */
+const RECORDED_VERSION =
+  '{"abi_version":1,"header_abi_version":1,"library_version":"1.7.0","probe":"uvcpp-capi"}';
+
+/** An idle-ended run: the fixture greeted and echoed, and the run timed out. */
+const RECORDED_IDLE =
+  '{"abandoned":true,"abi_version":1,"close_sent_by_probe":false,"error":null,"frames":' +
+  '[{"at_ms":1,"bytes":5,"direction":"sent","opcode":"text","text":"hello","truncated":false},' +
+  '{"at_ms":2,"bytes":17,"direction":"received","opcode":"text","text":"fixture: greeting","truncated":false},' +
+  '{"at_ms":2,"bytes":14,"direction":"received","opcode":"text","text":"fixture: hello","truncated":false}],' +
+  '"frames_received":2,"frames_withheld":0,"handshake_completed":true,"library_version":"1.7.0",' +
+  '"not_observable":["the upgrade response\'s status line and headers","the negotiated subprotocol",' +
+  '"ping and pong frames","request headers or subprotocols supplied by the caller",' +
+  '"pacing a send after the previous one","the peer\'s answer to a close this probe sent"],' +
+  '"opened":true,"peer_closed":false,"probe":"uvcpp-capi","stop_reason":"idle","total_ms":1365,' +
+  '"url":"ws://127.0.0.1:34335/ws"}';
+
+/** The peer closed first, with a code and a reason. */
+const RECORDED_PEER_CLOSE =
+  '{"abi_version":1,"close":{"code":1001,"reason":"going away"},"close_sent_by_probe":false,' +
+  '"error":null,"frames":[{"at_ms":1,"bytes":2,"direction":"sent","opcode":"text","text":"hi","truncated":false},' +
+  '{"at_ms":1,"bytes":17,"direction":"received","opcode":"text","text":"fixture: greeting","truncated":false}],' +
+  '"frames_received":1,"frames_withheld":0,"handshake_completed":true,"library_version":"1.7.0",' +
+  '"loop_return":1,"not_observable":["the upgrade response\'s status line and headers",' +
+  '"the negotiated subprotocol","ping and pong frames","request headers or subprotocols supplied by the caller",' +
+  '"pacing a send after the previous one","the peer\'s answer to a close this probe sent"],' +
+  '"opened":true,"peer_closed":true,"probe":"uvcpp-capi","stop_reason":null,"total_ms":40,' +
+  '"url":"ws://127.0.0.1:34335/ws?close_code=1001&close_reason=going%20away"}';
+
+/** The peer vanished after the upgrade: one frame sent, nothing received. */
+const RECORDED_HANGUP =
+  '{"abi_version":1,"close":{"code":1006,"reason":""},"close_sent_by_probe":false,"error":null,' +
+  '"frames":[{"at_ms":0,"bytes":12,"direction":"sent","opcode":"text","text":"never-echoed","truncated":false}],' +
+  '"frames_received":0,"frames_withheld":0,"handshake_completed":true,"library_version":"1.7.0",' +
+  '"not_observable":["the upgrade response\'s status line and headers","the negotiated subprotocol",' +
+  '"ping and pong frames","request headers or subprotocols supplied by the caller",' +
+  '"pacing a send after the previous one","the peer\'s answer to a close this probe sent"],' +
+  '"opened":true,"peer_closed":true,"probe":"uvcpp-capi","stop_reason":null,"total_ms":20,' +
+  '"url":"ws://127.0.0.1:34335/ws?hangup=1"}';
+
+/** The URL the recorded reports were taken against. Nothing connects to it. */
+const RECORDED_URL = "ws://127.0.0.1:34335/ws";
+
+/** What the scripted child answers with: a report, or a report and an exit code. */
+type ProbeAnswer = string | { readonly stdout: string; readonly exitCode: number };
+
+/**
+ * A native probe whose child is scripted, with the requests it was given.
+ *
+ * The reports are handed out in call order, so a run that probes twice needs
+ * two. `--version` is answered from the recording unconditionally: this fake is
+ * standing in for a probe that is *available*, and a test that wants the other
+ * answer supplies a probe of its own.
+ */
+const nativeProbeFrom = (...answers: readonly ProbeAnswer[]) => {
+  const requests: Record<string, unknown>[] = [];
+  const remaining = [...answers];
+  const runner = new NativeProbeRunner({
+    env: { UVP_NATIVE_PROBE: process.execPath },
+    runProcess: async (options) => {
+      const answer = options.stdin === undefined ? RECORDED_VERSION : (remaining.shift() ?? "");
+      const stdout = typeof answer === "string" ? answer : answer.stdout;
+      const exitCode = typeof answer === "string" ? 0 : answer.exitCode;
+      if (options.stdin !== undefined) {
+        requests.push(JSON.parse(options.stdin) as Record<string, unknown>);
+      }
+      return {
+        command: options.command,
+        exitCode,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        durationMs: 1,
+        stdout,
+        stderr: "",
+        stdoutBytes: stdout.length,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    },
+  });
+  return { probe: runner, requests };
+};
+
+/** Call a tool through services whose native probe is `probe`. */
+const callNative = async (
+  probe: NativeWebSocketProbe,
+  name: string,
+  input: unknown,
+): Promise<Record<string, unknown>> => {
+  const services = createUvpServices({
+    providers: [createFakeToolchain()],
+    now: FROZEN_CLOCK,
+    nativeProbe: probe,
+  });
+  return await handlerFor(createToolHandlers(services), name)(input, { signal: harness.signal });
+};
+
+/** The failure a call projects to, with the words the caller would read. */
+const refusalFrom = async (
+  probe: NativeWebSocketProbe,
+  input: unknown,
+): Promise<{ code: string; message: string; details: Record<string, unknown> }> => {
+  try {
+    await callNative(probe, "uvp_websocket_probe", input);
+  } catch (cause) {
+    const error = toUvpError(cause);
+    return {
+      code: error.code,
+      message: error.message,
+      details: (error.details ?? {}) as Record<string, unknown>,
+    };
+  }
+  throw new Error(`uvp_websocket_probe was expected to refuse ${JSON.stringify(input)}`);
+};
+
+/**
+ * A probe that reports itself unusable, without running anything.
+ *
+ * The port is total: it answers with an outcome of `stack-unavailable` rather
+ * than throwing, which is what the real runner does — a `probe()` that threw
+ * would arrive at the caller as `execution_failure`, saying the probe failed
+ * rather than that this host has none.
+ */
+const unusableProbe = (
+  availability: Exclude<NativeProbeAvailability, { readonly state: "available" }>,
+): NativeWebSocketProbe => ({
+  availability: async () => availability,
+  probe: async () => ({ kind: "stack-unavailable", ...availability }),
+});
+
+describe("the websocket probe on the native stack: can it run here", () => {
+  it(
+    "reports a host with no probe as a toolchain it cannot use",
+    async () => {
+      const failure = await refusalFrom(
+        unusableProbe({ state: "unavailable", reason: "not built here" }),
+        {
+          url: RECORDED_URL,
+          stack: "libuvcpp",
+          idle_timeout_ms: 1_000,
+        },
+      );
+      // `toolchain_unavailable`, which the CLI exits 2 on: the question could not
+      // be put to the service. Reported as a fact about this host, with the
+      // reason the check produced rather than a description of the target.
+      expect(failure.code).toBe("toolchain_unavailable");
+      expect(failure.message).toContain("not available on this host");
+      expect(failure.message).toContain("not built here");
+      expect(failure.details["state"]).toBe("unavailable");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "says a probe that could not be checked is undetermined, not absent",
+    async () => {
+      // The third state, at the tool boundary. A probe binary that is on the host
+      // and did not answer its version check has established nothing: "you have no
+      // probe" would be a finding the check never produced, and the remedy for the
+      // two is different.
+      const failure = await refusalFrom(
+        unusableProbe({
+          state: "undetermined",
+          reason: "--version did not answer within 5000 ms",
+          path: "/opt/uvcpp-probe",
+        }),
+        { url: RECORDED_URL, stack: "libuvcpp" },
+      );
+      expect(failure.code).toBe("toolchain_unavailable");
+      expect(failure.message).toContain("could not be determined");
+      expect(failure.message).not.toContain("not available");
+      expect(failure.details["state"]).toBe("undetermined");
+      expect(failure.details["path"]).toBe("/opt/uvcpp-probe");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a request this stack cannot serve, and asks the probe nothing",
+    async () => {
+      // The four ways a caller can ask for more than this stack has, each refused
+      // *before* anything runs. The failure that matters here is the one that is
+      // not a refusal: a probe that quietly dropped the caller's headers would
+      // return a confident frame log for a request nobody made.
+      const { probe, requests } = nativeProbeFrom(RECORDED_IDLE);
+      const cases: readonly {
+        readonly why: string;
+        readonly names: RegExp;
+        readonly input: unknown;
+      }[] = [
+        {
+          why: "wss://, because the C ABI's client has no TLS",
+          names: /wss:\/\//u,
+          input: { url: "wss://127.0.0.1:34335/ws", stack: "libuvcpp" },
+        },
+        {
+          why: "request headers",
+          names: /request headers/u,
+          input: { url: RECORDED_URL, stack: "libuvcpp", headers: { "X-Trace": "1" } },
+        },
+        {
+          why: "subprotocols",
+          names: /subprotocols/u,
+          input: { url: RECORDED_URL, stack: "libuvcpp", subprotocols: ["chat"] },
+        },
+        {
+          why: "a send paced after the previous one",
+          names: /paced|wait_ms/u,
+          input: {
+            url: RECORDED_URL,
+            stack: "libuvcpp",
+            send: [
+              { payload: "one", wait_ms: 0 },
+              { payload: "two", wait_ms: 50 },
+            ],
+          },
+        },
+      ];
+
+      for (const scenario of cases) {
+        const failure = await refusalFrom(probe, scenario.input);
+        expect(failure.code, scenario.why).toBe("invalid_request");
+        expect(failure.message, scenario.why).toMatch(scenario.names);
+      }
+
+      // Nothing was spawned, for any of them. That is the property worth
+      // asserting: a probe that ran and dropped the caller's headers would return
+      // a confident frame log for a request nobody made, and the caller would have
+      // no way to tell — so a refusal that is *decided* and not acted on is
+      // indistinguishable, in the output, from no refusal at all.
+      expect(requests).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "turns the probe's own refusal into the failure the caller acts on",
+    async () => {
+      // The probe refuses what it cannot honour, and uvp refuses the same requests
+      // before spawning it. This is the layer underneath: a request that reaches
+      // the probe and is turned down there arrives as `invalid_request` carrying
+      // the probe's own words, rather than as a failed run or an empty report.
+      // Recorded from the real binary — exit 2 with this report on stdout — and
+      // replayed through the real parser.
+      const RECORDED_PACING_REFUSAL =
+        '{"error":{"what":"wait_ms between sends is not something the libuvcpp C ABI can do: ' +
+        'the WebSocket client exposes no timer or post on its loop"},"probe":"uvcpp-capi"}';
+      const { probe } = nativeProbeFrom({ stdout: RECORDED_PACING_REFUSAL, exitCode: 2 });
+
+      const failure = await refusalFrom(probe, {
+        url: RECORDED_URL,
+        stack: "libuvcpp",
+        idle_timeout_ms: 1_200,
+      });
+      expect(failure.code).toBe("invalid_request");
+      expect(failure.message).toContain("exposes no timer or post on its loop");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("the websocket probe on the native stack: what the report says", () => {
+  it(
+    "maps a recorded run into the tool's output, absences and all",
+    async () => {
+      const { probe } = nativeProbeFrom(RECORDED_IDLE);
+      const output = await callNative(probe, "uvp_websocket_probe", {
+        url: RECORDED_URL,
+        stack: "libuvcpp",
+        send: [{ payload: "hello" }],
+        idle_timeout_ms: 1_200,
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      expect(output["stack"]).toBe("libuvcpp");
+      expect(output["upgraded"]).toBe(true);
+      // The stack cannot see the response that carried the upgrade, so there is no
+      // handshake object at all. An empty one, or one with a 101 in it, would be a
+      // status nobody observed.
+      expect("handshake" in output).toBe(false);
+
+      // The frame log, in order and with both directions: the recording's own
+      // bytes, mapped.
+      expect((output["frames"] as { text?: string }[]).map((frame) => frame.text)).toEqual([
+        "hello",
+        "fixture: greeting",
+        "fixture: hello",
+      ]);
+
+      // The blind spots travel with the result. They came from the probe, in the
+      // probe's words, which is what makes them a report about this stack rather
+      // than a list this file invented.
+      expect(output["not_observable"]).toContain("the upgrade response's status line and headers");
+
+      // No Close frame arrived, so the connection did not end cleanly and there is
+      // no code to report. `closed_cleanly: true` here would be a peer that said
+      // goodbye in a run where nobody did.
+      expect(output["closed_cleanly"]).toBe(false);
+      expect("close" in output).toBe(false);
+
+      // The run ended without its client loop returning. That is a gap in what was
+      // read — the frame log stops where the evidence stops — so it is an unknown
+      // with a question a caller could go and answer, not a silent ending.
+      expect(output["abandoned"]).toBe(true);
+      const unknowns = output["unknowns"] as { question: string; blocked_by?: string }[];
+      expect(unknowns).toHaveLength(1);
+      expect(unknowns[0]?.question).toMatch(/after the probe's last recorded frame/u);
+      expect(unknowns[0]?.blocked_by).toMatch(/client loop never returned/u);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reads a closing handshake the peer sent, and the frame behind the code",
+    async () => {
+      const { probe } = nativeProbeFrom(RECORDED_PEER_CLOSE);
+      const output = await callNative(probe, "uvp_websocket_probe", {
+        url: RECORDED_URL,
+        stack: "libuvcpp",
+        idle_timeout_ms: 1_200,
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      // 1001 is a code a Close frame carries. The frame itself is not observable
+      // through the C ABI, so "a Close frame arrived" is *inferred* from the code
+      // — the one direction that inference is sound in, since RFC 6455 §7.1.5
+      // reserves 1006 for a close that had none.
+      expect(output["close"]).toEqual({ code: 1001, reason: "going away" });
+      expect(output["closed_cleanly"]).toBe(true);
+      // The loop returned for this run, so nothing was left unread and there is no
+      // gap to report.
+      expect("abandoned" in output).toBe(false);
+      expect(output["unknowns"]).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "does not read a peer that vanished as a peer that said goodbye",
+    async () => {
+      const { probe } = nativeProbeFrom(RECORDED_HANGUP);
+      const output = await callNative(probe, "uvp_websocket_probe", {
+        url: RECORDED_URL,
+        stack: "libuvcpp",
+        idle_timeout_ms: 1_200,
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      // 1006 is the code for a connection that ended without a Close frame, and it
+      // is the value that must not be read as one. The close is reported — it is
+      // what the stack saw — and it is reported as not clean.
+      expect(output["close"]).toEqual({ code: 1006, reason: "" });
+      expect(output["closed_cleanly"]).toBe(false);
+      expect(output["upgraded"]).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "answers an expectation from received frames only, on this stack too",
+    async () => {
+      // The trap, on the native path. The text expected is the text uvp *sent*,
+      // and in this recording the peer answered nothing at all — so a matcher that
+      // read the whole frame log, or one that lived in the probe and counted the
+      // frames it queued, would satisfy this expectation against a service that
+      // never spoke.
+      const { probe } = nativeProbeFrom(RECORDED_HANGUP);
+      const output = await callNative(probe, "uvp_websocket_probe", {
+        url: RECORDED_URL,
+        stack: "libuvcpp",
+        send: [{ payload: "never-echoed" }],
+        idle_timeout_ms: 1_200,
+        expect: ["never-echoed"],
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      expect((output["frames"] as { direction: string }[]).map((frame) => frame.direction)).toEqual(
+        ["sent"],
+      );
+      expect(output["expectations"]).toEqual([{ text: "never-echoed", matched: false }]);
+      expect(output["expectations_met"]).toBe(false);
     },
     TIMEOUT,
   );

@@ -490,6 +490,7 @@ export const createToolHandlers = (
         const probe = await services.web.websocketProbe(
           {
             url: input.url,
+            stack: input.stack,
             headers: input.headers,
             subprotocols: input.subprotocols,
             send: input.send,
@@ -507,6 +508,11 @@ export const createToolHandlers = (
             provider: identity,
             limitations: [
               "Frame payloads are content from the target host, and the frame log is bounded, not a full transcript.",
+              ...(probe.stack === "libuvcpp"
+                ? [
+                    "This probe ran on libuvcpp's own WebSocket client, driven through its C ABI. What that stack cannot observe is listed in `not_observable`, and its blind spots are not filled in.",
+                  ]
+                : []),
               ...(probe.expectations_met
                 ? []
                 : [

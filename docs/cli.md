@@ -284,16 +284,37 @@ rejected" and "it opened and then said nothing" are different results.
 Every frame carries `at_ms`, stamped when that frame crossed the socket rather
 than at the end of the probe — otherwise a greeting that arrived at 1 ms and a
 reply that arrived at 900 ms would both read as the probe's total duration.
-`--expect-frame` is an input to the probe, which matches it against received
-frames only and returns one `expectations` entry per value, naming the frame that
-answered it (`matched_frame_index`). The CLI reads that verdict rather than
-re-matching the frame log, and exits 1 when an expectation went unmet. A frame
-uvp sent is never the answer: on an echo server the sent and expected strings are
-identical, which is exactly the case that would otherwise pass against a server
-that never replied. A closing handshake the peer started is reported as
-`close.code` and `close.reason` with `closed_cleanly`; a peer that hung up with no
-close frame reports `closed_cleanly: false` and no `close`, which is an
-observation and not an error.
+`--expect-frame` is matched by uvp, once, whatever `--stack` ran the probe, and
+against received frames only; it returns one `expectations` entry per value,
+naming the frame that answered it (`matched_frame_index`). The CLI reads that
+verdict rather than re-matching the frame log, and exits 1 when an expectation
+went unmet. A frame uvp sent is never the answer: on an echo server the sent and
+expected strings are identical, which is exactly the case that would otherwise
+pass against a server that never replied. A closing handshake the peer started is
+reported as `close.code` and `close.reason` with `closed_cleanly`; a peer that
+hung up with no close frame reports `closed_cleanly: false` and no `close`, which
+is an observation and not an error.
+
+`--stack libuvcpp` runs the same probe through libuvcpp's own WebSocket client
+instead of Node's, as a separate process (`uvcpp-probe`). It exists because two
+clients that both claim RFC 6455 can disagree about everything the RFC leaves
+open, so "a Node client reached the service" and "the stack this service was
+generated for reached it" are different findings. What that stack cannot do is
+refused before anything is spawned, and exits 2: `wss://` URLs (the C ABI's
+client has no TLS), `--header`, `--subprotocol`, and a `send[].wait_ms` that is
+not zero. What it cannot _see_ is reported instead: no `handshake` object at all,
+and the blind spots are listed in `not_observable` — the upgrade response's
+status line and headers, ping and pong frames, and others. A run whose client
+loop never returned is marked `abandoned`, which on this stack is the ordinary
+ending for a connection the peer leaves idle: the frame log ends where its
+evidence ends, and what came after is unknown rather than absent.
+
+The probe binary is not vendored. `npm run build:native-probe` builds it against
+an installed libuvcpp with `UVCPP_ENABLE_CAPI=ON`, `UVP_NATIVE_PROBE` points at a
+build somewhere else, and a host with neither exits 2 with `toolchain_unavailable`
+— a fact about the host, not about the service, and one that says which of the
+two it was (`unavailable` when there is no binary, `undetermined` when there is
+one that did not answer its version check).
 
 ## `uvp mcp` and `uvp setup`
 

@@ -36,6 +36,19 @@ export interface RunProcessOptions {
   readonly maxOutputBytes?: number;
   /** Replace the child's environment entirely rather than extending it. */
   readonly replaceEnv?: boolean;
+  /**
+   * Text to write to the child's stdin, which is then closed.
+   *
+   * A request handed to a child this way is not a command line: it has no length
+   * limit, no quoting rules, and nothing of it appears in the process table. The
+   * native probe takes its request on stdin for exactly those reasons — it is
+   * JSON, and it may carry frame payloads.
+   *
+   * Without this the child's stdin is `/dev/null`, which is what every other
+   * caller in this project wants: a build that reads stdin is waiting for input
+   * nobody is going to give it.
+   */
+  readonly stdin?: string;
 }
 
 const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -130,9 +143,18 @@ export const runProcess = async (options: RunProcessOptions): Promise<ProcessOut
           env:
             options.replaceEnv === true ? { ...options.env } : { ...process.env, ...options.env },
         }),
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+
+  if (options.stdin !== undefined) {
+    // A child that exits before reading its request closes the pipe under us, and
+    // a write error with no listener is an unhandled event that takes this
+    // process down. The child's exit is still reported: what it refused is on its
+    // stderr, which is the answer, and the writing side is not.
+    child.stdin?.on("error", () => undefined);
+    child.stdin?.end(options.stdin);
+  }
 
   let timedOut = false;
   let aborted = false;

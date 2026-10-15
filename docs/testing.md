@@ -198,6 +198,38 @@ because both are product decisions rather than defects in the parser:
   phases already disagree, which is itself part of why this is recorded rather
   than resolved here.
 
+### The native probe, against a generated service
+
+`tests/toolchain/nativeProbe.test.ts` answers the one question the rest of the
+suite cannot: whether libuvcpp's _own_ WebSocket client can talk to a service uvp
+generated. Every other WebSocket test uses a Node client, and two clients that
+both claim RFC 6455 can disagree about everything the RFC leaves open — so a Node
+client reaching `websocket-echo` says nothing about this one.
+
+It has the same shape as the rest of the lane — generate, build, start, drive,
+stop — with one addition: the probe is a **binary**, `uvcpp-probe`, that
+`npm run build:native-probe` produces against a libuvcpp with
+`UVCPP_ENABLE_CAPI=ON`. The lane does not build it, because that would make a test
+run depend on a C++ compiler and a particular install; a host without it skips,
+and the skip names which of the two problems it has — no libuvcpp, or no probe —
+since only one of them is fixed by installing libuvcpp.
+
+Where the probe is comes from `NativeProbeRunner.availability`, the same call the
+CLI makes, rather than from a second search order written in the test; the path
+it returns is passed to the child CLI as `UVP_NATIVE_PROBE`, so the test and the
+tool cannot disagree about which binary answered. CI builds the probe before this
+lane runs, for the same reason it installs libuvcpp at all.
+
+All four tests in the file skip together, because all four need that binary: one
+probes a generated service end to end, one reads the same run the way a person
+would — without `--json`, where the stack row, the blind-spot list, and the note
+about the abandoned log are the only place a reader meets them — one asserts that
+an expectation the service never answered exits `1` with the echo still in the
+log, and one asserts that a request the stack cannot serve exits `2` with nothing
+spawned and nothing connected to. The file raises its own per-test timeout,
+because the lane's is the cold-cache figure for one template build and this file
+pays for a build plus two probes.
+
 ## The acceptance project
 
 `toolchain` proves a generated project builds, starts, and answers. `acceptance`

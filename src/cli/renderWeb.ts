@@ -86,13 +86,39 @@ const timingLine = (timing: Record<string, unknown>): string => {
   return parts.join(", ");
 };
 
+/**
+ * The payload column of a frame row.
+ *
+ * A frame that carries no text says why rather than showing an empty cell: an
+ * empty cell reads as "the peer sent nothing", which is a different observation
+ * from "this stack would not hand the bytes over".
+ */
+const payloadCell = (frame: unknown): string => {
+  const text = str(at(frame, "text"));
+  if (text !== "") return oneLine(text, 60);
+  const base64 = str(at(frame, "base64"));
+  if (base64 !== "") return `${String(base64.length)} base64 bytes`;
+  const omitted = str(at(frame, "text_omitted"));
+  return omitted === "" ? "" : `[no text: ${omitted}]`;
+};
+
 export const renderWebSocket = (output: Record<string, unknown>): string[] => {
   const handshake = obj(output["handshake"]);
+  const stack = str(output["stack"]);
   const lines = [
-    row(
-      "handshake",
-      `${String(num(at(handshake, "status")) ?? 0)}${str(at(handshake, "negotiated_subprotocol")) === "" ? "" : `  subprotocol ${str(at(handshake, "negotiated_subprotocol"))}`}`,
-    ),
+    // Only when it is not the default: a line that says "node" on every probe
+    // would be the same line every time, and the interesting case is the other one.
+    ...(stack === "" || stack === "node" ? [] : [row("stack", stack)]),
+    // A stack that cannot see the response has no status to report. Printing 0
+    // would be a status this probe never observed.
+    ...(Object.keys(handshake).length === 0
+      ? [row("handshake", "not observed by this stack")]
+      : [
+          row(
+            "handshake",
+            `${String(num(at(handshake, "status")) ?? 0)}${str(at(handshake, "negotiated_subprotocol")) === "" ? "" : `  subprotocol ${str(at(handshake, "negotiated_subprotocol"))}`}`,
+          ),
+        ]),
     row("upgraded", yesNo(output["upgraded"])),
   ];
 
@@ -107,16 +133,36 @@ export const renderWebSocket = (output: Record<string, unknown>): string[] => {
           str(at(frame, "opcode")),
           String(num(at(frame, "bytes")) ?? 0),
           millis(num(at(frame, "at_ms")) ?? 0),
-          str(at(frame, "text")) === "" ? "" : oneLine(str(at(frame, "text")), 60),
+          payloadCell(frame),
         ]),
       ),
     );
     if (frames.some((frame) => str(at(frame, "text")) !== "")) {
-      lines.push("", `# frame payloads are ${CONTENT_WARNING}`);
+      // The warning is a standalone sentence, so it is joined with a dash rather
+      // than the copula: "frame payloads are the text below came from the target
+      // host" is not a sentence, and a rendering whose own words are broken is
+      // read as noise at exactly the moment it is being asked to be read.
+      lines.push("", `# frame payloads — ${CONTENT_WARNING}`);
     }
   }
 
   lines.push(row("closed", yesNo(output["closed_cleanly"])));
+
+  if (bool(output["abandoned"]) === true) {
+    lines.push(
+      "",
+      "# The probe's own deadline ended this run and its client loop never returned, so whatever",
+      "# the peer sent after the last frame above is unknown rather than absent.",
+    );
+  }
+  const notObservable = list(output["not_observable"]).map((entry) => str(entry));
+  if (notObservable.length > 0) {
+    lines.push(
+      "",
+      `# ${stack === "" ? "this" : stack} stack cannot observe:`,
+      ...notObservable.map((entry) => `#   - ${entry}`),
+    );
+  }
   return lines;
 };
 
@@ -263,7 +309,7 @@ export const renderCaptureRead = (output: Record<string, unknown>): string[] => 
     }
   }
   if (exchanges.some((entry) => str(at(entry, "response_body")) !== "")) {
-    lines.push("", `# payloads below are ${CONTENT_WARNING}`);
+    lines.push("", `# payloads below — ${CONTENT_WARNING}`);
     for (const entry of exchanges) {
       const body = str(at(entry, "response_body"));
       if (body !== "")

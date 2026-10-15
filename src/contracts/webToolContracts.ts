@@ -134,6 +134,13 @@ export const httpRequestContract = defineTool({
  * Reports the handshake as an exchange and then the frames, because a failed
  * upgrade is diagnosable from the handshake response and a successful one is
  * not evidence that application frames work.
+ *
+ * Two stacks can answer. The default speaks the protocol in-process and sees the
+ * whole handshake response; the other drives libuvcpp's own WebSocket client
+ * through its C ABI — the stack a generated service links against — and sees
+ * less of it. The result says which one answered and carries the list of things
+ * that stack could not observe, so a missing field is never a field that was
+ * quietly filled in.
  */
 export const websocketProbeContract = defineTool({
   name: "uvp_websocket_probe",
@@ -143,10 +150,21 @@ export const websocketProbeContract = defineTool({
     "then close. Returns the upgrade handshake separately from the frame log, so a rejected " +
     "upgrade is distinguishable from a connection that opened and then stayed silent. Each " +
     "expected frame is answered as matched or not, because a caller comparing strings against " +
-    "the frame log is a second implementation of the same question.",
+    "the frame log is a second implementation of the same question. `stack` chooses which " +
+    "WebSocket client runs the probe: `node` reports the handshake status and headers, while " +
+    "`libuvcpp` probes through the C ABI of the libuvcpp that uvp's own services link against " +
+    "and reports what that stack can see — no status line, no headers, and no ping or pong " +
+    "frames, which it lists as not observable rather than omitting silently.",
   kind: "web",
   inputSchema: z.object({
     url: z.string().min(1).describe("ws:// or wss:// URL."),
+    stack: z
+      .enum(["node", "libuvcpp"])
+      .default("node")
+      .describe(
+        "Which WebSocket client runs the probe. `libuvcpp` runs a separate probe process and " +
+          "cannot do wss://, request headers, subprotocols, or a paced send.",
+      ),
     headers: headerMapSchema.default({}),
     subprotocols: z.array(z.string()).default([]),
     send: z
@@ -173,12 +191,21 @@ export const websocketProbeContract = defineTool({
   outputSchema: z.object({
     ...toolEnvelopeShape,
     exchange_id: exchangeIdSchema,
+    /** Which client answered. The two do not observe the same things. */
+    stack: z.enum(["node", "libuvcpp"]),
     upgraded: z.boolean(),
-    handshake: z.object({
-      status: z.number().int(),
-      headers: headerMapSchema,
-      negotiated_subprotocol: z.string().optional(),
-    }),
+    /**
+     * Absent when the stack that ran the probe does not see the response — the
+     * libuvcpp C ABI reports a completed upgrade without its status line or
+     * headers, and reports a failed one as a transport status.
+     */
+    handshake: z
+      .object({
+        status: z.number().int(),
+        headers: headerMapSchema,
+        negotiated_subprotocol: z.string().optional(),
+      })
+      .optional(),
     frames: z.array(
       z.object({
         direction: z.enum(["sent", "received"]),
@@ -186,6 +213,12 @@ export const websocketProbeContract = defineTool({
         bytes: z.number().int(),
         text: z.string().optional(),
         base64: z.string().optional(),
+        /**
+         * Why a text frame carries no `text`. `truncated` when the payload was
+         * longer than the probe's per-frame limit, `invalid-utf8` when it is not
+         * text at all — decoding either would invent bytes the peer never sent.
+         */
+        text_omitted: z.enum(["truncated", "invalid-utf8"]).optional(),
         /** Milliseconds from the start of the probe to this frame. */
         at_ms: z.number().int(),
         truncated: z.boolean(),
@@ -209,12 +242,30 @@ export const websocketProbeContract = defineTool({
       .object({ code: z.number().int().optional(), reason: z.string().optional() })
       .optional(),
     closed_cleanly: z.boolean(),
+    /**
+     * What the stack that ran the probe cannot observe, in its own words.
+     *
+     * Present when the chosen stack has blind spots, which is what makes an
+     * absent field readable: a caller can tell "the peer sent nothing" from "this
+     * client cannot see it".
+     */
+    not_observable: z.array(z.string()).optional(),
+    /**
+     * True when the probe process had to be killed at its deadline rather than
+     * ending by itself. Everything after the last recorded frame is then unknown
+     * rather than absent.
+     */
+    abandoned: z.boolean().optional(),
   }),
   effects: {
     readsFilesystem: false,
     writesFilesystem: false,
     network: true,
-    spawnsProcess: false,
+    // Unconditionally true, although only `stack: "libuvcpp"` starts a process.
+    // The effect set is a closed set of booleans and cannot say "sometimes", and a
+    // caller that reads this to decide whether the tool starts a process is
+    // better served by a yes it may not use than by a no that is not always true.
+    spawnsProcess: true,
     mutatesTarget: false,
   },
   returnsTargetContent: true,
@@ -227,6 +278,10 @@ export const websocketProbeContract = defineTool({
         expect: ["pong"],
         max_frames: 1,
       },
+    },
+    {
+      description: "Probe with the stack generated services link against",
+      input: { url: "ws://127.0.0.1:8080/echo", stack: "libuvcpp", send: [{ payload: "ping" }] },
     },
   ],
 });

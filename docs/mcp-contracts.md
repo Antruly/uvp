@@ -36,7 +36,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_run_stop`         | runtime   |     |     |     |  ●   |  ●  |           |
 | `uvp_verify`           | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
 | `uvp_http_request`     | web       |     |     |  ●  |      |     |     ●     |
-| `uvp_websocket_probe`  | web       |     |     |  ●  |      |     |     ●     |
+| `uvp_websocket_probe`  | web       |     |     |  ●  |  ●   |     |     ●     |
 | `uvp_soap_call`        | web       |     |     |  ●  |      |     |     ●     |
 | `uvp_load_test`        | web       |     |     |  ●  |      |  ●  |           |
 | `uvp_capture_start`    | web       |     |     |  ●  |      |  ●  |           |
@@ -45,6 +45,10 @@ whose results can contain bytes that did not originate with uvp.
 
 Read the table before granting a tool. `uvp_run_stop` reports no filesystem
 access at all: it signals a process this session started and nothing else.
+`uvp_websocket_probe` reports `proc` unconditionally, although only
+`stack: "libuvcpp"` starts anything: the effect set is a closed set of booleans
+and cannot say "sometimes", and a caller deciding whether to confirm is better
+served by a yes it may not use than by a no that is not always true.
 
 ### Toolchain
 
@@ -94,6 +98,17 @@ is reported as such rather than as an error. Each entry in `expect` is answered 
 `expectations` against received frames only, with `matched_frame_index` naming the
 frame that answered it; `expectations_met` is the verdict, and an unmet one is a
 field rather than an error so the frame log that shows why comes back with it.
+
+`stack` chooses the client that answers: `node`, or `libuvcpp` — the stack a
+generated service links against, run as a separate probe process. The second one
+sees less, and says so: `handshake` is absent rather than empty, the blind spots
+are listed in `not_observable`, and `abandoned` marks a run whose report was
+written without its client loop returning, which leaves everything after the last
+recorded frame unknown rather than absent. What it cannot do at all — `wss://`,
+request headers, subprotocols, a paced send — is `invalid_request`, decided
+before anything is spawned. A host without the probe binary is
+`toolchain_unavailable`, with `unavailable` and `undetermined` distinguished in
+`details.state`.
 
 **`uvp_soap_call`** — Invoke a SOAP operation.
 Builds a SOAP envelope around a payload you supply and returns the parsed

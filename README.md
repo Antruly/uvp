@@ -181,11 +181,15 @@ missing from `files[]` shows up.
 
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp
-generates. What it still lacks is the native probe module (`uvcpp-probe.node`),
-which would drive a WebSocket check through libuvcpp's own stack rather than
-through a Node client that happens to speak the same protocol. The toolchain
-provider _port_ is defined and the `local` provider implements it; the container
-and remote-SSH providers are not written.
+generates. The WebSocket probe runs on two stacks: a Node client by default, and
+libuvcpp's own client through `uvcpp-probe`, a small C++ program that speaks the
+C ABI. That second stack is what answers whether a service uvp generated talks
+to the stack it was generated for, since two clients that both claim RFC 6455
+can disagree about everything the RFC leaves open. `uvcpp-probe` is built by
+`npm run build:native-probe`, is a separate process rather than a module uvp
+loads, and is depended on by nothing uvp generates. The toolchain provider
+_port_ is defined and the `local` provider implements it; the container and
+remote-SSH providers are not written.
 
 **Not started.** Release automation: `release-please-config.json` and the
 conventional-commit gate on pull request titles exist, but nothing runs them yet,

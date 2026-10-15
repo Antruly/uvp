@@ -4,6 +4,8 @@ import { WebService } from "../application/WebService.js";
 import { CaptureService } from "../application/CaptureService.js";
 import { DoctorService } from "../application/DoctorService.js";
 import { LocalToolchainProvider } from "../toolchains/local/LocalToolchainProvider.js";
+import { NativeProbeRunner } from "../toolchains/native/NativeProbeRunner.js";
+import type { NativeWebSocketProbe } from "../application/NativeWebSocketProbe.js";
 import type { ToolchainProvider } from "../application/ToolchainProvider.js";
 
 /**
@@ -24,6 +26,15 @@ export interface UvpServiceOptions {
   readonly now?: (() => Date) | undefined;
   /** Providers by id; the first is the default. Defaults to the local toolchain. */
   readonly providers?: readonly ToolchainProvider[] | undefined;
+  /**
+   * The libuvcpp stack's WebSocket probe. Defaults to the supervised process.
+   *
+   * Injected for the same reason the providers are: a lane that is about what uvp
+   * does with a probe's report should not need a C++ toolchain to say it, and the
+   * lane that *is* about the real probe names this explicitly so its coverage is
+   * a statement rather than an inference.
+   */
+  readonly nativeProbe?: NativeWebSocketProbe | undefined;
 }
 
 export interface UvpServices {
@@ -55,7 +66,11 @@ export const createUvpServices = (options: UvpServiceOptions = {}): UvpServices 
     providers,
     primary,
     workspace: new WorkspaceService(store, client, now),
-    web: new WebService({ store, now }),
+    web: new WebService({
+      store,
+      now,
+      nativeProbe: options.nativeProbe ?? new NativeProbeRunner(),
+    }),
     capture: new CaptureService(store, now),
     // No `headerProbe` is passed. The doctor builds one rooted at the install
     // prefix it just discovered, which is the only prefix that describes the

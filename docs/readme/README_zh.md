@@ -167,9 +167,12 @@ tarball 装进一个空 prefix，再从安装后的副本执行 CLI 的首批命
 `files[]` 里漏了文件，就是在这里暴露出来的。
 
 **进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
-对任何服务都能用，不只对 uvp 生成的。它唯一还缺的是原生探测模块
-（`uvcpp-probe.node`），那个模块会让 WebSocket 检查走 libuvcpp 自己的协议栈，
-而不是走一个碰巧说同一种协议的 Node 客户端。工具链 provider 的
+对任何服务都能用，不只对 uvp 生成的。WebSocket 探测跑在两种栈上：默认是 Node 客户端，
+另一种是 `uvcpp-probe` —— 一个说 C ABI 的小型 C++ 程序 —— 走 libuvcpp 自己的客户端。
+第二种栈回答的正是「uvp 生成的服务，是否和它被生成时所面向的栈说得上话」：
+两个都自称符合 RFC 6455 的客户端，可以在 RFC 留白的地方处处不一致。
+`uvcpp-probe` 由 `npm run build:native-probe` 构建，是一个独立进程而不是 uvp 加载的模块，
+uvp 生成的项目也不依赖它。工具链 provider 的
 **端口（port）**已经定义，`local` provider 已实现；容器与远程 SSH provider 尚未编写。
 
 **尚未开始。** 发布自动化：`release-please-config.json` 和针对 PR 标题的

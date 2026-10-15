@@ -47,12 +47,25 @@ A test and debug surface for web services — not only the ones uvp generates.
 | ✅  | SOAP envelopes with the raw body preserved alongside the parsed one      |
 | ✅  | Load testing with per-sample timings retained behind the percentiles     |
 | ✅  | Capture with an explicit, reported size limit                            |
-| ⬜  | The native probe module (`uvcpp-probe.node`) over libuvcpp's C ABI       |
+| ✅  | The native probe (`uvcpp-probe`) over libuvcpp's C ABI                   |
 
-The probe module exists so that a WebSocket check goes through libuvcpp's own
-stack rather than through a Node client that happens to speak the same protocol.
-It reaches the C ABI (`UVCPP_ENABLE_CAPI=ON`), which is why that switch is on in
+The probe exists so that a WebSocket check goes through libuvcpp's own stack
+rather than through a Node client that happens to speak the same protocol. It
+reaches the C ABI (`UVCPP_ENABLE_CAPI=ON`), which is why that switch is on in
 the toolchain CI lane.
+
+It is a **separate program**, not a module uvp loads. `native/uvcpp-probe`
+reads one JSON request on stdin and writes one JSON report on stdout; the runner
+locates it, supervises it, and reads the report. Nothing about it is linked into
+uvp, and nothing uvp generates depends on it. `npm run build:native-probe`
+builds it against an installed libuvcpp, `UVP_NATIVE_PROBE` points at a build
+elsewhere, and a host with neither is reported as `toolchain_unavailable` — a
+fact about the host, not about the service under test.
+
+What the C ABI does not expose is reported rather than papered over: the probe
+lists its blind spots in `not_observable`, and `abandoned` marks a run whose
+report was written without the client loop returning, which on this stack is how
+an idle-ended run ordinarily finishes.
 
 ## Milestone 2 — more providers
 

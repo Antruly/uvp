@@ -15,6 +15,12 @@ import {
   recordUnknown,
 } from "./evidenceHelpers.js";
 import { framePayload, probeWebSocket } from "./websocketClient.js";
+import type { WebSocketFrame, WebSocketOpcode } from "./websocketClient.js";
+import type {
+  NativeProbeFrame,
+  NativeProbeOutcome,
+  NativeWebSocketProbe,
+} from "./NativeWebSocketProbe.js";
 import type { SessionStore, ExchangeRecord } from "./sessionStore.js";
 
 /**
@@ -40,6 +46,15 @@ export interface WebServiceOptions {
   readonly store: SessionStore;
   readonly now?: (() => Date) | undefined;
   readonly maxBodyBytes?: number | undefined;
+  /**
+   * The libuvcpp stack's probe, for `uvp_websocket_probe` with `stack: "libuvcpp"`.
+   *
+   * Optional because a caller that only ever probes with the default stack should
+   * not have to supply one, and because the toolchain layer is allowed to be
+   * absent — a host without the probe binary is `toolchain_unavailable`, which is
+   * an answer, not a construction failure.
+   */
+  readonly nativeProbe?: NativeWebSocketProbe | undefined;
 }
 
 const MS_CAP = 60 * 60 * 1000;
@@ -141,6 +156,327 @@ export interface HttpRequestInput {
   readonly timeout_ms: number;
   readonly max_body_bytes: number;
 }
+
+/**
+ * The most payload bytes one frame carries back to a caller.
+ *
+ * The same number on both stacks: the Node client cuts a payload here, and the
+ * probe process is told to cut one here, so a caller comparing two runs is
+ * comparing the far end rather than the client.
+ */
+const FRAME_PAYLOAD_BYTES = 64 * 1024;
+
+/**
+ * How far past the idle timeout the native probe's own ceiling sits.
+ *
+ * The probe ends on the frame cap or the idle timeout in every ordinary run, so
+ * this is a backstop for a connection that keeps the loop busy without ever
+ * producing the frames the caller asked for. It is derived here rather than
+ * exposed as a second timeout the caller has to think about.
+ */
+const NATIVE_TOTAL_TIMEOUT_SLACK_MS = 5_000;
+
+/**
+ * One observed frame, in the shape both stacks can be normalized to.
+ *
+ * `payload` is absent when a stack would not hand the bytes over, which is a
+ * different thing from an empty payload: the only honest rendering of "the frame
+ * was longer than the limit" or "it is not text" is to carry no payload and say
+ * which of the two it was.
+ */
+interface ProbeFrame {
+  readonly direction: "sent" | "received";
+  readonly opcode: WebSocketOpcode;
+  readonly bytes: number;
+  readonly atMs: number;
+  /** True when the stack itself cut this payload before reporting it. */
+  readonly truncated: boolean;
+  readonly payload?: Buffer | undefined;
+  readonly textOmitted?: "truncated" | "invalid-utf8" | undefined;
+}
+
+/** One probe run, as this service needs it — whichever stack produced it. */
+interface ProbeResult {
+  readonly upgraded: boolean;
+  /** Absent when the stack does not observe the response. */
+  readonly handshake:
+    | {
+        readonly status: number;
+        readonly headers: Readonly<Record<string, string>>;
+        readonly negotiatedSubprotocol: string | undefined;
+      }
+    | undefined;
+  readonly frames: readonly ProbeFrame[];
+  readonly close:
+    | { readonly code: number | undefined; readonly reason: string | undefined }
+    | undefined;
+  readonly closedCleanly: boolean;
+  readonly elapsedMs: number;
+  readonly transportError: string | undefined;
+  /** Frames the stack received after its frame log was full. */
+  readonly framesWithheld: number;
+  readonly notObservable: readonly string[] | undefined;
+  readonly abandoned: boolean | undefined;
+}
+
+const fromNodeFrame = (frame: WebSocketFrame): ProbeFrame => ({
+  direction: frame.direction,
+  opcode: frame.opcode,
+  bytes: frame.bytes,
+  atMs: frame.atMs,
+  // Nothing was cut before this call saw the frame; the only cut is the one the
+  // payload limit makes, which the mapping below applies and reports.
+  truncated: false,
+  payload: frame.payload,
+});
+
+const fromNativeFrame = (frame: NativeProbeFrame): ProbeFrame => ({
+  direction: frame.direction,
+  opcode: frame.opcode,
+  bytes: frame.bytes,
+  atMs: frame.atMs,
+  truncated: frame.truncated,
+  ...(frame.text === undefined ? {} : { payload: Buffer.from(frame.text, "utf8") }),
+  ...(frame.base64 === undefined ? {} : { payload: Buffer.from(frame.base64, "base64") }),
+  ...(frame.textOmitted === undefined ? {} : { textOmitted: frame.textOmitted }),
+});
+
+/** One frame of a probe result, as the tool's output carries it. */
+interface ProbeOutputFrame {
+  readonly direction: "sent" | "received";
+  readonly opcode: "text" | "binary" | "ping" | "pong";
+  readonly bytes: number;
+  readonly text?: string;
+  readonly base64?: string;
+  readonly text_omitted?: "truncated" | "invalid-utf8";
+  readonly at_ms: number;
+  readonly truncated: boolean;
+}
+
+/**
+ * One probe, as the tool's output carries it.
+ *
+ * Named rather than inline because the two stacks produce different facts and the
+ * differences have to stay visible: `handshake` and `not_observable` are optional
+ * because one stack does not produce them, and a required field would have to be
+ * filled with a value that was never observed.
+ */
+interface WebSocketProbeOutput {
+  exchange_id: string;
+  stack: "node" | "libuvcpp";
+  upgraded: boolean;
+  handshake?: {
+    status: number;
+    headers: Record<string, string>;
+    negotiated_subprotocol?: string;
+  };
+  frames: ProbeOutputFrame[];
+  expectations: {
+    text: string;
+    matched: boolean;
+    matched_frame_index?: number;
+  }[];
+  expectations_met: boolean;
+  transport_error?: string;
+  close?: { code?: number; reason?: string };
+  closed_cleanly: boolean;
+  not_observable?: string[];
+  abandoned?: boolean;
+}
+
+/**
+ * The frame log as the output carries it.
+ *
+ * The close handshake is reported through `close` rather than as traffic, so it
+ * is filtered out here; a frame whose payload a stack would not hand over carries
+ * neither text nor base64 and says why, because substituting a decode of a
+ * partial payload would be inventing bytes.
+ */
+const probeOutputFrames = (frames: readonly ProbeFrame[]): ProbeOutputFrame[] =>
+  frames
+    .filter((frame) => frame.opcode !== "close")
+    .map((frame): ProbeOutputFrame => {
+      const opcode = frame.opcode as ProbeOutputFrame["opcode"];
+      if (frame.payload === undefined) {
+        return {
+          direction: frame.direction,
+          opcode,
+          bytes: frame.bytes,
+          ...(frame.textOmitted === undefined ? {} : { text_omitted: frame.textOmitted }),
+          at_ms: frame.atMs,
+          truncated: frame.truncated,
+        };
+      }
+      const payload = framePayload(
+        {
+          direction: frame.direction,
+          opcode: frame.opcode,
+          bytes: frame.bytes,
+          payload: frame.payload,
+          atMs: frame.atMs,
+          protocolError: false,
+        },
+        FRAME_PAYLOAD_BYTES,
+      );
+      return {
+        direction: frame.direction,
+        opcode,
+        bytes: frame.bytes,
+        ...(payload.text === undefined ? {} : { text: payload.text }),
+        ...(payload.base64 === undefined ? {} : { base64: payload.base64 }),
+        at_ms: frame.atMs,
+        // Either the stack cut this payload before reporting it, or the limit cut
+        // it here. Both mean the same thing to a caller reading the field.
+        truncated: frame.truncated || payload.truncated,
+      };
+    });
+
+/** The output of one probe, from the facts that probe produced. */
+const probeOutput = (parts: {
+  readonly exchangeId: string;
+  readonly stack: "node" | "libuvcpp";
+  readonly result: ProbeResult;
+  readonly frames: readonly ProbeOutputFrame[];
+  readonly expectations: WebSocketProbeOutput["expectations"];
+}): WebSocketProbeOutput => {
+  const { result } = parts;
+  const handshake = result.handshake;
+  const close = result.close;
+  return {
+    exchange_id: parts.exchangeId,
+    stack: parts.stack,
+    upgraded: result.upgraded,
+    ...(handshake === undefined
+      ? {}
+      : {
+          handshake: {
+            status: handshake.status,
+            headers: { ...handshake.headers },
+            ...(handshake.negotiatedSubprotocol === undefined
+              ? {}
+              : { negotiated_subprotocol: handshake.negotiatedSubprotocol }),
+          },
+        }),
+    frames: [...parts.frames],
+    expectations: parts.expectations,
+    expectations_met: parts.expectations.every((expectation) => expectation.matched),
+    ...(result.transportError === undefined ? {} : { transport_error: result.transportError }),
+    ...(close === undefined
+      ? {}
+      : {
+          close: {
+            ...(close.code === undefined ? {} : { code: close.code }),
+            ...(close.reason === undefined ? {} : { reason: close.reason }),
+          },
+        }),
+    closed_cleanly: result.closedCleanly,
+    ...(result.notObservable === undefined ? {} : { not_observable: [...result.notObservable] }),
+    ...(result.abandoned === true ? { abandoned: true } : {}),
+  };
+};
+
+/** Anything the native stack could not do, as the failure a caller acts on. */
+const nativeProbeFailure = (
+  outcome: Exclude<NativeProbeOutcome, { kind: "report" }>,
+  url: string,
+): UvpFailure => {
+  switch (outcome.kind) {
+    case "stack-unavailable":
+      return new UvpFailure({
+        code: "toolchain_unavailable",
+        message:
+          outcome.state === "unavailable"
+            ? `The native WebSocket probe is not available on this host: ${outcome.reason}.`
+            : `Whether the native WebSocket probe works on this host could not be determined: ${outcome.reason}.`,
+        remediation: {
+          action:
+            'Build it with `npm run build:native-probe`, point UVP_NATIVE_PROBE at a build you have, or probe with stack: "node".',
+        },
+        details: {
+          state: outcome.state,
+          reason: outcome.reason,
+          ...(outcome.path === undefined ? {} : { path: outcome.path }),
+          url,
+        },
+      });
+    case "request-refused":
+      // The probe's own words. It refuses only requests this stack cannot serve,
+      // and it says which part, so the message is the reason and not a summary.
+      return new UvpFailure({
+        code: "invalid_request",
+        message: `The native WebSocket probe refused this request: ${outcome.message}.`,
+        remediation: {
+          action:
+            'Probe with stack: "node", which supports wss://, request headers, subprotocols, and a paced send.',
+        },
+        details: { url, stack: "libuvcpp" },
+      });
+    case "cancelled":
+      return new UvpFailure({
+        code: "cancelled",
+        message:
+          "The native WebSocket probe was cancelled; it was killed and observed nothing more.",
+        remediation: { action: "Re-run the probe without cancelling it." },
+      });
+    case "probe-failed":
+      return new UvpFailure({
+        code: "execution_failure",
+        message: `The native WebSocket probe produced no report: ${outcome.message}.`,
+        remediation: {
+          action:
+            "Check that the probe binary at that path runs (`uvcpp-probe --version`), then re-run the probe.",
+        },
+        details: { url, ...(outcome.detail === "" ? {} : { probe_said: outcome.detail }) },
+      });
+  }
+};
+
+/**
+ * Refuse a request this stack cannot serve, as the failure a caller acts on.
+ *
+ * Every one of these is knowable without asking the far end anything, and said
+ * before a process is spawned. The alternative is a probe that ignores part of
+ * the request and returns a result that reads like an answer about it: the
+ * caller's headers dropped, a paced send flattened into an unpaced one, and a
+ * frame log that looks like evidence for a question nobody asked.
+ *
+ * It throws rather than returning a failure, and the return type says so. A
+ * refusal that is *built* and not thrown is exactly that probe of a different
+ * request — the mistake is one forgotten keyword away and invisible in the
+ * output — so here there is no keyword to forget.
+ *
+ * Pacing is the one limit the probe refuses as well. That is deliberate, and not
+ * a second opinion: the probe is the only place that can promise it will not
+ * silently drop a caller's pacing. Doing it here too is what makes the answer
+ * independent of whether a probe binary happens to be on this host — otherwise a
+ * paced send is `invalid_request` on one machine and `toolchain_unavailable` on
+ * the next.
+ */
+const refuseNativeLimits = (input: {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly subprotocols: readonly string[];
+  readonly send: readonly { readonly wait_ms: number }[];
+}): void => {
+  const refuse = (limit: string): never => {
+    throw new UvpFailure({
+      code: "invalid_request",
+      message: `stack: "libuvcpp" cannot probe this request: ${limit}.`,
+      remediation: { action: `Probe with stack: "node", which supports ${limit}.` },
+      details: { url: input.url, stack: "libuvcpp" },
+    });
+  };
+
+  if (!input.url.startsWith("ws://")) {
+    // The C ABI's client speaks `ws://` only: there is no TLS in it. Refused
+    // rather than attempted, because a probe that tried anyway would report a
+    // handshake failure that says nothing about the server.
+    refuse("wss:// URLs, since the C ABI's client has no TLS");
+  }
+  if (Object.keys(input.headers).length > 0) refuse("request headers");
+  if (input.subprotocols.length > 0) refuse("subprotocols");
+  if (input.send.some((message) => message.wait_ms !== 0)) refuse("a paced send (wait_ms)");
+};
 
 export class WebService {
   constructor(private readonly options: WebServiceOptions) {}
@@ -333,10 +669,19 @@ export class WebService {
    * different questions. A 403 on the upgrade says the route exists and refused
    * this client; a 101 followed by no frames says the opposite, and a caller who
    * saw only "no frames" would draw the wrong conclusion from either.
+   *
+   * Two stacks can run it. The Node client does it in-process and sees the whole
+   * response; the libuvcpp C ABI is driven as a separate process and sees less.
+   * The differences are not smoothed over — they are refused where the request
+   * cannot be served at all (`wss://`, headers, subprotocols, a paced send), and
+   * reported as `not_observable` where the stack simply cannot see something. The
+   * alternative — quietly dropping the caller's headers and returning a probe of
+   * a request that was never made — is the failure this branch exists to avoid.
    */
   async websocketProbe(
     input: {
       readonly url: string;
+      readonly stack: "node" | "libuvcpp";
       readonly headers: Readonly<Record<string, string>>;
       readonly subprotocols: readonly string[];
       readonly send: readonly {
@@ -351,49 +696,15 @@ export class WebService {
     },
     recorder: EvidenceRecorder,
     signal: AbortSignal,
-  ): Promise<{
-    exchange_id: string;
-    upgraded: boolean;
-    handshake: {
-      status: number;
-      headers: Record<string, string>;
-      negotiated_subprotocol?: string;
-    };
-    frames: {
-      direction: "sent" | "received";
-      opcode: "text" | "binary" | "ping" | "pong" | "close";
-      bytes: number;
-      text?: string;
-      base64?: string;
-      at_ms: number;
-      truncated: boolean;
-    }[];
-    expectations: {
-      text: string;
-      matched: boolean;
-      matched_frame_index?: number;
-    }[];
-    expectations_met: boolean;
-    transport_error?: string;
-    close?: { code?: number; reason?: string };
-    closed_cleanly: boolean;
-  }> {
-    const result = await probeWebSocket({
-      url: input.url,
-      headers: input.headers,
-      subprotocols: input.subprotocols,
-      verifyTls: input.verify_tls,
-      maxFrames: input.max_frames,
-      idleTimeoutMs: input.idle_timeout_ms,
-      send: input.send.map((message) => ({
-        payload: message.payload,
-        encoding: message.encoding,
-        waitMs: message.wait_ms,
-      })),
-      signal,
-    });
+  ): Promise<WebSocketProbeOutput> {
+    const probe =
+      input.stack === "libuvcpp"
+        ? await this.nativeProbe(input, signal)
+        : await this.nodeProbe(input, signal);
 
-    if (!result.upgraded && result.handshake.status === 0) {
+    const result = probe.result;
+
+    if (!result.upgraded && result.handshake?.status === 0) {
       throw new UvpFailure({
         code: "endpoint_unreachable",
         message: `${input.url} could not be reached: ${result.transportError ?? "no response"}.`,
@@ -413,7 +724,8 @@ export class WebService {
       durationMs: result.elapsedMs,
       error: result.upgraded
         ? undefined
-        : `upgrade rejected with status ${String(result.handshake.status)}`,
+        : (result.transportError ??
+          `upgrade rejected with status ${String(result.handshake?.status)}`),
       captureId: undefined,
     });
 
@@ -425,23 +737,22 @@ export class WebService {
         { blockedBy: result.transportError },
       );
     }
+    if (result.abandoned === true) {
+      // The report was written out from under a client loop that never returned.
+      // Anything the far end sent after the last recorded frame was never read,
+      // which is a gap in the evidence rather than an absence of traffic.
+      recordUnknown(
+        recorder,
+        "What did the far end send after the probe's last recorded frame?",
+        "resource_limit",
+        {
+          blockedBy:
+            "the probe's client loop never returned, so the run ended without reading further",
+        },
+      );
+    }
 
-    const frames = result.frames
-      // The close handshake is reported through `close` rather than as traffic,
-      // so the frame list is what the application exchanged.
-      .filter((frame) => frame.opcode !== "close")
-      .map((frame) => {
-        const payload = framePayload(frame, 64 * 1024);
-        return {
-          direction: frame.direction,
-          opcode: frame.opcode as "text" | "binary" | "ping" | "pong",
-          bytes: frame.bytes,
-          ...(payload.text === undefined ? {} : { text: payload.text }),
-          ...(payload.base64 === undefined ? {} : { base64: payload.base64 }),
-          at_ms: frame.atMs,
-          truncated: payload.truncated,
-        };
-      });
+    const frames = probeOutputFrames(result.frames);
 
     // The expectation is answered here rather than left to each caller, because
     // "did the far end say what I expected" is the question a probe is asked and
@@ -468,11 +779,14 @@ export class WebService {
         url: input.url,
         exchange_id: stored.exchangeId,
         upgrade: result.upgraded ? "accepted" : "rejected",
+        stack: input.stack,
       },
       observed: {
-        handshake_status: result.handshake.status,
+        handshake_status: result.handshake?.status,
+        handshake_observed: result.handshake !== undefined,
         frames_received: frames.filter((frame) => frame.direction === "received").length,
         frames_sent: frames.filter((frame) => frame.direction === "sent").length,
+        frames_withheld: result.framesWithheld,
         expectations_checked: expectations.length,
         expectations_met: expectations.filter((expectation) => expectation.matched).length,
         closed_cleanly: result.closedCleanly,
@@ -488,32 +802,176 @@ export class WebService {
       sources: [endpointSource(input.url)],
       limitations: [
         "The frame log is bounded by max_frames and idle_timeout_ms, so it is the traffic observed and not a full transcript.",
+        ...probe.limitations,
       ],
     });
 
-    return {
-      exchange_id: stored.exchangeId,
-      upgraded: result.upgraded,
-      handshake: {
-        status: result.handshake.status,
-        headers: { ...result.handshake.headers },
-        ...(result.handshake.negotiatedSubprotocol === undefined
-          ? {}
-          : { negotiated_subprotocol: result.handshake.negotiatedSubprotocol }),
-      },
+    return probeOutput({
+      exchangeId: stored.exchangeId,
+      stack: input.stack,
+      result,
       frames,
       expectations,
-      expectations_met: expectations.every((expectation) => expectation.matched),
-      ...(result.transportError === undefined ? {} : { transport_error: result.transportError }),
-      ...(result.close === undefined
-        ? {}
-        : {
-            close: {
-              ...(result.close.code === undefined ? {} : { code: result.close.code }),
-              ...(result.close.reason === undefined ? {} : { reason: result.close.reason }),
-            },
-          }),
-      closed_cleanly: result.closedCleanly,
+    });
+  }
+
+  /**
+   * One probe, as the rest of this method needs it.
+   *
+   * `handshake` is optional here rather than on the way out only: the native stack
+   * does not produce one, and a shape that forced a value would be filled in with
+   * a status that was never observed.
+   */
+  private async nodeProbe(
+    input: {
+      readonly url: string;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly subprotocols: readonly string[];
+      readonly send: readonly {
+        readonly payload: string;
+        readonly encoding: "utf8" | "base64";
+        readonly wait_ms: number;
+      }[];
+      readonly max_frames: number;
+      readonly idle_timeout_ms: number;
+      readonly verify_tls: boolean;
+    },
+    signal: AbortSignal,
+  ): Promise<{
+    result: ProbeResult;
+    limitations: readonly string[];
+  }> {
+    const result = await probeWebSocket({
+      url: input.url,
+      headers: input.headers,
+      subprotocols: input.subprotocols,
+      verifyTls: input.verify_tls,
+      maxFrames: input.max_frames,
+      idleTimeoutMs: input.idle_timeout_ms,
+      send: input.send.map((message) => ({
+        payload: message.payload,
+        encoding: message.encoding,
+        waitMs: message.wait_ms,
+      })),
+      signal,
+    });
+
+    return {
+      result: {
+        upgraded: result.upgraded,
+        handshake: result.handshake,
+        frames: result.frames.map(fromNodeFrame),
+        close: result.close,
+        closedCleanly: result.closedCleanly,
+        elapsedMs: result.elapsedMs,
+        transportError: result.transportError,
+        framesWithheld: 0,
+        notObservable: undefined,
+        abandoned: undefined,
+      },
+      limitations: [],
+    };
+  }
+
+  /**
+   * The same probe, on libuvcpp's own client.
+   *
+   * Every refusal here is a request this stack cannot serve, said before anything
+   * is spawned, because the alternative is a probe that ignores part of the
+   * request and returns a result that looks like an answer about it.
+   */
+  private async nativeProbe(
+    input: {
+      readonly url: string;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly subprotocols: readonly string[];
+      readonly send: readonly {
+        readonly payload: string;
+        readonly encoding: "utf8" | "base64";
+        readonly wait_ms: number;
+      }[];
+      readonly max_frames: number;
+      readonly idle_timeout_ms: number;
+    },
+    signal: AbortSignal,
+  ): Promise<{ result: ProbeResult; limitations: readonly string[] }> {
+    const native = this.options.nativeProbe;
+    if (native === undefined) {
+      throw new UvpFailure({
+        code: "toolchain_unavailable",
+        message: 'This uvp was built without the native probe, so stack: "libuvcpp" cannot run.',
+        remediation: {
+          action: 'Probe with stack: "node", or use a uvp build that includes the native probe.',
+        },
+      });
+    }
+
+    refuseNativeLimits(input);
+
+    const idleTimeoutMs = input.idle_timeout_ms;
+    const outcome = await native.probe(
+      {
+        url: input.url,
+        send: input.send.map((message) => ({
+          payload: message.payload,
+          encoding: message.encoding,
+          waitMs: message.wait_ms,
+        })),
+        maxFrames: input.max_frames,
+        maxFrameBytes: FRAME_PAYLOAD_BYTES,
+        idleTimeoutMs,
+        // The probe's own ceiling, which is a backstop: a busy connection ends the
+        // run at the frame cap or the idle timeout first. Deriving it here rather
+        // than asking the caller keeps one timeout in the contract.
+        totalTimeoutMs: idleTimeoutMs + NATIVE_TOTAL_TIMEOUT_SLACK_MS,
+      },
+      signal,
+    );
+
+    if (outcome.kind !== "report") {
+      throw nativeProbeFailure(outcome, input.url);
+    }
+
+    const report = outcome.report;
+    const limitations = [
+      "The libuvcpp C ABI reports a completed upgrade without the response that carried it, so this probe has no handshake status or headers.",
+      "A failed handshake arrives as a transport status with no HTTP response, so a rejected upgrade and an endpoint that could not be reached are not distinguishable on this stack.",
+      "The probe runs as a separate process: it reads no ping or pong frames, and it ends without a closing handshake unless the frame cap was reached.",
+      ...(report.framesWithheld === 0
+        ? []
+        : [
+            `${String(report.framesWithheld)} further frames were received after the frame log was full; they are counted in the record and not listed.`,
+          ]),
+      ...(report.abandoned
+        ? [
+            "The probe's client loop never returned, so its report was written out from under a run that was still parked; the frame log ends where its evidence ends.",
+          ]
+        : []),
+    ];
+
+    return {
+      result: {
+        upgraded: report.upgraded,
+        handshake: undefined,
+        frames: report.frames.map(fromNativeFrame),
+        close:
+          report.close === undefined
+            ? undefined
+            : { code: report.close.code, reason: report.close.reason },
+        // Inferred from the close code rather than seen, and the inference is
+        // sound in one direction only: RFC 6455 §7.1.5 defines 1006 as a close
+        // that had no Close frame, so a code that is not 1006 means one arrived.
+        closedCleanly: report.close?.closeFrameReceived ?? false,
+        elapsedMs: report.totalMs,
+        transportError:
+          report.error === undefined
+            ? undefined
+            : `${report.error.what} (status ${String(report.error.code)})`,
+        framesWithheld: report.framesWithheld,
+        notObservable: report.notObservable,
+        abandoned: report.abandoned,
+      },
+      limitations,
     };
   }
 

@@ -229,6 +229,14 @@ const server = createServer((request, response) => {
 });
 
 server.on("upgrade", (request, socket) => {
+  // First, before any branch below can return. An upgrade hands the socket over
+  // raw, so the http server's own error handling does not cover it, and a client
+  // that disappears mid-connection then arrives here as an `error` event with no
+  // listener — an uncaught exception that kills the fixture and takes every later
+  // test in the lane with it. The paths a vanishing client is most likely to be
+  // on are the early returns, which is why this is not attached further down.
+  socket.on("error", () => socket.destroy());
+
   const key = request.headers["sec-websocket-key"];
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(port)}`);
   if (url.pathname !== "/ws" || typeof key !== "string") {
@@ -306,7 +314,6 @@ server.on("upgrade", (request, socket) => {
       }
     }
   });
-  socket.on("error", () => socket.destroy());
 });
 
 server.listen(port, "127.0.0.1", () => {

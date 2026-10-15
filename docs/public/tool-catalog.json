@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "40e9fecc6107e594e28eefe3717bbf80f0bdee31ed8c771244ada2adfcf08cca",
+  "digest": "f4875009ac5ae171a6671cea8c542016426fbd460af4887656eb60f9d580574c",
   "tool_count": 13,
   "tools": [
     {
@@ -2194,7 +2194,7 @@
     {
       "name": "uvp_websocket_probe",
       "title": "Probe a WebSocket endpoint",
-      "description": "Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent. Each expected frame is answered as matched or not, because a caller comparing strings against the frame log is a second implementation of the same question.",
+      "description": "Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent. Each expected frame is answered as matched or not, because a caller comparing strings against the frame log is a second implementation of the same question. `stack` chooses which WebSocket client runs the probe: `node` reports the handshake status and headers, while `libuvcpp` probes through the C ABI of the libuvcpp that uvp's own services link against and reports what that stack can see — no status line, no headers, and no ping or pong frames, which it lists as not observable rather than omitting silently.",
       "kind": "web",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2204,6 +2204,15 @@
             "type": "string",
             "minLength": 1,
             "description": "ws:// or wss:// URL."
+          },
+          "stack": {
+            "default": "node",
+            "description": "Which WebSocket client runs the probe. `libuvcpp` runs a separate probe process and cannot do wss://, request headers, subprotocols, or a paced send.",
+            "type": "string",
+            "enum": [
+              "node",
+              "libuvcpp"
+            ]
           },
           "headers": {
             "default": {},
@@ -2451,6 +2460,13 @@
             "type": "string",
             "pattern": "^exc_[0-9a-f]{22}$"
           },
+          "stack": {
+            "type": "string",
+            "enum": [
+              "node",
+              "libuvcpp"
+            ]
+          },
           "upgraded": {
             "type": "boolean"
           },
@@ -2513,6 +2529,13 @@
                 },
                 "base64": {
                   "type": "string"
+                },
+                "text_omitted": {
+                  "type": "string",
+                  "enum": [
+                    "truncated",
+                    "invalid-utf8"
+                  ]
                 },
                 "at_ms": {
                   "type": "integer",
@@ -2579,6 +2602,15 @@
           },
           "closed_cleanly": {
             "type": "boolean"
+          },
+          "not_observable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "abandoned": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -2588,8 +2620,8 @@
           "unknowns",
           "limitations",
           "exchange_id",
+          "stack",
           "upgraded",
-          "handshake",
           "frames",
           "expectations",
           "expectations_met",
@@ -2601,7 +2633,7 @@
         "readsFilesystem": false,
         "writesFilesystem": false,
         "network": true,
-        "spawnsProcess": false,
+        "spawnsProcess": true,
         "mutatesTarget": false
       },
       "annotations": {
@@ -2625,6 +2657,18 @@
               "pong"
             ],
             "max_frames": 1
+          }
+        },
+        {
+          "description": "Probe with the stack generated services link against",
+          "input": {
+            "url": "ws://127.0.0.1:8080/echo",
+            "stack": "libuvcpp",
+            "send": [
+              {
+                "payload": "ping"
+              }
+            ]
           }
         }
       ]

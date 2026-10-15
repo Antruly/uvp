@@ -309,6 +309,18 @@ jobs:
           PKG_CONFIG_PATH=/tmp/uvcpp-prefix/lib/pkgconfig pkg-config --modversion uvcpp
       - run: npm ci
       - run: npm run compile
+      - name: Build the native probe against that libuvcpp
+        env:
+          CMAKE_PREFIX_PATH: /tmp/uvcpp-prefix
+          PKG_CONFIG_PATH: /tmp/uvcpp-prefix/lib/pkgconfig
+        run: |
+          set -euo pipefail
+          # Built here rather than by the lane, for the same reason libuvcpp is:
+          # a test that compiled its own C++ would make the lane's runtime depend
+          # on a compiler, and its result on a build nobody inspected. Without
+          # this step `tests/toolchain/nativeProbe.test.ts` skips, which looks
+          # like a host without a probe and is really a missing CI step.
+          npm run build:native-probe
       - name: Compile, run, and probe generated workspaces against real libuvcpp
         env:
           CMAKE_PREFIX_PATH: /tmp/uvcpp-prefix
