@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "81c64af224c7a139a13a6280231c12b163dc369f6f45220a44b0fc2adb53dab4",
+  "digest": "512dfea370dca755d7408184e36a999a1d10929860042405598264ff73015cac",
   "tool_count": 15,
   "tools": [
     {
@@ -456,7 +456,8 @@
               "rest-api",
               "websocket-echo",
               "soap-service",
-              "static-files"
+              "static-files",
+              "http3-service"
             ]
           },
           "features": {
@@ -1724,7 +1725,7 @@
     {
       "name": "uvp_http_request",
       "title": "Send an HTTP request",
-      "description": "Send one HTTP request and return the complete exchange: status, headers, body, negotiated protocol version, TLS details, and a timing breakdown. Bodies are returned inline when they are text and small, otherwise as a base64 payload with the byte count. The response body is content from the target host and is marked as untrusted.",
+      "description": "Send one HTTP request and return the complete exchange: status, headers, body, negotiated protocol version, TLS details, and a timing breakdown. Bodies are returned inline when they are text and small, otherwise as a base64 payload with the byte count. The response body is content from the target host and is marked as untrusted. HTTP/3 is answered through libuvcpp's own QUIC client in a separate probe process — the same stack a service from `uvp init` links against — so the result says which certificate state applies and lists what that client could not read.",
       "kind": "web",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1771,7 +1772,7 @@
           },
           "http_version": {
             "default": "auto",
-            "description": "Requested protocol version; `auto` negotiates. The result reports what was used.",
+            "description": "Requested protocol version; `auto` negotiates. The result reports what was used. `3` runs over QUIC through the native probe rather than in this process: it needs an https:// URL, `verify_tls: false`, and `follow_redirects: false`, and reports the response headers it read by name rather than the whole set.",
             "type": "string",
             "enum": [
               "2",
@@ -2168,7 +2169,7 @@
         "readsFilesystem": false,
         "writesFilesystem": false,
         "network": true,
-        "spawnsProcess": false,
+        "spawnsProcess": true,
         "mutatesTarget": false
       },
       "annotations": {

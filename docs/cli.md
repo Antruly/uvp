@@ -225,6 +225,17 @@ reported as `unsupported_target` — non-retryable, with the remediation naming
 service answered and the caller is being sent to inspect the one thing that
 works.
 
+`--http-version 3` is a different case, because it is not this process that
+answers it. A pass never silently downgrades: the exchange records no status and
+no `http_version`, and the reason lands in `unverified`. Two things decide which
+reason. A pass builds its URL from the workspace's own scheme, so against a
+workspace generated without `--features tls` the request is `http://` and `3` is
+refused with `invalid_request` naming the `https://` requirement — QUIC has no
+cleartext mode. Against a TLS workspace the request reaches libuvcpp's QUIC client
+in a separate probe process, which needs a probe binary on this host. To actually
+ask a service over HTTP/3, use `uvp http --http-version 3 --no-tls` against a
+workspace generated from the `http3-service` template.
+
 `--tls` does the same for a certificate, and its default is the other way round:
 a pass reports what the certificate was on every exchange (`tls_verification`,
 and `tls_reason` when OpenSSL recorded one) without making it part of the verdict
@@ -296,6 +307,16 @@ reports the value it observed, so a negated check would be a check the bundle
 described as one thing and ran as another. Both the CLI and the tool contract
 refuse it — the contract declares `negate` in order to reject it, because
 dropping the field silently is the failure mode being avoided.
+
+A header the client never looked at is a third answer, and it is not `is absent`.
+Some clients read a response's headers one name at a time — libuvcpp's C ABI is
+one — so an exchange can be recorded with a narrower set of header names than the
+response carried. An assertion on a name outside that set says **`was not looked
+at`** and names the headers that were, because "the service does not send
+`x-request-id`" is a finding about the service and "uvp did not ask" is a finding
+about uvp. A record whose header set was read in full has no such gap, and an
+absent list means the whole response, which is what everything that reads a
+record without the field assumes.
 
 A JSON path that does not exist is a failure with the path and `is absent` in the
 message — not an error, and not a `= undefined` that reads as a value the body
@@ -415,6 +436,17 @@ arrives as the failure below rather than as a result carrying a field. `reason`
 is OpenSSL's own spelling — `DEPTH_ZERO_SELF_SIGNED_CERT`, `CERT_HAS_EXPIRED`,
 `ERR_TLS_CERT_ALTNAME_INVALID` — because the messages for those three are prose
 that names none of them, and they want three different things done about them.
+
+**HTTP/3 is the one transport whose certificate is never examined**, and its
+`not_checked` means something narrower than the state above. The QUIC client in
+libuvcpp's C ABI verifies against a CA bundle it is handed or not at all — there
+is no system-trust-store path in that layer — and `uvp_http_request` has no input
+for a bundle. So the call is refused before anything is spawned when `verify_tls`
+is on, and when it is off the result says `not_checked` with a `reason` saying no
+certificate was examined. It does not say `verified`, and it is not the "the chain
+was still validated" case: nothing was validated. `--http-version 3` therefore
+requires `--no-tls`, and `uvp http`'s `--help` says so rather than leaving the
+refusal to be discovered.
 
 A certificate this client will not accept exits `2` with `target_unavailable`,
 and not `endpoint_unreachable`: the service is listening, the handshake

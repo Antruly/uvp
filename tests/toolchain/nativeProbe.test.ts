@@ -115,12 +115,136 @@ const probeArgs = (...extra: readonly string[]): string[] => [
   ...extra,
 ];
 
+/**
+ * The port `http3-service` is generated with.
+ *
+ * The same number the reference table's row uses, for the same reason `PORT` is:
+ * it is the same template, and the two files never hold it at once.
+ */
+const HTTP3_PORT = 8095;
+
 /** Generate, build, and start `websocket-echo`, the way a person would. */
 const served = async () => {
   const workspace = await createWorkspace("websocket-echo", PORT);
   const result = resultOrThrow(await buildWorkspace(workspace));
   expect(result["succeeded"], `websocket-echo failed to build: ${why(result)}`).toBe(true);
   return await startService(workspace);
+};
+
+/**
+ * The same, for `http3-service`, which has to be asked for its features.
+ *
+ * `tls` and `http3` are required rather than merely allowed — a QUIC service
+ * without a certificate is not an h3 service — so a workspace generated without
+ * them is one `uvp init` refuses to produce. The lane generates what a person
+ * would have to generate.
+ */
+const servedOverQuic = async () => {
+  const workspace = await createWorkspace("http3-service", HTTP3_PORT, ["tls", "http3"]);
+  const result = resultOrThrow(await buildWorkspace(workspace));
+  expect(result["succeeded"], `http3-service failed to build: ${why(result)}`).toBe(true);
+  return await startService(workspace);
+};
+
+/**
+ * The lane's second claim, and the one no other lane can make.
+ *
+ * Node has no HTTP/3 client, so `uvp http --http-version 3` is answered by the
+ * probe — libuvcpp's own QUIC and h3 client, the same implementation the generated
+ * service serves with. A client and a server from one project can still disagree
+ * about the spec, so what this establishes is not "HTTP/3 works" but "these two
+ * agree", which is the only form of the claim uvp is in a position to test.
+ *
+ * Named here rather than written inline in the `describe` below because the
+ * lane's per-function budget is an error at 150 lines and this body plus the
+ * three before it crosses it. It is a claim with a name, which is what it should
+ * have been anyway.
+ */
+const overQuic = async (): Promise<void> => {
+  const service = await servedOverQuic();
+  try {
+    const outcome = await runCli(
+      [
+        "http",
+        `https://127.0.0.1:${String(HTTP3_PORT)}/hello`,
+        "--http-version",
+        "3",
+        // The certificate is the template's own self-signed one, and the QUIC
+        // client verifies only against a CA bundle it is handed — which this tool
+        // has no input for. With verification left on the request is refused
+        // before anything is spawned, which is the refusal the source lane pins;
+        // here it is turned off, and the result is required to say so rather than
+        // to stay silent.
+        "--no-tls",
+        "--json",
+      ],
+      { env: { UVP_NATIVE_PROBE: probe() } },
+    );
+    expect(outcome.exit, outcome.stderr).toBe(EXIT_OK);
+    const result = resultOrThrow(outcome);
+
+    // The transport, which is the whole point: `3` here is the version *used*,
+    // not the one requested. A path that quietly sent HTTP/1.1 instead — over the
+    // template's TCP leg, which would answer just as happily — would make the flag
+    // a claim about a transport it never touched, and this assertion is what
+    // catches it.
+    expect(result["http_version"]).toBe("3");
+    expect(result["request_http_version"]).toBe("3");
+    expect(result["status"]).toBe(200);
+    // HTTP/3 dropped the reason phrase, so there is no text to report and a
+    // synthesised "OK" would be a string this stack never sent.
+    expect(result["status_text"]).toBe("");
+
+    const body = result["body"] as { text?: unknown };
+    expect(body.text).toBe("hello over HTTP/3");
+
+    // The certificate, in the four-state vocabulary rather than a yes. The request
+    // was made without a CA bundle because that is the only way this layer can
+    // make one, so nothing was examined and the result says `not_checked` — not
+    // `verified`.
+    const tls = result["tls"] as { verification?: unknown; reason?: unknown };
+    expect(tls.verification).toBe("not_checked");
+    expect(String(tls.reason)).toMatch(/[Nn]o certificate was examined/u);
+
+    // The headers that were read, named, and the ones that were not, declared.
+    // The C ABI reads one response header at a time and has no call that lists
+    // them, so a full set is not something this path can honestly report — and a
+    // reader who looks at the headers alone has no way to tell. Both places the
+    // exchange states it are asserted here: the coverage, which names the headers
+    // that went unread, and the limitation beside it, which says what that means.
+    const evidence = result["evidence"] as {
+      coverage?: { status?: unknown; note?: unknown };
+      limitations?: unknown;
+    }[];
+    expect(evidence[0]?.coverage?.status).toBe("partial");
+    expect(String(evidence[0]?.coverage?.note)).toMatch(/response headers/u);
+    expect(
+      (evidence[0]?.limitations as readonly string[] | undefined)?.some((line) =>
+        /not looked at rather than absent/u.test(line),
+      ),
+      JSON.stringify(evidence[0]?.limitations),
+    ).toBe(true);
+
+    // The control: the same service, the same route, over its TCP leg. Without
+    // this the assertions above would be satisfied by any exchange that happened
+    // to return that body — the h3 half of the claim is that HTTP/3 carried *this*
+    // response from *this* route table.
+    const overTcp = resultOrThrow(
+      await runCli([
+        "http",
+        `https://127.0.0.1:${String(HTTP3_PORT)}/hello`,
+        "--http-version",
+        "1.1",
+        "--no-tls",
+        "--json",
+      ]),
+    );
+    expect(overTcp["http_version"]).toBe("1.1");
+    expect(overTcp["status"]).toBe(200);
+    expect((overTcp["body"] as { text?: unknown }).text).toBe(body.text);
+  } finally {
+    await service.stop();
+  }
 };
 
 afterAll(() => {
@@ -296,6 +420,16 @@ describe.skipIf(guard !== "")(
         }
       },
       TIMEOUT,
+    );
+
+    it(
+      "completes an HTTP/3 exchange with a generated service, both legs answering alike",
+      overQuic,
+      // Larger than the file's default: this test pays for a template build that
+      // compiles TLS, the QUIC stack and the h3 route table — several times the
+      // headers of the WebSocket template — plus a QUIC handshake and a probe
+      // start on top of it.
+      300_000,
     );
 
     it(

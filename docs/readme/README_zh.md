@@ -129,27 +129,31 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 
 ## uvp 能做什么
 
-| 任务                                            | 工具                                    |
-| ----------------------------------------------- | --------------------------------------- |
-| 检查工具链以及存在哪些 libuvcpp 模块            | `uvp_doctor`                            |
-| 生成可编译的工程（5 个模板）                    | `uvp_workspace_create`                  |
-| 用 CMake 配置并编译                             | `uvp_build`                             |
-| 启动服务，并等待它真正能应答                    | `uvp_run`、`uvp_run_stop`               |
-| 发起 HTTP/1.1 与 HTTP/2 请求，带耗时和 TLS 细节 | `uvp_http_request`                      |
-| 探测 WebSocket 端点                             | `uvp_websocket_probe`                   |
-| 发送 SOAP 信封并读取应答                        | `uvp_soap_call`                         |
-| 测量吞吐与延迟分位数                            | `uvp_load_test`                         |
-| 录制一段会话中的请求往来，供之后读取            | `uvp_capture_start`、`uvp_capture_read` |
-| 把录制的会话对着一个活动目标重放                | `uvp_capture_replay`                    |
-| 针对已录制的请求往来求值断言                    | `uvp_assert_exchange`                   |
-| 把以上全部作为一次托管流程执行                  | `uvp_verify`                            |
-| 对比两份验证报告，看清到底哪里变了              | `uvp_bundle_diff`                       |
+| 任务                                             | 工具                                    |
+| ------------------------------------------------ | --------------------------------------- |
+| 检查工具链以及存在哪些 libuvcpp 模块             | `uvp_doctor`                            |
+| 生成可编译的工程（6 个模板）                     | `uvp_workspace_create`                  |
+| 用 CMake 配置并编译                              | `uvp_build`                             |
+| 启动服务，并等待它真正能应答                     | `uvp_run`、`uvp_run_stop`               |
+| 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS | `uvp_http_request`                      |
+| 探测 WebSocket 端点                              | `uvp_websocket_probe`                   |
+| 发送 SOAP 信封并读取应答                         | `uvp_soap_call`                         |
+| 测量吞吐与延迟分位数                             | `uvp_load_test`                         |
+| 录制一段会话中的请求往来，供之后读取             | `uvp_capture_start`、`uvp_capture_read` |
+| 把录制的会话对着一个活动目标重放                 | `uvp_capture_replay`                    |
+| 针对已录制的请求往来求值断言                     | `uvp_assert_exchange`                   |
+| 把以上全部作为一次托管流程执行                   | `uvp_verify`                            |
+| 对比两份验证报告，看清到底哪里变了               | `uvp_bundle_diff`                       |
 
-模板：`hello-http`、`rest-api`、`websocket-echo`、`soap-service`、`static-files`。
+模板：`hello-http`、`rest-api`、`websocket-echo`、`soap-service`、`static-files`、
+`http3-service`。
 
 特性：`tls`、`http2`、`http3`、`grpc`、`websocket`、`soap`、`db`。
 每一项都对应真实存在的 libuvcpp CMake 开关和配置宏；这份映射有完整文档，
 包括 libuvcpp 没有对应开关的那两项。
+
+多数模板启动的是 `uvcpp_web_app`；`http3-service` 不是。它写在 `uvcpp_http_server` 之上
+—— 1.7.0 里只有这个类型能打开 QUIC 监听 —— 并把同一张路由表同时跑在 TCP 和 HTTP/3 上。
 
 <a id="当前状态"></a>
 
@@ -158,7 +162,7 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 uvp 尚未发布 1.0，正在积极建设中。说清楚这意味着什么，比给一个百分比更有用：
 
 **已工作并已验证。** 完整闭环 —— 描述 → 生成 → 构建 → 运行 → 探测 → 证据 ——
-在真实的 libuvcpp 1.7.0 安装上对全部五个模板都通过。生成的工程在存在 CMake
+在真实的 libuvcpp 1.7.0 安装上对全部六个模板都通过。生成的工程在存在 CMake
 package 时走 `find_package(uvcpp 1.7.0 CONFIG)`，不存在时回退到 `pkg-config`
 —— 因为预编译发布包只带后者、不带前者。两条路径都会强制校验版本下限。
 
@@ -176,6 +180,15 @@ C ABI 的小型 C++ 程序 —— 走 libuvcpp 自己的客户端。第二种栈
 uvp 生成的项目也不依赖它。`tests/toolchain/nativeProbe.test.ts` 会生成一个工程、
 用 uvp 找到的 CMake 构建它、启动它，再用真实的二进制探测它：这次运行报告了什么、
 这个栈在启动任何进程之前拒绝了什么，以及不带 `--json` 时人看到的是什么。
+
+HTTP/3 也是同一条路，理由也一样：Node 标准库根本没有 HTTP/3 客户端，
+所以 `uvp http --http-version 3` 走的是 `uvcpp-probe` 的 QUIC 客户端 ——
+libuvcpp 自己的那一个，也就是生成的服务所链接的同一个栈。校验它的也是同一条通道，
+所以这里的主张是「同一个实现在线上和自己对得上」，而不是「两个项目对规范的理解一致」。
+这条路径有三件事不做，并且会明说而不是猜：`http://` 被拒绝，因为 QUIC 没有明文模式；
+`verify_tls` 被拒绝，因为那个客户端只能用交给它的 CA bundle 去校验，否则就不校验；
+重定向被拒绝，因为探针只发一次请求。结果会报 `verification: not_checked`，
+而不是一个没人检查过的证书；它会列出自己**读过**的响应头，而不是把它们当成全集。
 
 **进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
 对任何服务都能用，不只对 uvp 生成的。它还缺的是触达范围：工具链 provider 的

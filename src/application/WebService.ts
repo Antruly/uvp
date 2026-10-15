@@ -8,10 +8,14 @@ import {
   transportFailureKind,
   TransportFailure,
 } from "./httpClient.js";
-import type { HttpExchange, HttpTiming, TlsVerification } from "./httpClient.js";
+import type { HttpExchange, HttpTiming } from "./httpClient.js";
+import type { NativeHttp3Probe } from "./NativeHttp3Probe.js";
 import { evaluateAssertions, percentile } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
+import { Http3Client } from "./Http3Client.js";
+import { rememberExchange } from "./exchangeRecord.js";
+import type { HttpRequestOutput, TimingOutput, ToolTlsReport } from "./httpToolOutput.js";
 import {
   coverageComplete,
   coveragePartial,
@@ -26,7 +30,7 @@ import type {
   NativeProbeOutcome,
   NativeWebSocketProbe,
 } from "./NativeWebSocketProbe.js";
-import type { SessionStore, ExchangeRecord } from "./sessionStore.js";
+import type { SessionStore } from "./sessionStore.js";
 
 /**
  * The web-testing surface.
@@ -60,19 +64,22 @@ export interface WebServiceOptions {
    * an answer, not a construction failure.
    */
   readonly nativeProbe?: NativeWebSocketProbe | undefined;
+  /**
+   * The same binary's HTTP/3 exchange, for `uvp_http_request` with
+   * `http_version: "3"`.
+   *
+   * Separate from `nativeProbe` rather than one object with two methods, because
+   * the two disagree about what a usable build is: a probe predating the exchange
+   * list speaks WebSocket and not h3. A caller with one and not the other should be
+   * able to say so, and a lane that scripts one exchange's report should not have
+   * to satisfy the other's.
+   */
+  readonly nativeHttp3Probe?: NativeHttp3Probe | undefined;
 }
 
 const MS_CAP = 60 * 60 * 1000;
 
-const toTiming = (
-  timing: HttpTiming,
-): {
-  dns_ms?: number;
-  connect_ms?: number;
-  tls_ms?: number;
-  ttfb_ms?: number;
-  total_ms: number;
-} => ({
+const toTiming = (timing: HttpTiming): TimingOutput => ({
   ...(timing.dnsMs === undefined ? {} : { dns_ms: timing.dnsMs }),
   ...(timing.connectMs === undefined ? {} : { connect_ms: timing.connectMs }),
   ...(timing.tlsMs === undefined ? {} : { tls_ms: timing.tlsMs }),
@@ -80,16 +87,14 @@ const toTiming = (
   total_ms: timing.totalMs,
 });
 
-export interface ToolTlsReport {
-  protocol?: string;
-  cipher?: string;
-  subject?: string;
-  issuer?: string;
-  valid_from?: string;
-  valid_to?: string;
-  verification: TlsVerification;
-  reason?: string;
-}
+/**
+ * The certificate report, as a caller reads it.
+ *
+ * Re-exported from the shared output module so that the importers of this file —
+ * the verification service among them — keep one import for "the web service and
+ * the shapes it returns" rather than reaching into where the shape is declared.
+ */
+export type { ToolTlsReport } from "./httpToolOutput.js";
 
 const toTls = (exchange: HttpExchange): ToolTlsReport | undefined => {
   const tls = exchange.tls;
@@ -109,44 +114,10 @@ const toTls = (exchange: HttpExchange): ToolTlsReport | undefined => {
 /**
  * Record an exchange in the session, so `uvp_assert_exchange` can re-evaluate it.
  *
- * Storing the raw bytes is what makes a re-run possible without a re-request:
- * an assertion evaluated twice against the same recorded exchange must give the
- * same answer, or the tool is measuring the network rather than the service.
+ * The one recording path, in `exchangeRecord.ts`, because it is shared with the
+ * HTTP/3 client — which records a narrower header set and has to say so.
  */
-const remember = (
-  store: SessionStore,
-  now: () => Date,
-  exchange: {
-    readonly method: string;
-    readonly url: string;
-    readonly requestHeaders: Readonly<Record<string, string>>;
-    readonly requestBody: Buffer | undefined;
-    readonly response: HttpExchange | undefined;
-    readonly durationMs: number;
-    readonly error: string | undefined;
-    readonly captureId: string | undefined;
-  },
-): ExchangeRecord =>
-  store.addExchange({
-    exchangeId: newId("exchange"),
-    at: now().toISOString(),
-    method: exchange.method,
-    url: exchange.url,
-    status: exchange.response?.status,
-    statusText: exchange.response?.statusText,
-    httpVersion: exchange.response?.httpVersion,
-    requestHeaders: exchange.requestHeaders,
-    responseHeaders: exchange.response?.headers ?? {},
-    requestBody: exchange.requestBody,
-    responseBody: exchange.response?.body,
-    durationMs: exchange.durationMs,
-    // A caller's own request body is sent whole and recorded whole; only the
-    // response can arrive already cut short, by the transport's read limit.
-    requestBodyTruncated: false,
-    responseBodyTruncated: exchange.response?.bodyTruncated ?? false,
-    error: exchange.error,
-    captureId: exchange.captureId,
-  });
+const remember = rememberExchange;
 
 export interface HttpRequestInput {
   readonly url: string;
@@ -499,59 +470,19 @@ export class WebService {
   /**
    * One HTTP request, reported in full.
    *
-   * `http_version: "3"` is refused rather than silently downgraded. Node's
-   * standard library has no HTTP/3 client, and answering an HTTP/1.1 request
-   * while the caller asked for HTTP/3 would be the worst possible outcome: a
-   * green result for a transport that was never exercised.
+   * `http_version: "3"` goes to `Http3Client` rather than to Node, and goes there
+   * only after the URL has been parsed here. Both halves of that matter: Node's
+   * standard library has no HTTP/3 client at all, so answering an HTTP/1.1 request
+   * while the caller asked for HTTP/3 would be a green result for a transport that
+   * was never exercised; and a URL this tool would not accept over HTTP/1.1 is not
+   * one it should accept over HTTP/3 either, so the validation is shared rather
+   * than duplicated on the far side of a process boundary.
    */
   async httpRequest(
     input: HttpRequestInput,
     recorder: EvidenceRecorder,
     signal: AbortSignal,
-  ): Promise<{
-    exchange_id: string;
-    request: { method: string; url: string };
-    status: number;
-    status_text: string;
-    http_version: string;
-    request_http_version: string;
-    headers: Record<string, string>;
-    timing: ReturnType<typeof toTiming>;
-    body: {
-      bytes: number;
-      content_type?: string;
-      text?: string;
-      base64?: string;
-      truncated: boolean;
-      decoded_as_text: boolean;
-      digest: string;
-    };
-    redirects: { status: number; location: string }[];
-    /**
-     * The certificate the exchange happened under, when one did.
-     *
-     * Declared as `ToolTlsReport` rather than as `object`, which is what it was:
-     * a declared type of `object` reads as "some record" and compiles for every
-     * consumer that never touches it, while making every consumer that does a
-     * type error. The certificate was built correctly and handed out unreadably,
-     * so no caller could report what it said — the verification bundle could not
-     * name the reason a chain was rejected even though the reason was in this
-     * object the whole time.
-     */
-    tls?: ToolTlsReport;
-  }> {
-    if (input.http_version === "3") {
-      throw new UvpFailure({
-        code: "unsupported_target",
-        message: "HTTP/3 is not supported by this client.",
-        remediation: {
-          action:
-            "Retry with http_version=auto, 2, or 1.1. uvp speaks HTTP/3 only through a libuvcpp " +
-            "service under test, not as a client.",
-        },
-      });
-    }
-
+  ): Promise<HttpRequestOutput> {
     let url: URL;
     try {
       url = new URL(input.url);
@@ -572,6 +503,26 @@ export class WebService {
           action: "Use http:// or https://. For WebSocket endpoints use uvp_websocket_probe.",
         },
       });
+    }
+
+    if (input.http_version === "3") {
+      const http3 = this.options.nativeHttp3Probe;
+      if (http3 === undefined) {
+        throw new UvpFailure({
+          code: "toolchain_unavailable",
+          message:
+            "This uvp was built without the native HTTP/3 probe, so http_version=3 cannot run.",
+          remediation: {
+            action:
+              "Ask over http_version=auto, 2, or 1.1, or use a uvp build that includes the native probe.",
+          },
+          details: { url: input.url, http_version: "3" },
+        });
+      }
+      return await new Http3Client(http3, this.options.store, this.now, recorder).request(
+        input,
+        signal,
+      );
     }
 
     const requestBody =

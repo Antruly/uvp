@@ -27,6 +27,16 @@
  * types a caller may rely on, and the outcomes an implementation must produce.
  */
 
+import type { NativeProbeExchange, NativeProbeExchangeOutcome } from "./nativeProbe.js";
+
+/**
+ * Whether the native stack can be used here, in three states.
+ *
+ * Defined once, in `nativeProbe.ts`, and re-exported here because this is the
+ * probe a caller of `uvp_websocket_probe` reads about.
+ */
+export type { NativeProbeAvailability } from "./nativeProbe.js";
+
 /** One frame the native stack observed, with the payload as far as it could read it. */
 export interface NativeProbeFrame {
   readonly direction: "sent" | "received";
@@ -109,30 +119,6 @@ export interface NativeProbeReport {
   readonly libraryVersion: string | undefined;
 }
 
-/**
- * Whether the native stack can be used here, in three states.
- *
- * The third state is the point. A probe binary that is not on this host is
- * *unavailable*; a probe binary that is there but did not answer is *undetermined*,
- * because a check that could not run has not established anything about it. A
- * caller that collapses the two reports either "you have no probe" about a probe
- * that exists, or "the probe works" about one that never answered.
- */
-export type NativeProbeAvailability =
-  | {
-      readonly state: "available";
-      readonly path: string;
-      /** The libuvcpp version the probe loaded, when it reported one. */
-      readonly libraryVersion: string | undefined;
-    }
-  | {
-      readonly state: "unavailable";
-      readonly reason: string;
-      /** Absent when no candidate path existed to examine. */
-      readonly path?: string | undefined;
-    }
-  | { readonly state: "undetermined"; readonly reason: string; readonly path: string };
-
 /** One probe run, as the caller asks for it. */
 export interface NativeProbeRequest {
   readonly url: string;
@@ -160,32 +146,16 @@ export interface NativeProbeRequest {
 /**
  * How a run ended — including the ways it did not.
  *
- * No throws, and not because throwing is inconvenient: each of these is a
- * different fact with a different remedy, and an exception would flatten
- * "this host has no probe" into the same channel as "the far end answered
- * nothing". The service layer decides what each one is worth to the caller.
+ * One of `nativeProbe.ts`'s two unions, instantiated with this exchange's report:
+ * the shapes are shared with the HTTP/3 probe, the report is not.
  */
-export type NativeProbeOutcome =
-  | { readonly kind: "report"; readonly report: NativeProbeReport }
-  /** The stack is not usable here. `state` carries the distinction above. */
-  | {
-      readonly kind: "stack-unavailable";
-      readonly state: "unavailable" | "undetermined";
-      readonly reason: string;
-      readonly path?: string | undefined;
-    }
-  /** The probe refused the request, and says why. Its message is the reason. */
-  | { readonly kind: "request-refused"; readonly message: string }
-  /** The caller cancelled the run; the probe was killed and observed nothing more. */
-  | { readonly kind: "cancelled" }
-  /**
-   * The probe ran and produced nothing usable. A fact about the probe, not about
-   * the target: `detail` is what it managed to say.
-   */
-  | { readonly kind: "probe-failed"; readonly message: string; readonly detail: string };
+export type NativeProbeOutcome = NativeProbeExchangeOutcome<NativeProbeReport>;
 
-export interface NativeWebSocketProbe {
-  /** Whether the stack can be used here, without connecting to anything. */
-  availability(signal: AbortSignal): Promise<NativeProbeAvailability>;
-  probe(request: NativeProbeRequest, signal: AbortSignal): Promise<NativeProbeOutcome>;
-}
+/**
+ * The probe, as this tool uses it.
+ *
+ * An alias rather than a second interface declaration: the shape is
+ * `NativeProbeExchange` with this exchange's two types, and writing it out again
+ * would be a second place for the two probes to drift apart.
+ */
+export type NativeWebSocketProbe = NativeProbeExchange<NativeProbeRequest, NativeProbeReport>;

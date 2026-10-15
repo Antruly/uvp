@@ -37,8 +37,20 @@ const manifest = (
   return JSON.parse(file.content) as Record<string, unknown>;
 };
 
-/** Every template that starts a `uvcpp_web_app`, which is all of them today. */
-const WEB_TEMPLATES: readonly TemplateId[] = TEMPLATE_IDS;
+/**
+ * Every template that starts a `uvcpp_web_app` — which is no longer all of them.
+ *
+ * `http3-service` is written against the plain `uvcpp_http_server`, because the
+ * web-app layer's stream-claim hook is refused by the h3 leg and a request that
+ * reaches one is answered 500 rather than routed. Every assertion in the two
+ * blocks below is about a `uvcpp_web_app` method, so looping the h3 template in
+ * would assert that it calls functions it must not call. Leaving it out and
+ * saying nothing would be worse in the other direction — it is the one template
+ * with a transport the others do not have — so it has its own block underneath.
+ */
+const WEB_TEMPLATES: readonly TemplateId[] = TEMPLATE_IDS.filter(
+  (template) => template !== "http3-service",
+);
 
 describe("the http2 feature reaches the generated service", () => {
   it.each(WEB_TEMPLATES)("%s turns on cleartext HTTP/2 on its port", (template) => {
@@ -93,7 +105,7 @@ describe("the tls feature reaches the generated service", () => {
 
   it.each(WEB_TEMPLATES)("%s serves TLS instead of cleartext", (template) => {
     const source = render(template, ["tls"]);
-    expect(source).toContain("app.enable_ssl(cert_file, key_file);");
+    expect(source).toContain("app.enable_ssl(cert, key);");
     expect(source).toContain("app.set_tls_handshake_timeout_ms(10000);");
     expect(source).toContain("#include <cstdlib>");
     expect(manifest(template, ["tls"])["features"]).toEqual(["tls"]);
@@ -130,7 +142,7 @@ describe("the tls feature reaches the generated service", () => {
     expect(setup).not.toBe("");
     expect(setup.match(/return 1;/gu)).toHaveLength(2);
     expect(source.indexOf("set_tls_handshake_timeout_ms")).toBeLessThan(started);
-    expect(source.indexOf("app.enable_ssl(cert_file, key_file);")).toBeLessThan(started);
+    expect(source.indexOf("app.enable_ssl(cert, key);")).toBeLessThan(started);
   });
 
   it.each(WEB_TEMPLATES)("%s hands the pair over before it checks it", (template) => {
@@ -147,7 +159,7 @@ describe("the tls feature reaches the generated service", () => {
     // the service would come up on one no client accepts — with the operator
     // holding a certificate file that nothing reads.
     const source = render(template, ["tls"]);
-    expect(source.indexOf("if (cert_file != nullptr)")).toBeLessThan(
+    expect(source.indexOf("if (cert != nullptr)")).toBeLessThan(
       source.indexOf("app.enable_self_signed"),
     );
     expect(source).toContain('app.enable_self_signed("localhost");');
@@ -165,13 +177,146 @@ describe("the tls feature reaches the generated service", () => {
   });
 });
 
-describe("requesting a feature no template can exercise", () => {
+describe("the http3-service template, which is not a uvcpp_web_app", () => {
+  const H3: readonly UvpFeature[] = ["tls", "http3"];
+
+  /** The generated README, which is where a deployment fact has to be written down. */
+  const readme = (features: readonly UvpFeature[]): string => {
+    const files = renderTemplate("http3-service", { name: "svc", port: 8080, features });
+    const file = files.find((entry) => entry.path === "README.md");
+    if (file === undefined) throw new Error("http3-service produced no README.md");
+    return file.content;
+  };
+
+  it("puts one route table on two transports, with no web app anywhere", () => {
+    const source = render("http3-service", H3);
+    // The shape a reader has to get right: `uvcpp_http_server` runs both legs on
+    // one loop and one table, so the routes are registered once and reached over
+    // any of them. The handler's third parameter is the `uvcpp_tcp_client*` that
+    // is null on the h3 leg.
+    expect(source).toContain("uvcpp_http_server server;");
+    expect(source.match(/server\.get\("/gu)).toHaveLength(2);
+    expect(source).not.toContain("uvcpp_web_app");
+  });
+
+  it("installs the QUIC context before it listens, and listens before it runs", () => {
+    // The header's own required order, and each edge of it is a line that
+    // compiles and does nothing if it is wrong: a QUIC endpoint whose context is
+    // missing is refused with `UV_EINVAL` rather than opened, and a port is only
+    // connectable after `listen`.
+    const source = render("http3-service", H3);
+    const context = source.indexOf("set_quic_ssl_context");
+    const listenQuic = source.indexOf("server.listen_quic(");
+    const listen = source.indexOf("server.listen();");
+    const run = source.indexOf("server.run()");
+    for (const at of [context, listenQuic, listen, run]) expect(at).toBeGreaterThan(-1);
+    expect(context).toBeLessThan(listenQuic);
+    expect(listenQuic).toBeLessThan(listen);
+    expect(listen).toBeLessThan(run);
+  });
+
+  it("gives both legs the same certificate, and says which port each is on", () => {
+    const source = render("http3-service", H3);
+    expect(source).toContain("server.get_tcp_server()->set_ssl_context(&tls);");
+    expect(source).toContain("server.set_quic_ssl_context(&tls);");
+    // The UDP port is the one the caller cannot check by connecting, so it is
+    // read back and printed rather than assumed to be the number passed in.
+    expect(source).toContain("server.quic_listen_port()");
+    expect(source).toContain('server.bind("0.0.0.0", 8080)');
+    expect(source).toContain("server.listen_quic(8080,");
+  });
+
+  it("refuses to start rather than serve something a caller cannot verify", () => {
+    // This template has no cleartext mode to fall back to, so every way of being
+    // misconfigured ends in a return before the listeners are opened: half a
+    // certificate pair, a pair libuvcpp cannot read, and a self-signed
+    // certificate that could not be generated. A service that came up anyway
+    // would be one no client can verify, which is the failure the whole
+    // certificate block exists for.
+    const source = render("http3-service", H3);
+    const start = source.indexOf("uvcpp_http_server server;");
+    expect(start).toBeGreaterThan(-1);
+    // Read as a block, because `return 1;` appears elsewhere in this file's
+    // generated source for reasons that have nothing to do with certificates.
+    const setup = source.slice(source.indexOf('std::getenv("UVP_TLS_CERT")'), start);
+    expect(setup.match(/return 1;|return Fail\(/gu)).toHaveLength(3);
+    expect(source.indexOf("tls.load_certificate_file")).toBeLessThan(start);
+  });
+
+  it("generates a certificate only when it was given none", () => {
+    const source = render("http3-service", H3);
+    expect(source.indexOf("if (cert != nullptr)")).toBeLessThan(
+      source.indexOf("tls.generate_self_signed"),
+    );
+    // `generate_self_signed` returns a bool here — unlike `uvcpp_web_app`'s
+    // `enable_self_signed`, which returns nothing — so a certificate that could
+    // not be generated is a case this service can refuse rather than a line it
+    // prints and then serves on.
+    expect(source).toContain('if (!tls.generate_self_signed("localhost"))');
+  });
+
+  it("turns on HTTP/2 for the TCP leg, and never h2c", () => {
+    const source = render("http3-service", H3.concat("http2"));
+    // Both halves are load-bearing and neither is the default on the plain
+    // server, which is the opposite of `uvcpp_web_app`: ALPN is how a TLS client
+    // and this server agree on h2, and `set_http2_enabled` is what lets them.
+    expect(source).toContain('tls.set_alpn_select_protos({"h2", "http/1.1"});');
+    expect(source).toContain("server.set_http2_enabled(true);");
+
+    // h2c is deliberately absent, and this is the assertion that says so. h2c is
+    // HTTP/2 over a *cleartext* connection, and this server installs a TLS
+    // context on its only TCP listener — so no cleartext connection can reach
+    // h2c's 24-byte preface check, and the call would be a line that compiles,
+    // runs, and decides nothing.
+    expect(source).not.toContain("set_h2c_enabled(true)");
+
+    // The negative control: without the feature, neither line is there at all.
+    const cleartext = render("http3-service", H3);
+    expect(cleartext).not.toContain("set_http2_enabled");
+    expect(cleartext).not.toContain("alpn_select_protos");
+    expect(manifest("http3-service", H3)["features"]).toEqual(["tls", "http3"]);
+  });
+
+  it("guards every module its headers need, including the web layer", () => {
+    // The guard is what turns "this libuvcpp has no QUIC" into one readable
+    // compile error. `UVCPP_WEB_ENABLE` is the one a reader would not expect
+    // here: the h3 *client* headers install without the web layer, so a check
+    // that stopped at HTTP3 and QUIC would pass on a build with no h3 listener.
+    const source = render("http3-service", H3);
+    for (const symbol of [
+      "UVCPP_OPENSSL_ENABLE",
+      "UVCPP_HTTP3_ENABLE",
+      "UVCPP_QUIC_ENABLE",
+      "UVCPP_WEB_ENABLE",
+    ]) {
+      expect(source, `${symbol} produced no guard`).toContain(`#if !${symbol}`);
+    }
+  });
+
+  it("says in its README which transport a reader's tools will use", () => {
+    const text = readme(H3);
+    expect(text).toContain("## HTTP/3");
+    expect(text).toContain("HTTP/3 over QUIC");
+    // The instruction that would otherwise be wrong: this project has no
+    // `set_port`, and the other templates' README says to edit one.
+    expect(text).toContain("`server.bind` and `server.listen_quic`");
+    expect(text).not.toContain("edit\n`set_port`");
+    // The command a reader would copy, with the flag the self-signed default
+    // makes necessary. A README that omitted it would hand out a call that is
+    // refused before it runs.
+    expect(text).toContain("--http-version 3 --no-tls");
+  });
+});
+
+describe("requesting a feature a web-app template has no code for", () => {
   it("records http3 in the manifest and writes no HTTP/3 code for it", () => {
     // Stated rather than left implicit, because the two are different facts and
-    // the manifest is what a later `uvp doctor --workspace` reads. libuvcpp
-    // 1.7.0's web layer has no HTTP/3 listener — `uvcpp_web_app` documents the
-    // switch as arriving "when there is h3" — so what the feature buys today is
-    // a build requirement and a compile-time guard, not a protocol.
+    // the manifest is what a later `uvp doctor --workspace` reads. `uvcpp_web_app`
+    // has no HTTP/3 listener — it documents the switch as arriving "when there is
+    // h3" — so on a web-app template the feature buys a build requirement and a
+    // compile-time guard, not a protocol. The transport exists in libuvcpp, which
+    // is why `http3-service` is written against the plain server instead; this
+    // test is about what happens when a caller asks a web-app template for it.
     const source = render("hello-http", ["http3"]);
     expect(manifest("hello-http", ["http3"])["features"]).toEqual(["http3"]);
     expect(source).toContain("#if !UVCPP_HTTP3_ENABLE");

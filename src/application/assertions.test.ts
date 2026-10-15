@@ -21,6 +21,7 @@ const baseExchange: ExchangeRecord = {
   httpVersion: "1.1",
   requestHeaders: {},
   responseHeaders: {},
+  responseHeadersObserved: undefined,
   requestBody: undefined,
   responseBody: undefined,
   durationMs: 5,
@@ -225,6 +226,71 @@ describe("header assertions", () => {
     const outcome = only(withHeaders({}), { kind: "header_exists", target: "Authorization" });
     expect(outcome.passed).toBe(false);
     expect(outcome.message).toBe("header authorization is absent");
+  });
+
+  /**
+   * The third state, and the reason it is not a nicety.
+   *
+   * An exchange recorded over HTTP/3 by the native probe carries only the
+   * response headers the probe asked for by name — the libuvcpp C ABI reads one
+   * header at a time and has no call that lists them. So for those records,
+   * "absent from `responseHeaders`" has two possible causes, and only one of
+   * them is a fact about the service. Reporting the other as an absence is a
+   * finding about a service derived from a gap in the client, which is the
+   * failure `responseHeadersObserved` exists to prevent.
+   */
+  describe("a record whose header set is narrower than the response", () => {
+    /** A record from a client that read exactly these names and no others. */
+    const narrowed = (headers: Record<string, string>, lookedAt: readonly string[]) =>
+      exchange({ responseHeaders: headers, responseHeadersObserved: lookedAt });
+
+    it.each([
+      ["header_equals", { kind: "header_equals", target: "x-request-id", expected: "abc" }],
+      ["header_exists", { kind: "header_exists", target: "x-request-id" }],
+      ["header_matches", { kind: "header_matches", target: "x-request-id", expected: "^a" }],
+    ] as const)("%s names the gap rather than the service", (kind, spec) => {
+      const outcome = only(narrowed({}, ["content-type", "date"]), spec as AssertionSpec);
+      expect(outcome.passed).toBe(false);
+      expect(outcome.message, kind).toContain("was not looked at");
+      // Both halves matter: what happened, and which names a caller *can* assert
+      // on — otherwise the next question has no answer in the report.
+      expect(outcome.message).toContain("`content-type`");
+      expect(outcome.message).toContain("`date`");
+      expect(outcome.message).not.toContain("is absent");
+    });
+
+    it("still reports an absence for a name that was looked at", () => {
+      // The control. If `responseHeadersObserved` were read as "the response had
+      // exactly these headers and no others", a header the peer genuinely left
+      // out would stop being reportable at all.
+      const outcome = only(narrowed({ date: "now" }, ["content-type", "date"]), {
+        kind: "header_exists",
+        target: "content-type",
+      });
+      expect(outcome.message).toBe("header content-type is absent");
+    });
+
+    it("evaluates a name that was looked at normally", () => {
+      const outcome = only(narrowed({ "content-type": "text/plain" }, ["content-type"]), {
+        kind: "header_equals",
+        target: "Content-Type",
+        expected: "text/plain",
+      });
+      expect(outcome.passed).toBe(true);
+      expect(outcome.observed).toBe("text/plain");
+    });
+
+    it("treats an absent list as the whole response, which is what the other paths read", () => {
+      // `undefined` means "all of them", so the HTTP/1.1 and HTTP/2 paths — which
+      // hand Node's parser a complete header set — keep the two-state behaviour
+      // they had before this field existed.
+      const outcome = only(exchange({ responseHeaders: { date: "now" } }), {
+        kind: "header_exists",
+        target: "content-type",
+      });
+      expect(outcome.passed).toBe(false);
+      expect(outcome.message).toBe("header content-type is absent");
+    });
   });
 });
 

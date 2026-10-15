@@ -50,15 +50,15 @@ Run `uvp doctor --json` and read the `libuvcpp.route` field.
 `FEATURE_REQUIREMENTS` in `src/application/ToolchainProvider.ts` is the source of
 truth. This table is generated from it.
 
-| Feature     | CMake switches                            | Config macros                             | Header                    |
-| ----------- | ----------------------------------------- | ----------------------------------------- | ------------------------- |
-| `tls`       | `UVCPP_ENABLE_OPENSSL`                    | `UVCPP_OPENSSL_ENABLE`                    | `ssl/uvcpp_ssl_context.h` |
-| `http2`     | `UVCPP_ENABLE_NGHTTP2`                    | `UVCPP_NGHTTP2_ENABLE`                    | `http2/uvcpp_h2_common.h` |
-| `http3`     | `UVCPP_ENABLE_HTTP3`, `UVCPP_ENABLE_QUIC` | `UVCPP_HTTP3_ENABLE`, `UVCPP_QUIC_ENABLE` | `http3/uvcpp_h3_common.h` |
-| `websocket` | `UVCPP_BUILD_WEB`, `UVCPP_BUILD_WEBAPP`   | `UVCPP_WEB_ENABLE`, `UVCPP_WEBAPP_ENABLE` | `web/uvcpp_ws_server.h`   |
-| `soap`      | `UVCPP_BUILD_WEB`, `UVCPP_BUILD_WEBAPP`   | `UVCPP_WEB_ENABLE`, `UVCPP_WEBAPP_ENABLE` | `webapp/uvcpp_web_app.h`  |
-| `db`        | `UVCPP_ENABLE_DB`                         | `UVCPP_DB_ENABLE`                         | `db`                      |
-| `grpc`      | _(none)_                                  | _(none)_                                  | `grpc`                    |
+| Feature     | CMake switches                                               | Config macros                                                 | Header                    |
+| ----------- | ------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------- |
+| `tls`       | `UVCPP_ENABLE_OPENSSL`                                       | `UVCPP_OPENSSL_ENABLE`                                        | `ssl/uvcpp_ssl_context.h` |
+| `http2`     | `UVCPP_ENABLE_NGHTTP2`                                       | `UVCPP_NGHTTP2_ENABLE`                                        | `http2/uvcpp_h2_common.h` |
+| `http3`     | `UVCPP_ENABLE_HTTP3`, `UVCPP_ENABLE_QUIC`, `UVCPP_BUILD_WEB` | `UVCPP_HTTP3_ENABLE`, `UVCPP_QUIC_ENABLE`, `UVCPP_WEB_ENABLE` | `http3/uvcpp_h3_common.h` |
+| `websocket` | `UVCPP_BUILD_WEB`, `UVCPP_BUILD_WEBAPP`                      | `UVCPP_WEB_ENABLE`, `UVCPP_WEBAPP_ENABLE`                     | `web/uvcpp_ws_server.h`   |
+| `soap`      | `UVCPP_BUILD_WEB`, `UVCPP_BUILD_WEBAPP`                      | `UVCPP_WEB_ENABLE`, `UVCPP_WEBAPP_ENABLE`                     | `webapp/uvcpp_web_app.h`  |
+| `db`        | `UVCPP_ENABLE_DB`                                            | `UVCPP_DB_ENABLE`                                             | `db`                      |
+| `grpc`      | _(none)_                                                     | _(none)_                                                      | `grpc`                    |
 
 ### The macros are always defined
 
@@ -104,24 +104,57 @@ and the only evidence available is header existence. See
 Do not add `UVCPP_ENABLE_GRPC` to a build in an attempt to satisfy this. CMake
 warns about the unused variable and the request is silently ignored.
 
-### HTTP/3 and QUIC travel together
+### HTTP/3, QUIC, and the web layer travel together
 
 HTTP/3 is a dialect that runs over QUIC. `UVCPP_ENABLE_HTTP3` without
 `UVCPP_ENABLE_QUIC` yields a build where the header is present and there is no
 transport underneath it — the worst kind of failure, because everything compiles.
 
-Both switches and both macros are required, and both are checked.
+Three switches and three macros are required, and all three are checked.
 
-A build can satisfy the `http3` feature — the macros are `1`, the headers are
-installed — and still serve no HTTP/3, which is the state of the baseline itself.
-`uvcpp_web_app` has no HTTP/3 listener: it documents `set_http2_enabled` and
-`set_h2c_enabled`, and notes that HTTP/3 will be handled the same way _when there
-is h3_. The C ABI carries an h3 client and server of its own
-(`capi/uvcpp_c_http3.h`, `quic/uvcpp_quic_client.h`), so the feature is a real
-build requirement with real headers behind it; serving h3 from a generated web
-service is what does not exist. Generating a workspace with `--features http3`
-therefore asks the build for a module and emits its guard, and writes no HTTP/3
-code — stated in the manifest, not implied by it.
+The third is the one a reader would not expect. `UVCPP_ENABLE_HTTP3` and
+`UVCPP_ENABLE_QUIC` turn on a QUIC stack with an h3 client, and the h3 _client_
+headers (`http3/uvcpp_h3_common.h`, `capi/uvcpp_c_http3.h`,
+`quic/uvcpp_quic_client.h`) install on a build with the web layer compiled out.
+The only type in 1.7.0 that can open an h3 **listener**, though, is
+`uvcpp_http_server`, and it lives behind `#if UVCPP_WEB_ENABLE`. A check that
+stopped at HTTP3 and QUIC would call a build adequate and then fail to compile the
+one line that listens.
+
+#### Which template speaks HTTP/3
+
+`uvcpp_web_app` — the type every other template starts — has **no** HTTP/3
+listener. It documents `set_http2_enabled` and `set_h2c_enabled`, and notes that
+HTTP/3 will be handled the same way _when there is h3_. So the two cases are
+different, and both are stated rather than implied by the manifest:
+
+- **`http3-service`** is written against `uvcpp_http_server`, which serves one
+  route table over a TCP leg and a QUIC leg at once. It registers the QUIC
+  context before `listen_quic`, installs the same certificate on both legs, and
+  reads the UDP port back from `quic_listen_port()`. It also has no cleartext
+  mode to fall back to, so every misconfiguration returns before a listener is
+  opened.
+- **Every other template**, asked for `--features http3`, asks the build for the
+  module and emits its guard, and writes no HTTP/3 code.
+
+Because the h3 leg is TLS-only, `http3-service` is also the one template that
+turns on `set_http2_enabled` for its TCP leg rather than h2c: ALPN is how a TLS
+client and this server agree on h2, and its only TCP listener has a TLS context
+installed, so no cleartext connection could ever reach h2c's preface check.
+
+#### Reading a request back
+
+`uvp http --http-version 3` is answered by `uvcpp-probe`'s QUIC client — Node has
+no HTTP/3 client — and the C ABI behind it reports a handshake and a response and
+nothing underneath either. Two consequences a reader of a result has to know:
+response headers are read **one name at a time** (`uvcpp_c_h3_response_header`,
+which has no header-list counterpart), so `headers` in a result is the set that was
+read rather than the set the peer sent, and the exchange says so beside it; and
+there is no timing below the poll interval, because the h3 connection has no ready
+callback.
+It also verifies only against a CA bundle it is handed — there is no
+system-trust-store path in that layer — which is why the request is refused
+outright when `verify_tls` is on rather than answered with `verified`.
 
 ### HTTP/2 in the web-app layer
 

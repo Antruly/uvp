@@ -57,6 +57,7 @@ const exchange = (exchangeId: string, at: string = CLOCK_START): ExchangeRecord 
   httpVersion: "1.1",
   requestHeaders: {},
   responseHeaders: {},
+  responseHeadersObserved: undefined,
   requestBody: undefined,
   responseBody: undefined,
   durationMs: 3,

@@ -381,11 +381,12 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
         // Carried into the bundle as well as into the evidence, because
         // `unverified` is where a caller reads what the pass could not establish
         // and why. Without it the bundle says only "the request did not complete",
-        // which is one sentence for two unrelated facts: a transport refused by
-        // design — `--http-version 3`, which uvp's client does not have — and a
-        // connection that dropped. A reader deciding whether to retry needs the
-        // difference, and the exchange record is the only other place it is
-        // written down.
+        // which is one sentence for several unrelated facts: a request refused
+        // before it was made — `--http-version 3` against this pass's own
+        // `http://` base URL, which QUIC cannot carry — a stack that is not on
+        // this host, and a connection that dropped. A reader deciding whether to
+        // retry needs the difference, and the exchange record is the only other
+        // place it is written down.
         unverified.push({ question, reason: `the request did not complete: ${blockedBy}` });
         return undefined;
       });

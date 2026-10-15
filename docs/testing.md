@@ -154,15 +154,15 @@ These require `npm run compile` to have run first. They exercise the artifacts
 that ship: the CLI as a process, the MCP server as a process, the packaged
 tarball.
 
-| Project            | Covers                                                                                 |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| `boundary`         | Import-surface rules across built output                                               |
-| `cli-boundary`     | The CLI driven as a subprocess                                                         |
-| `process-boundary` | Process supervision: start, readiness, stop, orphans                                   |
-| `mcp-boundary`     | The MCP server over real stdio                                                         |
-| `toolchain`        | Real CMake and real libuvcpp: five templates, a failing build, both provider contracts |
-| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                   |
-| `process-global`   | What a call leaves in the process it ran in, and whose session it is                   |
+| Project            | Covers                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `boundary`         | Import-surface rules across built output                                              |
+| `cli-boundary`     | The CLI driven as a subprocess                                                        |
+| `process-boundary` | Process supervision: start, readiness, stop, orphans                                  |
+| `mcp-boundary`     | The MCP server over real stdio                                                        |
+| `toolchain`        | Real CMake and real libuvcpp: six templates, a failing build, both provider contracts |
+| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                  |
+| `process-global`   | What a call leaves in the process it ran in, and whose session it is                  |
 
 `toolchain` is serial (`maxWorkers: 1`, `fileParallelism: false`) because it
 configures and compiles real CMake projects, and two of those at once on one
@@ -178,13 +178,13 @@ not a red one they learn to ignore.
 When libuvcpp _is_ present, the test:
 
 1. runs `uvp doctor` and asserts the reported version is at or above the floor,
-2. generates each of the five templates,
+2. generates each of the six templates,
 3. configures and compiles each one,
 4. starts each one **on its own port** and waits for readiness,
 5. drives a real request and asserts on the response,
 6. stops it and asserts the process is gone.
 
-Each template gets a distinct port (8090–8094 in the reference run). Sequential
+Each template gets a distinct port (8090–8095 in the reference run). Sequential
 probes sharing one port was the cause of a long-standing intermittent failure
 that looked like a flaky server and was actually a previous test's socket still
 in `TIME_WAIT`.
@@ -197,7 +197,17 @@ The verified output of that pass, against libuvcpp 1.7.0:
 ### websocket-echo  :8092 -> HTTP/1.1 101 Switching Protocols
 ### soap-service    :8093 -> <?xml version="1.0" encoding="utf-8"?><soap:Envelope …
 ### static-files    :8094 -> <!doctype html>
+### http3-service   :8095 -> hello over HTTP/3
 ```
+
+The `http3-service` row is the one that needs a word. It binds TCP and UDP on the
+same port, and this table is produced by a TCP readiness probe and a plain HTTP
+request — so what the row records is that the template's _other_ leg answers, and
+that the service printed the UDP port it opened before serving anything. The h3
+claim itself is made one project over, by
+`tests/toolchain/nativeProbe.test.ts`, which asks `uvp http --http-version 3` and
+gets its answer from libuvcpp's own QUIC client. A row here that read
+"HTTP/3 verified" would be a claim this probe cannot make.
 
 This list is the project's self-proof. If it stops being true, nothing else in
 the test suite is worth much.
@@ -345,7 +355,7 @@ The four verdicts are asked of one workspace on one port, reusing one build,
 because that is what a caller does — and because a pass that leaked its service
 would show up as the _next_ pass failing to bind. Ports are allocated per file
 (`8301`, `8311`, `8321`, `8322`) and stay disjoint from the toolchain lane's
-`8090–8094`.
+`8090–8095`.
 
 `http2.test.ts` is the one file here whose subject is a transport rather than a
 verdict, and it is written so that it cannot pass by accident. The generated
@@ -358,13 +368,17 @@ failing run is required to name `1.1` rather than merely to be red. The negative
 control for the whole file is the third test: `auto` negotiates down, so an
 evaluator that answered `passed: true` for any response at all would go red there.
 
-HTTP/3 is not tested because there is nothing to test — see
-[libuvcpp features](libuvcpp-features.md#http3-and-quic-travel-together) — and the
-file says so in its header rather than leaving a reader to wonder. What it
-asserts instead is the refusal, and the last test uses a plain Node HTTP/1.1
-server rather than a second generated workspace: the fact under test is uvp's
-classification of a protocol mismatch, which needs a real socket and a real
-response but no C++.
+HTTP/3 is not tested _here_, and the file says why in its header rather than
+leaving a reader to wonder. What it asserts instead is a refusal: `--http-version
+3` does not reach a h3 client from this lane, because the client is only asked for
+when verification is off and this call leaves it on — see
+[libuvcpp features](libuvcpp-features.md#http3-quic-and-the-web-layer-travel-together).
+The transport itself is covered where it can be: `tests/toolchain/nativeProbe.test.ts`
+generates `http3-service`, builds it, starts it, and completes an exchange over
+QUIC with libuvcpp's own client, with the same service answering over its TCP leg
+as the control. The last test here uses a plain Node HTTP/1.1 server rather than a
+second generated workspace: the fact under test is uvp's classification of a
+protocol mismatch, which needs a real socket and a real response but no C++.
 
 `manualPath.test.ts` is the only file here that spawns uvp itself rather than
 calling it: `uvp run --no-detach` does not exit while it holds a service, so the

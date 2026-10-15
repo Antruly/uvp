@@ -42,12 +42,14 @@ import type { Exchange } from "./verifyBundle.js";
  *
  * ## What is deliberately not here
  *
- * HTTP/3. libuvcpp 1.7.0's web layer has no HTTP/3 listener — `uvcpp_web_app`
- * documents the switch as arriving "when there is h3" — so there is no generated
- * service that could be asked for h3 and nothing this lane could observe. What
- * uvp says instead is pinned below: `--http-version 3` is refused, by name, as a
- * transport uvp's client does not have, rather than answered over HTTP/1.1 and
- * reported as the version the caller asked for.
+ * HTTP/3. The transport exists — the `http3-service` template serves it, and
+ * `tests/toolchain/nativeProbe.test.ts` completes an exchange over QUIC against a
+ * built one — but this lane's fixture is a `hello-http` workspace, so the question
+ * `--http-version 3` is asked against is an `http://` URL and the answer is a
+ * refusal. What is pinned below is that refusal: `invalid_request`, by name,
+ * naming `https://`, rather than an answer sent over HTTP/1.1 and reported as the
+ * version the caller asked for. The transport itself is covered where it can be
+ * answered.
  *
  * The install this lane runs against must also have been built with nghttp2. That
  * is not assumed: `set_h2c_enabled` is a no-op without it, `http2_enabled()`
@@ -223,14 +225,18 @@ describeServing(
       expect(failures.join(" ")).toContain("2.0");
     }, 120_000);
 
-    it("refuses HTTP/3 rather than answering it over HTTP/1.1", async () => {
-      // The honest statement of where HTTP/3 stands, and it is a refusal rather
-      // than a silent downgrade. libuvcpp's C ABI has an h3 client and server
-      // (`capi/uvcpp_c_http3.h`, `quic/uvcpp_quic_client.h`) but QUIC mandates
-      // TLS 1.3, so serving it needs a real certificate — which is the next row
-      // on the roadmap, not this one. A client that quietly sent HTTP/1.1 instead
-      // would make `--http-version 3` a flag that reports success for a transport
-      // it never used.
+    it("refuses HTTP/3 over a cleartext workspace rather than answering it over HTTP/1.1", async () => {
+      // A refusal rather than a silent downgrade, and this is the refusal a
+      // `uvp verify --http-version 3` actually meets: the pass builds its URL
+      // from the workspace's scheme, `hello-http` is cleartext, and QUIC has no
+      // cleartext mode. The code is `invalid_request` and the message names
+      // `https://`, because the part that is wrong is the request.
+      //
+      // The other two ways this can end are deliberately not exercised here,
+      // because neither is about HTTP/3: a TLS workspace reaches libuvcpp's QUIC
+      // client in a separate probe process, which is `toolchain_unavailable` on a
+      // host without the probe binary. `tests/toolchain/nativeProbe.test.ts` is
+      // where that client is actually asked, against a real `http3-service`.
       //
       // It sits in this describe rather than the next one because it goes through
       // `uvp verify`, which builds before it asks: the workspace declares the

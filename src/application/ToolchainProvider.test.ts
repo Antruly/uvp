@@ -17,7 +17,7 @@ import type { UvpFeature } from "../domain/features.js";
 const CONFIG_DECIDED: readonly (readonly [UvpFeature, readonly string[]])[] = [
   ["tls", ["UVCPP_OPENSSL_ENABLE"]],
   ["http2", ["UVCPP_NGHTTP2_ENABLE"]],
-  ["http3", ["UVCPP_HTTP3_ENABLE", "UVCPP_QUIC_ENABLE"]],
+  ["http3", ["UVCPP_HTTP3_ENABLE", "UVCPP_QUIC_ENABLE", "UVCPP_WEB_ENABLE"]],
   ["websocket", ["UVCPP_WEB_ENABLE", "UVCPP_WEBAPP_ENABLE"]],
   ["soap", ["UVCPP_WEB_ENABLE", "UVCPP_WEBAPP_ENABLE"]],
   ["db", ["UVCPP_DB_ENABLE"]],
@@ -68,14 +68,26 @@ describe("FEATURE_REQUIREMENTS", () => {
     ]);
   });
 
-  it("gates HTTP/3 on QUIC as well, because one without the other is a header with no transport", () => {
+  it("gates HTTP/3 on QUIC and on the web layer, because each without the others is a header with nothing under it", () => {
+    // QUIC for the transport — h3 is dialect-over-QUIC, and a build with the h3
+    // headers and no QUIC under them cannot carry one byte.
+    //
+    // Web for the *server* half, which is the one that is easy to miss: h3's
+    // client lives in `http3/` and installs its headers whatever else the build
+    // did, while `uvcpp_http_server` — the only h3 listener libuvcpp has — is in
+    // the web layer behind `#if UVCPP_WEB_ENABLE`. So a build with HTTP3 and QUIC
+    // on and web off satisfies a two-symbol check and then offers nothing that
+    // can accept a connection, which is a satisfied feature whose generated
+    // workspace does not compile.
     expect(FEATURE_REQUIREMENTS.http3.cmakeOptions).toEqual([
       "UVCPP_ENABLE_HTTP3",
       "UVCPP_ENABLE_QUIC",
+      "UVCPP_BUILD_WEB",
     ]);
     expect(FEATURE_REQUIREMENTS.http3.configSymbols).toEqual([
       "UVCPP_HTTP3_ENABLE",
       "UVCPP_QUIC_ENABLE",
+      "UVCPP_WEB_ENABLE",
     ]);
   });
 
@@ -120,8 +132,12 @@ describe("assessFeatures", () => {
     // that is already defined would send them to reconfigure for no reason.
     const assessment = await assessFeatures(["http3"], ["UVCPP_HTTP3_ENABLE"]);
     expect(assessment.unmet).toHaveLength(1);
-    expect(assessment.unmet[0]?.absentSymbols).toEqual(["UVCPP_QUIC_ENABLE"]);
-    expect(assessment.unmet[0]?.cmakeOptions).toEqual(["UVCPP_ENABLE_HTTP3", "UVCPP_ENABLE_QUIC"]);
+    expect(assessment.unmet[0]?.absentSymbols).toEqual(["UVCPP_QUIC_ENABLE", "UVCPP_WEB_ENABLE"]);
+    expect(assessment.unmet[0]?.cmakeOptions).toEqual([
+      "UVCPP_ENABLE_HTTP3",
+      "UVCPP_ENABLE_QUIC",
+      "UVCPP_BUILD_WEB",
+    ]);
   });
 
   it("never consults the header probe for a feature a config symbol decides", async () => {

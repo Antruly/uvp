@@ -208,8 +208,16 @@ export const FEATURE_REQUIREMENTS: Record<UvpFeature, UvpFeatureRequirement> = {
   http3: {
     // HTTP/3 is dialect-over-QUIC; enabling one without the other yields a build
     // with the header present and no transport under it.
-    cmakeOptions: ["UVCPP_ENABLE_HTTP3", "UVCPP_ENABLE_QUIC"],
-    configSymbols: ["UVCPP_HTTP3_ENABLE", "UVCPP_QUIC_ENABLE"],
+    //
+    // `UVCPP_BUILD_WEB` is here because the *serving* half of h3 is
+    // `uvcpp_http_server`, which lives in the web layer behind
+    // `#if UVCPP_WEB_ENABLE`. Without it the h3 headers still install — the
+    // client half is in `http3/` — so a config-symbol check that stopped at
+    // HTTP3/QUIC would call the feature satisfied and then hand the caller a
+    // template that cannot compile. The client-only build is a real build; it is
+    // just not one that can serve what this feature's generated code serves.
+    cmakeOptions: ["UVCPP_ENABLE_HTTP3", "UVCPP_ENABLE_QUIC", "UVCPP_BUILD_WEB"],
+    configSymbols: ["UVCPP_HTTP3_ENABLE", "UVCPP_QUIC_ENABLE", "UVCPP_WEB_ENABLE"],
     header: "http3/uvcpp_h3_common.h",
   },
   grpc: {

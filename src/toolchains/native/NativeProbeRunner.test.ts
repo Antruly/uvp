@@ -32,6 +32,15 @@ const EXECUTABLE = process.execPath;
 
 const SIGNAL = new AbortController().signal;
 
+/**
+ * What an available probe answers `--version` with.
+ *
+ * Deliberately without an `exchanges` field, because that is what every probe
+ * built before the HTTP/3 exchange answered — and the WebSocket runner has to keep
+ * accepting those. It was the only exchange then, so a build that does not list it
+ * still speaks it perfectly well; requiring the field would refuse a binary that
+ * works. The HTTP/3 runner requires it, for the reason its own tests state.
+ */
 const VERSION = JSON.stringify({
   probe: "uvcpp-capi",
   abi_version: 1,
@@ -126,8 +135,7 @@ describe("deciding whether the native stack can be used here", () => {
       state: "available",
       path: EXECUTABLE,
       libraryVersion: "1.7.0",
-    });
-    // `--version` and nothing else: the check that establishes the stack works
+    }); // `--version` and nothing else: the check that establishes the stack works
     // must not connect to anything, or "is this host able to probe" would be
     // answered by a probe.
     expect(calls).toHaveLength(1);
@@ -234,6 +242,10 @@ describe("writing the request the probe reads", () => {
     );
 
     expect(requestOf(calls[1])).toEqual({
+      // The exchange, named on every request: one binary serves both, and a
+      // request that did not say which one it was would be answered by whichever
+      // the probe defaults to — a report about another transport.
+      exchange: "websocket",
       url: "ws://127.0.0.1:9000/echo",
       idle_ms: 1_500,
       total_timeout_ms: 6_500,

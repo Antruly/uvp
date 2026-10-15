@@ -20,7 +20,7 @@ import {
 import type { RealLibuvcpp } from "../support/realLibuvcpp.js";
 
 /**
- * The self-proof: five templates, built by a real CMake against a real libuvcpp,
+ * The self-proof: six templates, built by a real CMake against a real libuvcpp,
  * started on their own ports, and answered.
  *
  * This is the one lane that can say whether uvp *works*, as opposed to whether
@@ -36,12 +36,24 @@ import type { RealLibuvcpp } from "../support/realLibuvcpp.js";
  * ### websocket-echo  :8092 -> HTTP/1.1 101 Switching Protocols
  * ### soap-service    :8093 -> <?xml version="1.0" encoding="utf-8"?><soap:Envelope …
  * ### static-files    :8094 -> <!doctype html>
+ * ### http3-service   :8095 -> hello over HTTP/3
  * ```
  *
  * That table is the reference run recorded in [docs/testing.md](../../docs/testing.md),
  * and the assertions below are the same facts stated as code — one test per row,
  * each naming the template and the port, so a failure points at a row. The
  * elided rows are asserted as prefixes, which is what the doc's `…` means.
+ *
+ * **`http3-service` is rowed over its TCP leg**, and that is a division of labour
+ * rather than a shortcut. This file's tests may not depend on the native probe —
+ * every one of them runs whenever a libuvcpp is installed, and the probe needs a
+ * C++ build with `UVCPP_ENABLE_CAPI=ON` on top of that — so the row here is the
+ * one thing this lane can always establish: the template compiles, starts with a
+ * certificate, opens **both** legs (the test reads the startup line naming the
+ * QUIC port), and answers on the route table. The h3 leg itself is
+ * `nativeProbe.test.ts`'s subject, where libuvcpp's own QUIC client is the
+ * requester; a claim about which transport carried a request belongs with the
+ * client that can tell.
  *
  * **Ports are fixed and distinct.** Each template listens on its own number
  * rather than on a port reserved per run. Sequential probes sharing one port was
@@ -70,6 +82,21 @@ const PORT_BY_TEMPLATE: Record<TemplateId, number> = {
   "websocket-echo": 8092,
   "soap-service": 8093,
   "static-files": 8094,
+  "http3-service": 8095,
+};
+
+/**
+ * The features a template must be asked for, where it has no default that works.
+ *
+ * Only `http3-service` needs this, and it needs them rather than merely allowing
+ * them: h3 runs on QUIC, QUIC has no cleartext mode, so a workspace without a
+ * certificate is not a lesser h3 service — it is not an h3 service, and
+ * `uvp init` refuses to generate one. Every other template is generated the way
+ * a person would generate it, with no `--features` at all, so its workspace is
+ * the default one.
+ */
+const FEATURES_BY_TEMPLATE: Partial<Record<TemplateId, readonly string[]>> = {
+  "http3-service": ["tls", "http3"],
 };
 
 /** What the service actually said, per template, so the table can be checked. */
@@ -112,12 +139,16 @@ const why = (result: Record<string, unknown>): string =>
  * Generate and build one template, and hand back the workspace.
  *
  * The build is asserted here rather than in each test because there is nothing
- * template-specific about it: every one of the five must compile with the same
+ * template-specific about it: every one of the six must compile with the same
  * flags against the same library, and a failure names the template through the
  * test that called it.
  */
 const builtTemplate = async (template: TemplateId) => {
-  const workspace = await createWorkspace(template, PORT_BY_TEMPLATE[template]);
+  const workspace = await createWorkspace(
+    template,
+    PORT_BY_TEMPLATE[template],
+    FEATURES_BY_TEMPLATE[template] ?? [],
+  );
   const outcome = await buildWorkspace(workspace);
   const result = resultOrThrow(outcome);
   expect(result["succeeded"], `${template} failed to build: ${why(result)}`).toBe(true);
@@ -127,6 +158,67 @@ const builtTemplate = async (template: TemplateId) => {
   // and left nothing to run.
   expect(existsSync(workspace.binary), `no binary at ${workspace.binary}`).toBe(true);
   return workspace;
+};
+
+/**
+ * The `http3-service` row, written out here rather than inline below.
+ *
+ * It is also the one row that is *not* only about the route table. This template
+ * binds TCP and UDP on the same number, and this probe reaches it over TCP — so
+ * the row's own evidence that the QUIC leg exists is the line the service prints
+ * after `listen_quic` returned 0, naming the UDP port it was bound on. That is an
+ * observation no number of TCP requests could produce, and it is why this row can
+ * appear in a TCP-driven table at all.
+ *
+ * Named at module scope because the lane's per-function budget is an error at 150
+ * lines, and six inline rows cross it.
+ */
+const http3Service = async (): Promise<void> => {
+  const workspace = await builtTemplate("http3-service");
+  const port = workspace.port;
+  const service = await startService(workspace);
+  try {
+    // The QUIC leg's own evidence, read before any request is made. The service
+    // prints this line only after `listen_quic` returned a success, and it names
+    // the UDP port the endpoint was bound on — so this is an observation that the
+    // leg this template exists for was opened, which no number of TCP requests
+    // could establish.
+    expect(service.output()).toMatch(/HTTP\/3 over QUIC on UDP \d+/u);
+
+    // The TCP leg over TLS. `--no-tls` because the certificate is the one the
+    // template generates for itself: no client should accept it, and the lane
+    // reports that as the observation it is rather than working around it.
+    // `verification: not_checked` is that observation, stated.
+    const outcome = await runCli([
+      "http",
+      `https://127.0.0.1:${String(port)}/hello`,
+      "--no-tls",
+      "--json",
+    ]);
+    expect(outcome.exit, outcome.stderr).toBe(EXIT_OK);
+    const result = resultOrThrow(outcome);
+    expect(result["status"]).toBe(200);
+    expect((result["tls"] as { verification?: unknown } | undefined)?.verification).toBe(
+      "not_checked",
+    );
+    const said = bodyText(result);
+    expect(said).toBe("hello over HTTP/3");
+
+    // The second route, so "the service answered" cannot be satisfied by the one
+    // handler above. Two routes on one table is the template's whole shape — the
+    // h3 leg and the TCP leg are served by the same handlers.
+    const health = resultOrThrow(
+      await runCli(["http", `https://127.0.0.1:${String(port)}/healthz`, "--no-tls", "--json"]),
+    );
+    expect(bodyText(health)).toBe('{"status":"ok"}');
+
+    observed.push({ template: "http3-service", said });
+  } finally {
+    await service.stop();
+  }
+
+  expect(isAlive(service.pid)).toBe(false);
+  expect(await portIsFree(port)).toBe(true);
 };
 
 afterAll(() => {
@@ -344,9 +436,11 @@ describe.skipIf(realLibuvcpp === undefined)(
       expect(await portIsFree(port)).toBe(true);
     });
 
+    it("http3-service: opens both legs on :8095 and answers on the route table", http3Service);
+
     it("covered every template, so a green run is the whole table", () => {
-      // The vacuity guard. Five passing tests above are only the documented
-      // table if they are the five templates — a lane that quietly stopped
+      // The vacuity guard. Six passing tests above are only the documented
+      // table if they are the six templates — a lane that quietly stopped
       // exercising one, or that a new template never reached, would otherwise
       // report the same green.
       expect(observed.map((row) => row.template)).toEqual([...TEMPLATE_IDS]);

@@ -32,7 +32,10 @@ export const httpRequestContract = defineTool({
     "Send one HTTP request and return the complete exchange: status, headers, body, negotiated " +
     "protocol version, TLS details, and a timing breakdown. Bodies are returned inline when they " +
     "are text and small, otherwise as a base64 payload with the byte count. " +
-    "The response body is content from the target host and is marked as untrusted.",
+    "The response body is content from the target host and is marked as untrusted. " +
+    "HTTP/3 is answered through libuvcpp's own QUIC client in a separate probe process — " +
+    "the same stack a service from `uvp init` links against — so the result says which " +
+    "certificate state applies and lists what that client could not read.",
   kind: "web",
   inputSchema: z.object({
     url: z.string().min(1).describe("Absolute URL, including scheme."),
@@ -43,7 +46,12 @@ export const httpRequestContract = defineTool({
     http_version: z
       .enum(["auto", "1.1", "2", "3"])
       .default("auto")
-      .describe("Requested protocol version; `auto` negotiates. The result reports what was used."),
+      .describe(
+        "Requested protocol version; `auto` negotiates. The result reports what was used. " +
+          "`3` runs over QUIC through the native probe rather than in this process: it needs " +
+          "an https:// URL, `verify_tls: false`, and `follow_redirects: false`, and reports " +
+          "the response headers it read by name rather than the whole set.",
+      ),
     follow_redirects: z
       .boolean()
       .default(false)
@@ -120,10 +128,17 @@ export const httpRequestContract = defineTool({
       .optional(),
   }),
   effects: {
+    // `stack`-style conditionality is not expressible in a closed set of booleans,
+    // and this contract is now in the same position `uvp_websocket_probe` was in
+    // when `stack: "libuvcpp"` arrived: only `http_version: "3"` starts a process —
+    // Node has no HTTP/3 client, so that one version is asked through the native
+    // probe — and every other version is answered in this process. A caller that
+    // reads this to decide whether the tool starts a process is better served by a
+    // yes it may not use than by a no that is not always true.
     readsFilesystem: false,
     writesFilesystem: false,
     network: true,
-    spawnsProcess: false,
+    spawnsProcess: true,
     mutatesTarget: false,
   },
   returnsTargetContent: true,

@@ -30,7 +30,14 @@ export const workspaceCreateContract = defineTool({
       .min(1)
       .describe("Project name; used for the CMake target and the default binary name."),
     template: z
-      .enum(["hello-http", "rest-api", "websocket-echo", "soap-service", "static-files"])
+      .enum([
+        "hello-http",
+        "rest-api",
+        "websocket-echo",
+        "soap-service",
+        "static-files",
+        "http3-service",
+      ])
       .default("hello-http"),
     features: z
       .array(z.enum(UVP_FEATURES))

@@ -25,8 +25,76 @@ export const TEMPLATE_IDS = [
   "websocket-echo",
   "soap-service",
   "static-files",
+  "http3-service",
 ] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
+
+/**
+ * The features a template can honour, for the templates where that is a question.
+ *
+ * The web templates leave it open, and that is not laxity: they are written
+ * against `uvcpp_web_app`, which serves whichever modules the build has, so a
+ * feature they do not name in the source is still a real build requirement
+ * recorded in `uvp.json` and still checkable against the install.
+ *
+ * `http3-service` is different for a reason that is not taste. It is written
+ * against `uvcpp_http_server`, because `uvcpp_web_app` cannot serve HTTP/3 at
+ * all: the web-app layer installs a stream-claim hook for its middleware chain,
+ * and the h3 leg refuses that hook — a request that reaches one is answered 500
+ * with a line on stderr rather than routed. So this template's feature list is
+ * fixed by which headers it includes, and a request for a feature it does not
+ * write code for would be a manifest claiming a module the source never touches.
+ *
+ * `tls` and `http3` are *required* rather than allowed, because h3 runs on QUIC
+ * and QUIC has no cleartext mode: an h3 service without a certificate is not a
+ * lesser service, it is not an h3 service.
+ */
+export const TEMPLATE_FEATURE_RULES: Partial<
+  Record<
+    TemplateId,
+    { readonly required: readonly UvpFeature[]; readonly allowed: readonly UvpFeature[] }
+  >
+> = {
+  "http3-service": {
+    required: ["tls", "http3"],
+    allowed: ["tls", "http3", "http2"],
+  },
+};
+
+/**
+ * Why this template cannot be asked for these features, or `undefined`.
+ *
+ * The message is the whole of what the caller needs to act on, and it names the
+ * command that would work — a rule stated as "unsupported feature" leaves the
+ * caller to work out which combination is supported by trying them.
+ */
+export const templateFeatureProblem = (
+  template: TemplateId,
+  features: readonly UvpFeature[],
+): string | undefined => {
+  const rule = TEMPLATE_FEATURE_RULES[template];
+  if (rule === undefined) return undefined;
+
+  const missing = rule.required.filter((feature) => !features.includes(feature));
+  if (missing.length > 0) {
+    return (
+      `the ${template} template serves HTTP/3 over QUIC, which has no cleartext mode, so it ` +
+      `needs the ${missing.join(" and ")} feature${missing.length === 1 ? "" : "s"}: ` +
+      `pass --features ${[...features, ...missing].join(",")}`
+    );
+  }
+
+  const refused = features.filter((feature) => !rule.allowed.includes(feature));
+  if (refused.length > 0) {
+    return (
+      `the ${template} template writes code for ${rule.allowed.join(", ")} and nothing else, ` +
+      `so ${refused.join(", ")} would be recorded in uvp.json without any code behind it: ` +
+      `pass --features ${rule.allowed.join(",")}`
+    );
+  }
+
+  return undefined;
+};
 
 export interface TemplateInput {
   readonly name: string;
@@ -194,6 +262,35 @@ const webTail = (input: TemplateInput): string => `
 `;
 
 /**
+ * Which certificate the environment names, and the refusal when it names half of
+ * one.
+ *
+ * Emitted once and used by both certificate setups — the `uvcpp_web_app` one and
+ * the `uvcpp_http_server` one — because it is one interpretation of two
+ * environment variables, and two copies of it would be two chances to disagree
+ * about what an empty value means. The setups differ in what they do with the
+ * pair; they do not differ in how they read it.
+ */
+const certificateFromEnvironment = (): string => `
+  const char* cert_file = std::getenv("UVP_TLS_CERT");
+  const char* key_file = std::getenv("UVP_TLS_KEY");
+  // An empty value counts as "not naming a certificate": \`UVP_TLS_CERT=$CERT\`
+  // with CERT unset in the caller's shell is a mistake, and reading it as "no
+  // certificate" would quietly do something else instead of reporting it.
+  const char* cert = (cert_file != nullptr && cert_file[0] != '\\0') ? cert_file : nullptr;
+  const char* key = (key_file != nullptr && key_file[0] != '\\0') ? key_file : nullptr;
+  if ((cert == nullptr) != (key == nullptr)) {
+    // Half a pair is not a configuration to guess at. The missing half could be
+    // the other half of a real certificate or of the self-signed fallback, and
+    // only one of those is what the operator meant, so neither is assumed.
+    std::cerr << "UVP_TLS_CERT and UVP_TLS_KEY are given together or not at all; "
+              << (cert == nullptr ? "UVP_TLS_CERT" : "UVP_TLS_KEY")
+              << " is missing or empty. Refusing to start rather than serve something else.\\n";
+    return 1;
+  }
+`;
+
+/**
  * HTTPS, when the workspace declared the `tls` module.
  *
  * A workspace that asked for TLS must not come up serving cleartext. That is the
@@ -230,19 +327,9 @@ const tlsSetup = (input: TemplateInput): string => {
   // With neither variable set, a self-signed certificate is generated for
   // localhost. Clients that check certificates will refuse it, which is the
   // point: it is a development certificate, not a deployment one.
-  const char* cert_file = std::getenv("UVP_TLS_CERT");
-  const char* key_file = std::getenv("UVP_TLS_KEY");
-  if ((cert_file == nullptr) != (key_file == nullptr)) {
-    // Half a pair is not a configuration to guess at. The missing half could be
-    // the other half of a real certificate or of the self-signed fallback, and
-    // only one of those is what the operator meant, so neither is assumed.
-    std::cerr << "UVP_TLS_CERT and UVP_TLS_KEY are set together or not at all; "
-              << (cert_file == nullptr ? "UVP_TLS_CERT" : "UVP_TLS_KEY")
-              << " is missing. Refusing to start rather than serve something else.\\n";
-    return 1;
-  }
-  if (cert_file != nullptr) {
-    app.enable_ssl(cert_file, key_file);
+${certificateFromEnvironment()}
+  if (cert != nullptr) {
+    app.enable_ssl(cert, key);
     // enable_ssl reads and checks the pair where it is called, so a path that
     // does not exist or a key that does not match is reported here, naming the
     // file, rather than at the first handshake — where a client sees only a
@@ -253,7 +340,7 @@ const tlsSetup = (input: TemplateInput): string => {
       std::cerr << "TLS is unusable, so this service will not start: " << app.ssl_error() << "\\n";
       return 1;
     }
-    std::cout << "serving HTTPS with the certificate in " << cert_file << "\\n" << std::flush;
+    std::cout << "serving HTTPS with the certificate in " << cert << "\\n" << std::flush;
   } else {
     app.enable_self_signed("localhost");
     std::cout << "serving HTTPS with a generated self-signed certificate for localhost; "
@@ -452,12 +539,208 @@ ${webAppSetup(input)}
                "static routes will return 500\\n" << std::flush;
 ${webTail(input)}`;
 
+/**
+ * The preamble of the one template that does not use `uvcpp_web_app`.
+ *
+ * `http3-service` is written against `uvcpp_http_server` because the web-app
+ * layer's stream-claim hook is refused by the h3 leg — see the note on
+ * `TEMPLATE_FEATURE_RULES`. The consequence for this file is that the web-app
+ * headers, which carry the config macros into every other template, are not here
+ * at all, so `<uvcpp/uvcpp_config.h>` is included explicitly and first: the
+ * guards below are the first thing in the file that needs those macros, and a
+ * missing include would turn each of them into a compile error about an
+ * undefined identifier rather than the guard's own message.
+ */
+const http3Preamble = (input: TemplateInput): string => `#include <uvcpp/uvcpp_config.h>
+#include <ssl/uvcpp_ssl_context.h>
+#include <web/uvcpp_http_server.h>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+${featureGuard(input)}
+using namespace uvcpp;
+`;
+
+/**
+ * The certificate, for a service that has no cleartext mode to fall back to.
+ *
+ * It is the same reading of the same two variables that `tlsSetup` does, and
+ * deliberately not a second one: `certificateFromEnvironment` owns that
+ * interpretation, including what an empty value means. What differs is what
+ * happens next. `uvcpp_web_app` is handed the pair through `enable_ssl`, which
+ * defers the read to the framework and reports through `ssl_error()`; the plain
+ * server wants an `uvcpp_ssl_context` the operator builds, so the loads and the
+ * `check_private_key` call are here and each failure names the file it came
+ * from. Both refuse to start rather than serve something else, which is the
+ * property that matters and the reason these are two spellings of one decision
+ * rather than two decisions.
+ *
+ * The self-signed fallback is kept for the same reason `tlsSetup` keeps it: it
+ * is what makes a freshly generated workspace runnable, and it is a certificate
+ * no verifying client should accept — which uvp's own h3 probe does not, unless
+ * it was told to.
+ */
+const http3CertificateSetup = (): string => `  uvcpp_ssl_context tls(tls_mode::SERVER);
+${certificateFromEnvironment()}
+  if (cert != nullptr) {
+    if (!tls.load_certificate_file(cert) || !tls.load_private_key_file(key) || !tls.check_private_key()) {
+      return Fail("TLS is unusable with " + std::string(cert) + " and " + std::string(key) +
+                  ": HTTP/3 runs on QUIC, which has no cleartext mode, so this service will not "
+                  "start rather than serve something a caller cannot verify.");
+    }
+    std::cout << "serving HTTPS with the certificate in " << cert << "\\n" << std::flush;
+  } else {
+    if (!tls.generate_self_signed("localhost")) {
+      return Fail("no UVP_TLS_CERT/UVP_TLS_KEY were given and a self-signed certificate could "
+                  "not be generated, so there is nothing for the QUIC leg to present.");
+    }
+    std::cout << "serving HTTPS with a generated self-signed certificate for localhost; clients "
+                 "that verify will refuse it. Set UVP_TLS_CERT and UVP_TLS_KEY to serve a real "
+                 "one.\\n" << std::flush;
+  }
+`;
+
+/**
+ * The HTTP/2 lines, when the workspace declared the `http2` module.
+ *
+ * Both are load-bearing and neither is the default. ALPN is how a TLS client and
+ * this server agree on h2 — without a selector the TCP leg answers h1.1 to
+ * everyone — and `set_http2_enabled` is off by default on the plain server,
+ * which is the opposite of `uvcpp_web_app`. A selector set here applies to the
+ * TCP leg only: the QUIC leg negotiates `h3` inside QUIC's own TLS handshake and
+ * is not affected by it.
+ */
+const http3Http2Setup = (input: TemplateInput): string =>
+  input.features.includes("http2")
+    ? `
+  // ALPN for the TCP leg, because this workspace declared the http2 module.
+  // Without a selector the TLS listener answers h1.1 to everyone. This affects
+  // the TCP leg only: the QUIC leg negotiates h3 inside QUIC's own handshake.
+  tls.set_alpn_select_protos({"h2", "http/1.1"});
+`
+    : "";
+
+/**
+ * The `set_http2_enabled` call, and the note about the call that is not beside it.
+ *
+ * The omission is the interesting half, and it is written into the generated
+ * source rather than only into this comment: a reader who knows the other
+ * templates will look for `set_h2c_enabled` there, and finding nothing needs to
+ * be told why nothing is the answer. h2c is HTTP/2 over a connection *without*
+ * TLS, and the only TCP listener this service has carries a TLS context — so no
+ * cleartext connection ever reaches the 24-byte preface check that decides h2c,
+ * and the call would be a line that compiles, runs, and decides nothing.
+ */
+const http3Http2Enable = (input: TemplateInput): string =>
+  input.features.includes("http2")
+    ? `
+  // HTTP/2 over TLS on the TCP leg. Off by default on the plain server, which is
+  // the opposite of uvcpp_web_app, so it is stated here or h2 never happens. There
+  // is no set_h2c_enabled beside it, and that is the decision rather than an
+  // omission: h2c is HTTP/2 over a connection *without* TLS, while this listener
+  // installs a TLS context — so no cleartext connection reaches h2c's preface
+  // check, and the call would compile, run, and decide nothing.
+  server.set_http2_enabled(true);`
+    : "";
+
+/**
+ * An HTTP/3 service: one route table, two listeners.
+ *
+ * The shape is the point, and it is not obvious from either header alone.
+ * `uvcpp_http_server` runs both transports on one loop and one route table, so
+ * the routes are registered once and reachable over h1.1, h2 and h3 — the
+ * handlers cannot tell which leg a request arrived on, and for a service that
+ * only reads a path and writes a body that is the whole story. The two legs are
+ * configured separately (`get_tcp_server()->set_ssl_context` and
+ * `set_quic_ssl_context`) and can be given different contexts; this template
+ * gives them the same one, because a service that presents two certificates is a
+ * decision an operator should make deliberately rather than inherit from a
+ * template.
+ *
+ * `bind` is the TCP half and `listen_quic` is the QUIC half; both must be done
+ * before `run()`, and `listen()` is what makes the TCP port connectable. The
+ * order below is the required one: the QUIC leg needs its TLS context installed
+ * before `listen_quic` or it returns `UV_EINVAL` — the framework refuses to open
+ * a QUIC endpoint it could not secure.
+ */
+const http3ServiceMain = (input: TemplateInput): string => `${http3Preamble(input)}
+namespace {
+
+/** A response body as text, with the header a caller needs to read it as text. */
+void SendText(uvcpp_http_response& resp, http_status status, const std::string& body,
+              const char* content_type) {
+  resp.status_code = status;
+  resp.headers.push_back(http_header{"content-type", content_type});
+  resp.body = uvcpp_buf(body);
+}
+
+int Fail(const std::string& what) {
+  std::cerr << what << "\\n";
+  return 1;
+}
+
+}  // namespace
+
+// There is no cleartext mode to fall back to and no second port for one: QUIC
+// carries its TLS handshake inside the transport, so this service has a
+// certificate before it has anything else, and the two listeners below share the
+// port number — UDP for HTTP/3, TCP for HTTP/1.1${input.features.includes("http2") ? " and HTTP/2" : ""}.
+int main() {
+${http3CertificateSetup()}${http3Http2Setup(input)}
+  uvcpp_http_server server;
+
+  // One route table for both legs. A handler receives a uvcpp_tcp_client* that is
+  // nullptr on the h3 leg, because on that leg there is no TCP connection behind
+  // the request — code that uses that pointer has to check it, and this template
+  // does not use it at all.
+  server.get("/hello", [](uvcpp_http_request&, uvcpp_http_response& resp, uvcpp_tcp_client*) {
+    SendText(resp, http_status::OK, "hello over HTTP/3", "text/plain; charset=utf-8");
+  });
+  server.get("/healthz", [](uvcpp_http_request&, uvcpp_http_response& resp, uvcpp_tcp_client*) {
+    SendText(resp, http_status::OK, R"({"status":"ok"})", "application/json");
+  });
+
+  // The TCP leg. The handshake timeout is set explicitly, at the framework's own
+  // default, because it is the bound that covers the case idle_timeout_ms does
+  // not: a peer that opens a connection and never finishes the handshake is not
+  // idle by the framework's reckoning.
+  server.get_tcp_server()->set_ssl_context(&tls);
+  server.get_tcp_server()->set_tls_handshake_timeout_ms(10000);${http3Http2Enable(input)}
+  if (server.bind("0.0.0.0", ${String(input.port)}) != 0) {
+    return Fail("could not bind TCP port ${String(input.port)}");
+  }
+
+  // The QUIC leg. QUIC has no cleartext mode, so this is the call that fails if
+  // the context above was not installed.
+  server.set_quic_ssl_context(&tls);
+  const int quic = server.listen_quic(${String(input.port)}, "0.0.0.0");
+  if (quic != 0) {
+    return Fail("could not listen for HTTP/3 on UDP ${String(input.port)}: libuv error " +
+                std::to_string(quic));
+  }
+
+  const int tcp = server.listen();
+  if (tcp != 0) return Fail("could not listen: libuv error " + std::to_string(tcp));
+
+  std::cout << "listening on https://127.0.0.1:${String(input.port)} (TCP HTTP/1.1${
+    input.features.includes("http2") ? " and HTTP/2" : ""
+  }) "
+               "and HTTP/3 over QUIC on UDP "
+            << server.quic_listen_port() << "\\n" << std::flush;
+
+  const int rc = server.run();
+  std::cerr << "the server loop ended with " << rc << "\\n";
+  return rc == 0 ? 0 : 1;
+}
+`;
+
 const MAIN_BY_TEMPLATE: Record<TemplateId, (input: TemplateInput) => string> = {
   "hello-http": helloHttpMain,
   "rest-api": restApiMain,
   "websocket-echo": websocketEchoMain,
   "soap-service": soapServiceMain,
   "static-files": staticFilesMain,
+  "http3-service": http3ServiceMain,
 };
 
 /**
@@ -520,6 +803,64 @@ with the reason OpenSSL gave — which is the honest result, and what
 `;
 };
 
+/**
+ * The section an HTTP/3 workspace's README needs and the others must not carry.
+ *
+ * Two things about this service are not visible from the source in the way they
+ * are for the others: that it answers on two transports with one route table,
+ * and that the ordinary tools a reader would reach for do not speak the second
+ * one. Both are deployment facts, so both are stated here.
+ */
+const http3Readme = (input: TemplateInput): string => `
+## HTTP/3
+
+This service puts **one route table on two transports**:
+
+| Transport | Protocol | Port |
+| --------- | ------------------------- | ---- |
+| UDP | HTTP/3 over QUIC | ${String(input.port)} |
+| TCP | HTTP/1.1${input.features.includes("http2") ? " and HTTP/2" : ""} over TLS | ${String(input.port)} |
+
+A handler cannot tell which leg a request arrived on, so the routes above are
+reachable over any of them. The TCP leg is what the port number in \`uvp.json\`
+refers to, and it is the one a browser or \`curl\` will use without being told
+anything.
+
+Talking to the QUIC leg takes a client that speaks HTTP/3 — \`curl\` does not
+unless it was built with \`--http3\`. \`uvp http\` does, through the probe it
+keeps for exactly this:
+
+\`\`\`bash
+uvp http https://127.0.0.1:${String(input.port)}/hello --http-version 3 --no-tls
+\`\`\`
+
+Both legs present the same certificate, which here is the generated self-signed
+one — so a client that verifies refuses it, and \`--no-tls\` is what a request
+against a freshly generated service needs. uvp does not skip the check on the
+caller's behalf: with it on, the request is refused before anything is spawned,
+and with it off the result says \`verification: not_checked\` rather than
+claiming a chain it never examined.
+`;
+
+/**
+ * How to change the port, which is not the same instruction for every template.
+ *
+ * The web-app templates take theirs from `set_port`; `http3-service` is written
+ * against the plain server and binds it in `bind` and `listen_quic`. A README
+ * that named the wrong function would send a reader to edit a line their project
+ * does not contain — and the reader most likely to follow it is the one whose
+ * port is already busy, which is exactly when nothing else works either.
+ */
+const portNote = (template: TemplateId, input: TemplateInput): string => {
+  const recorded = "the port is also recorded in `uvp.json` so tooling can find it.";
+  return template === "http3-service"
+    ? `The service listens on port ${String(input.port)} over both transports. If that port is
+busy, change the number in \`server.bind\` and \`server.listen_quic\` in \`src/main.cpp\` —
+${recorded}`
+    : `The service listens on port ${String(input.port)}. If that port is busy, edit
+\`set_port\` in \`src/main.cpp\` — ${recorded}`;
+};
+
 const readme = (input: TemplateInput, template: TemplateId): string => `# ${input.name}
 
 Generated by [uvp](https://github.com/Antruly/uvp) from the \`${template}\` template.
@@ -550,10 +891,8 @@ binary's location:
 ./build/${input.name}
 \`\`\`
 
-The service listens on port ${String(input.port)}. If that port is busy, edit
-\`set_port\` in \`src/main.cpp\` — the port is also recorded in \`uvp.json\` so
-tooling can find it.
-${tlsReadme(input)}
+${portNote(template, input)}
+${tlsReadme(input)}${template === "http3-service" ? http3Readme(input) : ""}
 ## Verify
 
 \`\`\`bash

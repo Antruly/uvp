@@ -50,7 +50,12 @@ if(NOT NLOHMANN_JSON_HEADER)
   message(FATAL_ERROR "nlohmann/json.hpp is not in ${UVCPP_INCLUDE_DIR}; the probe needs it to read its request.")
 endif()
 
-add_executable(uvcpp-probe main.cpp)
+# Three translation units: one per exchange, and `main.cpp` holding the protocol
+# both of them speak. One file per exchange is what keeps the h3 half from
+# becoming a second copy of the WebSocket half's ending logic — the shared part
+# lives in `probe.h`, and the watchdog in it is a template over each exchange's own
+# run state.
+add_executable(uvcpp-probe main.cpp websocket_exchange.cpp http3_exchange.cpp)
 target_include_directories(uvcpp-probe PRIVATE "${UVCPP_INCLUDE_DIR}")
 target_link_libraries(uvcpp-probe PRIVATE "${UVCPP_LIBRARY}")
 

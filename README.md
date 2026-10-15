@@ -136,28 +136,32 @@ That last rule is the one that shapes everything else. A tool that says
 
 ## What uvp can do
 
-| Task                                                           | Tools                                   |
-| -------------------------------------------------------------- | --------------------------------------- |
-| Check the toolchain and which libuvcpp modules are present     | `uvp_doctor`                            |
-| Scaffold a buildable project (5 templates)                     | `uvp_workspace_create`                  |
-| Configure and build with CMake                                 | `uvp_build`                             |
-| Start a service and wait for it to actually answer             | `uvp_run`, `uvp_run_stop`               |
-| Drive HTTP/1.1 and HTTP/2 requests, with timing and TLS detail | `uvp_http_request`                      |
-| Probe a WebSocket endpoint                                     | `uvp_websocket_probe`                   |
-| Post a SOAP envelope and read the reply                        | `uvp_soap_call`                         |
-| Measure throughput and latency percentiles                     | `uvp_load_test`                         |
-| Record a session of exchanges for later reading                | `uvp_capture_start`, `uvp_capture_read` |
-| Replay a recorded session against a live target                | `uvp_capture_replay`                    |
-| Evaluate assertions against a recorded exchange                | `uvp_assert_exchange`                   |
-| Do all of the above as one supervised pass                     | `uvp_verify`                            |
-| Compare two verification reports and see what moved            | `uvp_bundle_diff`                       |
+| Task                                                        | Tools                                   |
+| ----------------------------------------------------------- | --------------------------------------- |
+| Check the toolchain and which libuvcpp modules are present  | `uvp_doctor`                            |
+| Scaffold a buildable project (6 templates)                  | `uvp_workspace_create`                  |
+| Configure and build with CMake                              | `uvp_build`                             |
+| Start a service and wait for it to actually answer          | `uvp_run`, `uvp_run_stop`               |
+| Drive HTTP/1.1, HTTP/2, and HTTP/3 requests, and report TLS | `uvp_http_request`                      |
+| Probe a WebSocket endpoint                                  | `uvp_websocket_probe`                   |
+| Post a SOAP envelope and read the reply                     | `uvp_soap_call`                         |
+| Measure throughput and latency percentiles                  | `uvp_load_test`                         |
+| Record a session of exchanges for later reading             | `uvp_capture_start`, `uvp_capture_read` |
+| Replay a recorded session against a live target             | `uvp_capture_replay`                    |
+| Evaluate assertions against a recorded exchange             | `uvp_assert_exchange`                   |
+| Do all of the above as one supervised pass                  | `uvp_verify`                            |
+| Compare two verification reports and see what moved         | `uvp_bundle_diff`                       |
 
 Templates: `hello-http`, `rest-api`, `websocket-echo`, `soap-service`,
-`static-files`.
+`static-files`, `http3-service`.
 
 Features: `tls`, `http2`, `http3`, `grpc`, `websocket`, `soap`, `db`. Each maps
 to real libuvcpp CMake switches and configuration macros; the mapping is
 documented, including the two features libuvcpp has no switch for.
+
+Most templates start a `uvcpp_web_app`. `http3-service` does not: it is written
+against `uvcpp_http_server`, which is the only type in 1.7.0 that can open a QUIC
+listener, and it serves one route table over TCP and HTTP/3 at once.
 
 <a id="current-status"></a>
 
@@ -167,7 +171,7 @@ uvp is pre-1.0 and under active construction. Being precise about what that
 means is more useful than a percentage:
 
 **Working and verified.** The full closure — describe → generate → build → run →
-probe → evidence — passes against a real libuvcpp 1.7.0 install for all five
+probe → evidence — passes against a real libuvcpp 1.7.0 install for all six
 templates. The generated projects build via `find_package(uvcpp 1.7.0 CONFIG)`
 where a CMake package exists and via `pkg-config` where it does not, because the
 prebuilt release archives ship the latter and not the former. The version floor
@@ -191,6 +195,18 @@ depended on by nothing uvp generates. `tests/toolchain/nativeProbe.test.ts`
 generates a workspace, builds it with the CMake uvp found, starts it, and probes
 it with the real binary: what the run reports, what the stack refuses before
 anything is spawned, and what a person reads without `--json`.
+
+HTTP/3 is answered the same way, and for the same reason: Node's standard library
+has no HTTP/3 client, so `uvp http --http-version 3` goes through `uvcpp-probe`'s
+QUIC client — libuvcpp's own, which is the stack a generated service links
+against. The same lane is what checks it, so the claim is that one implementation
+agrees with itself across the wire rather than that two projects read a spec
+alike. Three things this path will not do, and says so instead of guessing:
+`http://` is refused because QUIC has no cleartext mode, `verify_tls` is refused
+because that client verifies against a CA bundle it is handed or not at all, and
+redirects are refused because the probe makes one request. The result reports
+`verification: not_checked` rather than a certificate nobody examined, and names
+the response headers it read rather than presenting them as the whole set.
 
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp

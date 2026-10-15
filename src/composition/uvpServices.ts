@@ -6,7 +6,9 @@ import { DoctorService } from "../application/DoctorService.js";
 import { LocalToolchainProvider } from "../toolchains/local/LocalToolchainProvider.js";
 import { startSupervised } from "../toolchains/processRunner.js";
 import { NativeProbeRunner } from "../toolchains/native/NativeProbeRunner.js";
+import { NativeHttp3ProbeRunner } from "../toolchains/native/NativeHttp3ProbeRunner.js";
 import type { NativeWebSocketProbe } from "../application/NativeWebSocketProbe.js";
+import type { NativeHttp3Probe } from "../application/NativeHttp3Probe.js";
 import type { ToolchainProvider } from "../application/ToolchainProvider.js";
 
 /**
@@ -36,6 +38,15 @@ export interface UvpServiceOptions {
    * a statement rather than an inference.
    */
   readonly nativeProbe?: NativeWebSocketProbe | undefined;
+  /**
+   * The same binary's HTTP/3 exchange, as a separate collaborator.
+   *
+   * Separate rather than one object with two methods, because the two are not
+   * interchangeable even though one process answers both: they disagree about what
+   * a usable build is (an older probe speaks WebSocket and not h3), and a lane that
+   * wants to script one exchange's report should not have to satisfy the other's.
+   */
+  readonly nativeHttp3Probe?: NativeHttp3Probe | undefined;
 }
 
 export interface UvpServices {
@@ -71,6 +82,7 @@ export const createUvpServices = (options: UvpServiceOptions = {}): UvpServices 
       store,
       now,
       nativeProbe: options.nativeProbe ?? new NativeProbeRunner(),
+      nativeHttp3Probe: options.nativeHttp3Probe ?? new NativeHttp3ProbeRunner(),
     }),
     capture: new CaptureService(store, now),
     // No `headerProbe` is passed. The doctor builds one rooted at the install

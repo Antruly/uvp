@@ -12,7 +12,7 @@ import type {
 import { newId, sha256 } from "../domain/identity.js";
 import type { SupervisedRun } from "./sessionStore.js";
 import { SessionStore } from "./sessionStore.js";
-import { renderTemplate, type TemplateId } from "./templates.js";
+import { renderTemplate, templateFeatureProblem, type TemplateId } from "./templates.js";
 import type { UvpFeature } from "../domain/features.js";
 import { describeStop } from "./ProcessSupervisor.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
@@ -204,6 +204,26 @@ export class WorkspaceService {
           details: { entries: meaningful.slice(0, 20) },
         });
       }
+    }
+
+    const featureProblem = templateFeatureProblem(input.template, input.features);
+    if (featureProblem !== undefined) {
+      // `missing_requirement` rather than `invalid_request`, which is what this
+      // was first written as. Both are `invalid_input` and both exit 2, so the
+      // category does not decide it; the code does, because a caller switches on
+      // the code. This request is well formed and the template exists — what is
+      // missing is a feature, and that is the same shape as a workspace asking
+      // for a module the installed libuvcpp was not built with.
+      throw new UvpFailure({
+        code: "missing_requirement",
+        message: `The ${input.template} template cannot be generated with the requested features: ${featureProblem}.`,
+        remediation: {
+          action:
+            "Re-run with a feature list this template can honour. `uvp doctor --features` reports " +
+            "which of them the installed libuvcpp provides.",
+        },
+        details: { template: input.template, features: [...input.features] },
+      });
     }
 
     const files = renderTemplate(input.template, {

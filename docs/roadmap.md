@@ -16,7 +16,7 @@ end to end on real libuvcpp.
 
 |     |                                                                                                  |
 | --- | ------------------------------------------------------------------------------------------------ |
-| ✅  | All five templates generate, build, run, and answer against libuvcpp 1.7.0                       |
+| ✅  | All six templates generate, build, run, and answer against libuvcpp 1.7.0                        |
 | ✅  | Both discovery routes: CMake package and `pkg-config`, version floor on each                     |
 | ✅  | Feature-to-switch mapping verified by building, not by reading                                   |
 | ✅  | The three-state assessment: `satisfied`, `unmet`, `undetermined`                                 |
@@ -33,7 +33,13 @@ The verified pass, run against a real 1.7.0 build:
 ### websocket-echo  :8092 -> HTTP/1.1 101 Switching Protocols
 ### soap-service    :8093 -> <?xml version="1.0" encoding="utf-8"?><soap:Envelope …
 ### static-files    :8094 -> <!doctype html>
+### http3-service   :8095 -> hello over HTTP/3
 ```
+
+`http3-service` appears in this list on its **TCP** leg: this table is produced by
+a TCP readiness probe and an ordinary HTTP request, and the template binds TCP and
+UDP on the same number. Its HTTP/3 leg is verified separately, by a client that
+speaks HTTP/3.
 
 ### Half two: the web toolbox
 
@@ -178,7 +184,7 @@ five that need neither when they are not, and reachable from nothing.
 |     |                                                                       |
 | --- | --------------------------------------------------------------------- |
 | ✅  | HTTP/2 end-to-end, template through probe                             |
-| ⬜  | HTTP/3, gated on the TLS row below                                    |
+| ✅  | HTTP/3 end-to-end, template through libuvcpp's own QUIC client        |
 | ✅  | TLS with real certificates, including the failure paths               |
 | ⬜  | Database-backed templates                                             |
 | ✅  | Replaying a capture as a regression suite                             |
@@ -206,18 +212,35 @@ whose report does not say which protocol answered no longer exists, and
 as `changed_fields: ["http_version"]` beside `same_digest: true` rather than as
 `identical`.
 
-HTTP/3 is split out because it is not a smaller version of the same work. libuvcpp
-1.7.0's web layer has no HTTP/3 listener at all — `uvcpp_web_app` documents the
-h2c switch and adds "将来有 h3 时同理", the same treatment when there is h3 — so
-there is no generated service that could be asked for h3 and nothing a probe could
-observe. The C ABI does carry an h3 client and server
-(`capi/uvcpp_c_http3.h`, `quic/uvcpp_quic_client.h`), but QUIC mandates TLS 1.3,
-so serving it needs a real certificate: the row below is a prerequisite rather
-than a neighbour. What uvp says in the meantime is a refusal — `--http-version 3`
-is `unsupported_target`, non-retryable, naming the reason — because a client that
-quietly sent HTTP/1.1 instead would make the flag a claim about a transport it
-never used. The same refusal now also reaches the bundle's `unverified`, so a
-report of a pass that could not ask says why.
+HTTP/3 was split out for a reason that has since been answered, and the shape of
+that answer is worth recording. libuvcpp 1.7.0's web layer has no HTTP/3 listener
+at all — `uvcpp_web_app` documents the h2c switch and adds "将来有 h3 时同理",
+the same treatment when there is h3 — but the _plain_ `uvcpp_http_server` does,
+behind `#if UVCPP_WEB_ENABLE` and reached through `set_quic_ssl_context` plus
+`listen_quic`. So the row landed as a **new template** rather than a new feature
+on the existing ones: `http3-service` serves one route table over a TCP leg and a
+QUIC leg at once, and asking a web-app template for `--features http3` still buys
+a build requirement and a guard and no protocol. Both are stated; neither is
+implied by the manifest.
+
+The client half is `uvcpp-probe`'s QUIC client, because Node has no HTTP/3 client
+at all. That the client and the service come from one implementation is the whole
+value: two projects that both claim HTTP/3 can disagree about everything the spec
+leaves open, so a Node client reaching an h3 endpoint would not answer the
+question uvp exists to ask. `tests/toolchain/nativeProbe.test.ts` generates the
+template, builds it with the CMake uvp found, starts it, completes an exchange
+over QUIC, and then asks the same route over the TCP leg as the control.
+
+Three things this path refuses instead of guessing, each of which would otherwise
+become a green result about a transport nobody used — `http://`, because QUIC has
+no cleartext mode; `verify_tls`, because the C ABI's QUIC client verifies against
+a CA bundle it is handed or not at all and this tool has no input for one; and
+redirects, because the probe makes one request. What comes back says
+`verification: not_checked` rather than a certificate nobody examined, reports the
+response headers it actually read as a partial set rather than as the whole set,
+and reports one duration rather than four phases, because the connection has no
+ready callback and a phase measured over the poll interval would be a number
+about the poll.
 
 The bundle comparison is the reason `digest` is semantic rather than a record
 hash. Two runs of the same check on the same subject produce the same digest, so

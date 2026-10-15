@@ -33,6 +33,18 @@ export interface ExchangeRecord {
   readonly requestHeaders: Readonly<Record<string, string>>;
   readonly responseHeaders: Readonly<Record<string, string>>;
   /**
+   * The response header names this record actually looked at, when that is
+   * narrower than "all of them". `undefined` means the whole set was read.
+   *
+   * A reader that cannot tell a header the peer did not send from one nobody
+   * asked about will report the second as the first — and an assertion on a
+   * header name is exactly such a reader. Over HTTP/3 the client reads response
+   * headers one name at a time and has no header-list call, so this is a real
+   * state rather than a hypothetical one, and it has to travel with the record
+   * because by the time an assertion runs the request is long over.
+   */
+  readonly responseHeadersObserved: readonly string[] | undefined;
+  /**
    * The bytes recorded, each capped by the session's `maxBodyBytes`.
    *
    * The flags are per direction because the two are capped by different things:

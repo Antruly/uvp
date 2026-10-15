@@ -159,13 +159,48 @@ const statusIn: RawEvaluator = (record, spec) => {
   };
 };
 
-const headerOf = (record: ExchangeRecord, spec: AssertionSpec): [string, string | undefined] => {
+/**
+ * The response header a spec names, and whether it was looked for at all.
+ *
+ * Three outcomes, not two, because two of them are different facts with different
+ * remedies. `observed` set means the header was read. `observed` absent with
+ * `lookedAt` true means the peer did not send it. `observed` absent with
+ * `lookedAt` false means nobody asked — the client that made the request reads
+ * response headers one name at a time, and this name was not on its list.
+ * Reporting the third as the second is the failure this exists to prevent: it
+ * turns "uvp did not look" into "the service did not send", which is a finding
+ * about a service derived from a gap in the tool.
+ */
+const headerOf = (
+  record: ExchangeRecord,
+  spec: AssertionSpec,
+): { readonly name: string; readonly observed: string | undefined; readonly lookedAt: boolean } => {
   const name = (spec.target ?? "").toLowerCase();
-  return [name, record.responseHeaders[name]];
+  return {
+    name,
+    observed: record.responseHeaders[name],
+    lookedAt: record.responseHeadersObserved?.includes(name) ?? true,
+  };
 };
 
+/**
+ * Why a header assertion could not be evaluated, or nothing when it could.
+ *
+ * The list of names that *were* read is part of the message, because the caller's
+ * next question is always "then which ones can I assert on".
+ */
+const notLookedAt = (record: ExchangeRecord, name: string): string =>
+  `header ${name} was not looked at: this exchange read only ${(
+    record.responseHeadersObserved ?? []
+  )
+    .map((entry) => `\`${entry}\``)
+    .join(
+      ", ",
+    )}, and a name outside that list is a header nobody asked for rather than one the peer left out`;
+
 const headerEquals: RawEvaluator = (record, spec) => {
-  const [name, observed] = headerOf(record, spec);
+  const { name, observed, lookedAt } = headerOf(record, spec);
+  if (!lookedAt) return { passed: false, observed, message: notLookedAt(record, name) };
   if (observed === undefined)
     return { passed: false, observed, message: `header ${name} is absent` };
   return {
@@ -176,7 +211,8 @@ const headerEquals: RawEvaluator = (record, spec) => {
 };
 
 const headerExists: RawEvaluator = (record, spec) => {
-  const [name, observed] = headerOf(record, spec);
+  const { name, observed, lookedAt } = headerOf(record, spec);
+  if (!lookedAt) return { passed: false, observed, message: notLookedAt(record, name) };
   return {
     passed: observed !== undefined,
     observed,
@@ -188,7 +224,8 @@ const headerExists: RawEvaluator = (record, spec) => {
 };
 
 const headerMatches: RawEvaluator = (record, spec) => {
-  const [name, observed] = headerOf(record, spec);
+  const { name, observed, lookedAt } = headerOf(record, spec);
+  if (!lookedAt) return { passed: false, observed, message: notLookedAt(record, name) };
   if (observed === undefined)
     return { passed: false, observed, message: `header ${name} is absent` };
   const pattern = typeof spec.expected === "string" ? spec.expected : "";

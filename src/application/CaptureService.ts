@@ -480,6 +480,10 @@ export class CaptureService {
           httpVersion: undefined,
           requestHeaders: request.headers as Record<string, string>,
           responseHeaders: {},
+          // No response was read: this branch is the 413 for a request whose body
+          // was over the session's limit, recorded so the capture shows what was
+          // refused. There is nothing to be narrower than "all of it".
+          responseHeadersObserved: undefined,
           requestBody: capped(requestBody, maxBodyBytes).body,
           responseBody: undefined,
           requestBodyTruncated: true,
@@ -559,6 +563,9 @@ export class CaptureService {
       httpVersion: exchange?.httpVersion,
       requestHeaders: headers,
       responseHeaders: exchange?.headers ?? {},
+      // The capture proxy reads a whole response from Node, so every header the
+      // peer sent is here; there is nothing this record did not look at.
+      responseHeadersObserved: undefined,
       requestBody: keptRequest.body,
       responseBody: keptResponse.body,
       // A response is cut short by whichever limit bit first: this session's, or
