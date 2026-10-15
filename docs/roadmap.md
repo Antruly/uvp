@@ -347,24 +347,77 @@ and DNS — which is why generated services bound each statement with a 5 s
 timeout instead of resizing a process-global pool, and why the generated README
 carries `UV_THREADPOOL_SIZE` for a caller who has measured their own workload.
 
+### The assertion engine's third state
+
+An assertion had two outcomes where the engine had three, and the missing one was
+the state this whole framework is built around. `AssertionOutcome.passed` is a
+boolean, so a check the engine could not run — a header the client never read, a
+body that was never recorded, a body that is not JSON, a regex that does not
+compile, a JSONPath the dialect does not support — was assigned `passed: false`
+and counted as a failure of the service. That is a finding about a subject derived
+from a limit of the check, which is the direction of error
+[the evidence rules](evidence.md) exist to forbid.
+
+It showed both faces. `uvp verify` reported `failed` for a pass whose only
+non-passing assertion was unevaluable, and `verified` for a pass in which
+**every** assertion was unevaluable — the absence of failures read as success,
+which is the same defect looking the other way. Negation was where the laundered
+state became a lie rather than a mistake: `evaluateAssertion` read
+`negated ? !raw.passed : raw.passed`, and `!false` is `true`, so `!header_equals`
+on a name nobody looked at was a **pass**. A caller who asked "is this header
+different from what I expect?" of a response whose headers were never read was
+told yes.
+
+`AssertionOutcome` now carries `evaluated`, negation reads
+`raw.evaluated && (negated ? !raw.passed : raw.passed)`, and each unevaluable
+check names its own reason. Consumers count only what ran, so `passed + failed`
+equals `results.length` and neither counter is a claim about a check that never
+ran: `uvp_verify` reports `partial` when part of the goal was unexamined and
+`unknown` when none of it was, naming each unanswered question in `unverified`;
+`uvp_assert_exchange` records one unknown per unrun assertion; evidence coverage is
+`complete` only when every assertion was evaluated and `partial` with
+`examined`/`total` otherwise. Two smaller conversions went the same way: a body
+nobody recorded is no longer measured as `length 0`, and a request that never
+answered is no longer compared against a latency limit.
+
+**No output schema changed, and that is a decision rather than an omission.**
+[CONTRIBUTING](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md) puts a
+tool's output schema behind a design discussion first, and the third state reaches
+a caller through `unverified` and the envelope's `unknowns`, which already exist
+and already carry a reason. The open question is whether `results[]` should carry
+`evaluated` beside `passed`, or a `status: met | unmet | undetermined` reusing the
+capability vocabulary — a `results` row and a capability answer to the same
+question should not spell their third state two ways. Until that is settled, the
+counter and the coverage note are where a caller learns a check did not run.
+
+What makes this evidence rather than a patch: twenty-three of the engine's
+sixty-three tests fail against the previous `assertions.ts`, and each of the three
+conformance tests added beside it fails without the fix — `expected 1 to be +0`
+for the failure count, `failed` for a status that should be `partial`, and
+`failed` for one that should be `unknown`. The fix is what breaks them.
+
 ## Hardening {#hardening}
 
 Known gaps in the project's own engineering, tracked here rather than left
 implicit.
 
-|     |                                                                                                                                                                                                                                                                                                           |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⬜  | Pin third-party GitHub Actions to commit SHAs. Workflows currently reference major version tags (`actions/checkout@v4`); full SHA pinning needs the SHAs verified rather than guessed                                                                                                                     |
-| ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                        |
-| ⬜  | Renovate or Dependabot with grouped, reviewed updates                                                                                                                                                                                                                                                     |
-| ⬜  | Reproducible builds for the packaged tarball                                                                                                                                                                                                                                                              |
-| ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                          |
-| ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                                                                                                                                              |
-| ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                          |
-| ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                          |
-| ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                          |
-| ⬜  | CI's database and HTTP/3 coverage is requested but unobserved: the real-libuvcpp lane has built libuvcpp with `-DUVCPP_ENABLE_DB=ON` and with a from-source OpenSSL 3.5 for QUIC only since 2026-10-16, and no run has yet reported what that lane did with either                                        |
-| ⬜  | `npm run build:native-probe` needs the HTTP/3 C headers in the install, because the probe compiles `http3_exchange.cpp` unconditionally — so a libuvcpp built without HTTP3/QUIC cannot build the probe at all, and the WebSocket half loses its native stack for a reason that has nothing to do with it |
+|     |                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ⬜  | Pin third-party GitHub Actions to commit SHAs. Workflows currently reference major version tags (`actions/checkout@v4`); full SHA pinning needs the SHAs verified rather than guessed                                                                                                                                                                                                                                          |
+| ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                                                                                                                                             |
+| ⬜  | Renovate or Dependabot with grouped, reviewed updates                                                                                                                                                                                                                                                                                                                                                                          |
+| ⬜  | Reproducible builds for the packaged tarball                                                                                                                                                                                                                                                                                                                                                                                   |
+| ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                               |
+| ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                                                                                                                                                                                                                                                                   |
+| ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                                                                                                                                               |
+| ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                               |
+| ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                                                                                                                                               |
+| ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                          |
+| ⬜  | `npm run build:native-probe` needs the HTTP/3 C headers in the install, because the probe compiles `http3_exchange.cpp` unconditionally — so a libuvcpp built without HTTP3/QUIC cannot build the probe at all, and the WebSocket half loses its native stack for a reason that has nothing to do with it                                                                                                                      |
+| ⬜  | `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19. The lane builds OpenSSL 3.5.0 from source because 24.04's 3.0.13 has no QUIC; 26.04 may ship an OpenSSL that makes that step unnecessary, or may move the runner under a package set this lane has never been rehearsed against. Nothing here can tell which until it happens                                                                                                 |
+| ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down                                                                                                                                   |
+| ⬜  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. Three steps name the reporter explicitly today; the next one added will not, and its skips will be a count with no names. A check belongs beside `verify:test-discovery`, which exists for the same reason: a lane that runs nothing, or reports nothing, looks like a lane that passed                             |
+| ⬜  | Whether `uvp_verify`'s `exchanges[].results[]` should carry `evaluated` beside `passed`, or a `status: met \| unmet \| undetermined` reusing the capability vocabulary. The third state currently reaches a caller through `unverified` and `unknowns`; two spellings of one answer is how they drift. An additive change, but a change to a tool's output schema, so it waits for the design discussion CONTRIBUTING requires |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
 rather than as a bug report. It has been seen three times, each time as the only
@@ -540,16 +593,76 @@ missing, neither of them about uvp:
 Neither is visible from the configure line, which is the argument for rehearsing a
 lane on the host that will run it rather than reading it.
 
-That lane's coverage of the db and h3 rows is requested from here on; it is not
-yet observed, and the row above says so until a run reports it. What _is_ observed
-is the same lane run locally against a libuvcpp built the way the workflow now
-builds it — source install, `WEB`, `WEBAPP`, `CAPI`, `DB`, `OPENSSL`, `QUIC`,
+At the time, that lane's coverage of the db and h3 rows became a request rather
+than an observation, and the row above said so until a run reported it. A run has
+now reported it — [below](#the-real-lane-s-first-run). What was observed first, and
+recorded as evidence about the lane rather than about the run, is the same lane run
+locally against a libuvcpp built the way the workflow now builds it — source
+install, `WEB`, `WEBAPP`, `CAPI`, `DB`, `OPENSSL`, `QUIC`,
 `HTTP3`, OpenSSL 3.5.0 from source, libuv 1.48.0 from Ubuntu's packages, the
 runner's OpenSSL 3.0.13 alongside: 47 tests across 6 files, all passing, including
 `http3-service` opening both legs, the probe completing an HTTP/3 exchange against
 a generated service, and the database template keeping a value across a restart.
 The runner is not this host, so that is evidence about the lane and not a
 prediction about the run.
+
+### The real lane's first run {#the-real-lane-s-first-run}
+
+Run `38801883813` (2026-10-16, `97a1d39`) is the first run in which this lane did
+anything at all, and it is the run that establishes the four claims above. All
+sixteen of its steps succeeded, including the two nobody had watched work:
+OpenSSL 3.5.0 built from source for its QUIC API, and libuvcpp 1.7.0 configured,
+built and installed with the flag set the lane asks for. The job reported:
+
+```
+Test Files  6 passed (6)
+     Tests  40 passed | 7 skipped (47)
+```
+
+The seven skips are all `containerConformance` — no container runtime on the
+runner — and they are the reason the skip reporter below exists: the log said
+`7 skipped` and, until it was added, named none of them and gave no reason.
+
+**What the install actually provides**, read from the config header of the
+build the lane made rather than from its configure line, which is the check
+[the evidence rules](evidence.md) require and the reason the configure line alone
+was never enough:
+
+```
+#  define UVCPP_NET_ENABLE 1        #  define UVCPP_WSDL_ENABLE 0
+#  define UVCPP_WEB_ENABLE 1        #  define UVCPP_YYJSON_ENABLE 0
+#  define UVCPP_WEBAPP_ENABLE 1     #  define UVCPP_ZLIB_ENABLE 0
+#  define UVCPP_OPENSSL_ENABLE 1    #  define UVCPP_BROTLI_ENABLE 0
+#  define UVCPP_NGHTTP2_ENABLE 0    #  define UVCPP_QUIC_ENABLE 1
+#  define UVCPP_HTTP3_ENABLE 1      #  define UVCPP_CAPI_ENABLE 1
+#  define UVCPP_DB_ENABLE 1         #  define UVCPP_DB_SQLITE_ENABLE 1
+#  define UVCPP_DB_MYSQL_ENABLE 1   #  define UVCPP_DB_PGSQL_ENABLE 1
+#  define UVCPP_TRY_WRITE_ENABLE 1  #  define UVCPP_UDP_GSO_ENABLE 0
+```
+
+Every module the database template, the HTTP/3 template and the probe need is on,
+and the install was found by exactly one route — `installed:
+/tmp/uvcpp-prefix/lib/cmake/uvcpp/uvcppConfig.cmake`, with no `uvcpp.pc` beside
+it — which is the asymmetry the lane's evidence step was rewritten for.
+
+The two rows this settles are the database and the HTTP/3 ones: `UVCPP_DB_ENABLE
+1` with `UVCPP_DB_SQLITE_ENABLE 1` read out of the header rather than inferred
+from a configure flag, and the two h3 subjects passing — `http3-service: opens
+both legs on :8095 and answers on the route table`, and `completes an HTTP/3
+exchange with a generated service, both legs answering alike` through the native
+probe. `stores a value in SQLite and still has it after the service restarts`
+passed in the same job, so the database half is a real restart and not a
+connection that stayed open.
+
+The run as a whole was **red**, and the lane was not why: `Packaged CLI and MCP
+rehearsal` failed at `97a1d39`, which is the defect `bdeb7e0` fixes. The next push
+(`38802214943`) is green in all twelve jobs, so the lane has now run on a commit
+that also passed everything else — and the two runs answer different questions.
+The first performed both builds and passed; the second found the OpenSSL and
+libuvcpp steps served from the caches the first had populated (`skipped`, not
+`success`), and passed off them. A lane that builds nothing and a lane that builds
+correctly both print a green step, so `38802214943` is evidence about the cache
+and `38801883813` is the evidence that the build works.
 
 ## Not planned
 
