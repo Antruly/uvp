@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 
 /**
@@ -10,28 +11,101 @@ import { createServer } from "node:net";
  * needs a port that is free and *stays* free, because a connection refused is the
  * only way to reach some CLI states without a target.
  *
- * The reservation is a bind-then-release, so in principle another process can
- * take the number in the gap. The window is microseconds and the failure is a
- * clear `EADDRINUSE` or an unexpected success rather than a wrong answer, which
- * is the trade a test can afford; a fixed port number would instead collide with
- * whatever else is on the machine.
+ * ## Why the number does not come from port 0
+ *
+ * Asking the kernel for port 0 returns an *ephemeral* port, and the ephemeral
+ * range is the same pool a TCP client's source port is drawn from. So the port is
+ * free when the probe closes it and can be taken by any outbound connection this
+ * suite opens a moment later — and the service that was told to listen there gets
+ * `EADDRINUSE` for a number nobody chose on purpose. That is not hypothetical: it
+ * is how CI's first run failed, on 33097, inside the default Linux range.
+ *
+ * The value used instead comes from just below that range, which the kernel never
+ * hands out as a source port. The bind probe still stands: a candidate that is
+ * genuinely occupied — by another service on this machine, or by another test
+ * worker that got there first — is rejected and the next one is tried, and the
+ * walk starts at a random offset so two workers do not walk in step.
+ *
+ * Where the range cannot be read (anything that is not Linux) the behaviour is
+ * the old one, port 0 included. A host whose range is unknown is a host where a
+ * fixed guess would be worse than the race, and this file says so rather than
+ * pretending the reservation is stronger than it is.
  *
  * A caller that needs the port to remain free should say so in the failure: a
  * test that asserts "connection refused" fails loudly if something did take it,
  * rather than passing for a reason it did not choose.
  */
-export const freePort = async (): Promise<number> =>
+
+/** How far below the ephemeral range this file is willing to look. */
+const WINDOW = 512;
+
+/**
+ * The lowest port the kernel will hand out for an outbound connection, or
+ * `undefined` where that is not knowable from here.
+ *
+ * `/proc/sys/net/ipv4/ip_local_port_range` is the kernel's own answer on Linux.
+ * It is read once per process: it is not a value that changes under a test run.
+ */
+const ephemeralFloor = ((): number | undefined => {
+  try {
+    const [low] = readFileSync("/proc/sys/net/ipv4/ip_local_port_range", "utf8")
+      .trim()
+      .split(/\s+/u);
+    const floor = Number(low);
+    // A floor that is not a usable port leaves nothing to search below, and a
+    // floor at or under the privileged range would put the window in it.
+    return Number.isInteger(floor) && floor > WINDOW + 1024 ? floor : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
+/** One candidate, bound and released. `undefined` when something else has it. */
+const probe = async (port: number): Promise<boolean> =>
+  await new Promise((resolve) => {
+    const socket = createServer();
+    socket.once("error", () => {
+      resolve(false);
+    });
+    socket.listen(port, "127.0.0.1", () => {
+      socket.close(() => {
+        resolve(true);
+      });
+    });
+  });
+
+/** Port 0: the kernel picks, out of the range that also serves source ports. */
+const anyFreePort = async (): Promise<number> =>
   await new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
+    const socket = createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
       if (address === null || typeof address === "string") {
-        probe.close();
+        socket.close();
         reject(new Error("the port probe did not return a numeric address"));
         return;
       }
       const { port } = address;
-      probe.close(() => resolve(port));
+      socket.close(() => {
+        resolve(port);
+      });
     });
   });
+
+export const freePort = async (): Promise<number> => {
+  if (ephemeralFloor === undefined) return await anyFreePort();
+  const start = ephemeralFloor - WINDOW;
+  // A random offset per call, so two workers reserving at the same moment are
+  // unlikely to be looking at the same candidates in the same order.
+  const offset = Math.floor(Math.random() * WINDOW);
+  for (let step = 0; step < WINDOW; step += 1) {
+    const port = start + ((offset + step) % WINDOW);
+    if (await probe(port)) return port;
+  }
+  // Every candidate in the window is taken by something else on this machine.
+  // Falling back is better than failing: the caller's own bind says whether the
+  // number it gets is really free, and a port in the ephemeral range is what it
+  // would have had before this file looked at the range at all.
+  return await anyFreePort();
+};
