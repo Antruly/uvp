@@ -413,7 +413,8 @@ implicit.
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                               |
 | ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                                                                                                                                               |
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                          |
-| ⬜  | `npm run build:native-probe` needs the HTTP/3 C headers in the install, because the probe compiles `http3_exchange.cpp` unconditionally — so a libuvcpp built without HTTP3/QUIC cannot build the probe at all, and the WebSocket half loses its native stack for a reason that has nothing to do with it                                                                                                                      |
+| ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)         |
+| ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and passed on every run since, local and CI. The mechanism is unknown and the row is here rather than in a commit message because an intermittent gate teaches people to re-run until it is green. See [below](#the-cancellation-flake)                   |
 | ⬜  | `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19. The lane builds OpenSSL 3.5.0 from source because 24.04's 3.0.13 has no QUIC; 26.04 may ship an OpenSSL that makes that step unnecessary, or may move the runner under a package set this lane has never been rehearsed against. Nothing here can tell which until it happens                                                                                                 |
 | ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down                                                                                                                                   |
 | ⬜  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. Three steps name the reporter explicitly today; the next one added will not, and its skips will be a count with no names. A check belongs beside `verify:test-discovery`, which exists for the same reason: a lane that runs nothing, or reports nothing, looks like a lane that passed                             |
@@ -663,6 +664,121 @@ libuvcpp steps served from the caches the first had populated (`skipped`, not
 `success`), and passed off them. A lane that builds nothing and a lane that builds
 correctly both print a green step, so `38802214943` is evidence about the cache
 and `38801883813` is the evidence that the build works.
+
+### The probe's HTTP/3 build gate {#the-probe-s-http-3-build-gate}
+
+The probe compiled its HTTP/3 exchange unconditionally, which made a missing module
+in the _install_ the probe's problem: a host whose libuvcpp was configured
+`-DUVCPP_ENABLE_HTTP3=OFF` could not build `native/uvcpp-probe` at all, and so lost
+the WebSocket exchange's native stack — the one exchange that has nothing to do with
+HTTP/3 — to a compiler error about a header.
+
+The gate that replaced it asks the compiler rather than the filesystem, because the
+two questions are not the same question:
+
+- _Is `capi/uvcpp_c_http3.h` on disk?_ This was the first attempt, and on an install
+  whose generated config header enables HTTP/3 while that header is absent — a
+  packager that moved a file, an install copied without one — it answers "no" and so
+  concludes "this install has HTTP/3 off". The build then dies on the
+  `#include <capi/uvcpp_c_http3.h>` inside `capi/uvcpp_c.h`, the umbrella header that
+  **every** translation unit of the probe includes, with `fatal error:
+  capi/uvcpp_c_http3.h: No such file or directory`: a sentence about a header nobody
+  asked for, naming neither the install nor the fix. The same check is wrong in the
+  other direction too, where a header is present that the config header has already
+  switched off: it would answer "HTTP/3 available" and then fail to build the
+  exchange, because the declarations are not there.
+- _Can a translation unit of this probe use the HTTP/3 C ABI here?_ That is what the
+  build actually needs answered, and it has three answers rather than two.
+
+`check_cxx_source_compiles` compiles a TU that includes the umbrella header and calls
+`uvcpp_c_h3_version`, so the answer accounts for the config header, the headers it
+names, and the compiler. It is compiled rather than linked
+(`CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY`): the check needs a declaration, not
+a symbol, and reaching for the library would pull the install's own dependencies into
+a configure step.
+
+| what the compiler said                                       | what the build does                                                                                                                                                                                                          |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the HTTP/3 header compiles                                   | build `http3_exchange.cpp` into the probe; `--version` lists `websocket` and `http3`, and reports nothing unavailable                                                                                                        |
+| it does not, and the umbrella header compiles on its own     | build the WebSocket half; this install genuinely has HTTP/3 off                                                                                                                                                              |
+| it does not, and the umbrella header does not compile either | stop, and name the install as the problem: a config header generated with HTTP3 on whose `capi/uvcpp_c_http3.h` was not installed beside it, fixed by reinstalling libuvcpp so its headers match its generated config header |
+
+The second and third are the pair worth separating — both are "this install has no
+HTTP/3", and only one of them is a build that can succeed.
+
+The reason travels with the answer. `--version` now reports `unavailable_exchanges`,
+keyed by exchange name and written **even when it is empty**, so a caller can tell
+"nothing is missing" from "this probe is too old to be asked" — `exchanges` alone
+cannot, because a name absent from a list and a name omitted without a reason look
+identical there. The native probe runner prefers that sentence to its own generic
+one, because the remedies differ: repeating `npm run build:native-probe` produces the
+same binary when what is missing is in the install, and only the build that produced
+this probe knows which case it was, since it asked the compiler.
+
+**What was verified, and how.** `tests/toolchain/nativeProbeGate.test.ts` runs real
+CMake and a real compiler against three include trees, in the real-libuvcpp lane: the
+install as it is (the h3 exchange is built); a copy whose config header is rewritten
+to the `0` shape libuvcpp's generator emits for an off switch, with the h3 header
+removed (the probe still builds, its `--version` lists `websocket` alone, and the
+reason it gives for the missing exchange is the probe's own sentence — built and run,
+not only configured); and a copy with only the h3 header removed (the named
+`FATAL_ERROR`, and no binary left in the build directory).
+
+The second and third trees are **models**: this install's headers with one generated
+file rewritten, not a libuvcpp built with `-DUVCPP_ENABLE_HTTP3=OFF`. They are
+evidence about the gate and about the header shape the gate reads, and not about
+libuvcpp's generator. The library the probe links in those trees is the real one,
+which is enough here: the gate reads headers, and a probe built without the h3
+translation unit never calls the ABI that was left out. QUIC is deliberately left on
+in the second tree — `-DUVCPP_ENABLE_QUIC=ON -DUVCPP_ENABLE_HTTP3=OFF` is a real
+configuration, since HTTP/3 needs QUIC and not the reverse, and this gate does not
+read it.
+
+The HTTP/3 test in `tests/toolchain/nativeProbe.test.ts` now carries its own skip,
+for the same reason the gate exists: an h3-less probe is a supported configuration,
+and a lane that dropped that test without saying so would read as coverage it did
+not have.
+
+### The cancellation flake {#the-cancellation-flake}
+
+Run `38805381480` failed one test in the _Source tests_ job, and it is the only
+failure this project has seen that has not been reproduced:
+
+```
+FAIL  tests/composition/runCancellation.test.ts > a run whose caller withdrew >
+      stops the service it started, and reports the withdrawal rather than the deadline
+      expected 'execution_failure' to be 'cancelled'   // Object.is equality   21.5 ms
+```
+
+Read from that job's blob artifact rather than from the summary: 721 tests, 720
+passing, one failing, and the 21.5 ms is the test's own duration — the run ended
+almost immediately, long before the 400 ms withdrawal and far inside the three-second
+grace a cancellation is given, which is the part that does not fit any path through
+the code. The push also carried the skip reporter, which is not implicated: the blob
+was written, the summary printed, and every other test in the job passed. Re-running
+the failed job came back green on every lane, and locally the file alone and the whole
+source lane have passed repeatedly, including pinned to two cores, which is the
+condition a loaded CI runner most resembles.
+
+What reading the code establishes, and what it does not:
+
+- Every path in `WorkspaceService.run` that ends a run because the caller withdrew
+  produces `cancelled`, and every path that fails to start the supervised process
+  produces `launch_failed`. Neither is the literal `execution_failure` that was
+  observed. `spawn` with a nonexistent working directory was checked by running it
+  rather than by reading the documentation: its `ENOENT` arrives asynchronously, so
+  that case lands in `launch_failed` through the readiness wait's own rejection.
+- Two mechanisms survive. An unrecognised plain `Error` thrown before the readiness
+  wait would arrive at `toUvpError` with no code of its own. So would a real
+  `UvpFailure` from a **second instance of the errors module** in one process, which
+  would make `isUvpFailure` false and produce exactly the observed code while
+  preserving the original message.
+
+Neither has been observed, and a change made for a mechanism nobody has seen cannot
+be tested against anything. So the row above stays open, and what was done instead is
+that the assertion now prints the failure's message and details alongside the code: a
+repeat of the first mechanism prints an error with no `UvpFailure` in it, and a repeat
+of the second prints `UvpFailure`, which is the whole difference between them.
 
 ## Not planned
 

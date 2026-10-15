@@ -217,7 +217,13 @@ alike. Three things this path will not do, and says so instead of guessing:
 because that client verifies against a CA bundle it is handed or not at all, and
 redirects are refused because the probe makes one request. The result reports
 `verification: not_checked` rather than a certificate nobody examined, and names
-the response headers it read rather than presenting them as the whole set.
+the response headers it read rather than presenting them as the whole set. That
+half of the probe exists only when the libuvcpp it was built against has the
+HTTP/3 C ABI: without it the probe is still built, complete for WebSocket, and
+`--version` reports which exchange is missing and what to change — the install,
+not the probe build — so a host without HTTP/3 loses one transport rather than the
+whole native stack. See
+[the probe's HTTP/3 build gate](docs/roadmap.md#the-probe-s-http-3-build-gate).
 
 The database-backed template is verified as a store rather than as a transport, and
 the assertion is a restart: `tests/toolchain/database.test.ts` writes a value

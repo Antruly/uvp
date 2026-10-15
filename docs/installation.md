@@ -89,7 +89,9 @@ declares it fails to compile rather than falling back to memory. Add OpenSSL,
 QUIC and HTTP/3 as well if you want `http3-service`, which needs an OpenSSL at or
 above 3.2 built with the QUIC API — [libuvcpp feature
 mapping](libuvcpp-features.md#building-libuvcpp-for-uvp) has that recipe and what
-each switch costs.
+each switch costs. Those three also decide whether the probe can run its HTTP/3
+exchange: without them it is still built, complete for WebSocket, and `--version`
+reports the missing exchange with the reason.
 
 ### Put the prefix on the loader path
 

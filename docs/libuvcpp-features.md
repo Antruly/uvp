@@ -378,9 +378,11 @@ here because a template needs them:
   `uvcpp-probe` — the program that answers the WebSocket probe's `libuvcpp` stack
   and the HTTP/3 probe's client — reaches libuvcpp through its C ABI rather than
   through C++ name mangling. It is built by `npm run build:native-probe`,
-  separately from uvp, and is not needed to use any other tool. It compiles all
-  three of its translation units, so an install without the h3 C headers cannot
-  build the probe at all, WebSocket half included.
+  separately from uvp, and is not needed to use any other tool. The probe's HTTP/3
+  exchange needs the h3 C ABI as well, and its build compiles that one translation
+  unit only when the install it is pointed at has it: without HTTP/3 the probe is
+  still built, complete for WebSocket, and its `--version` says which exchange is
+  missing and why.
 - `UVCPP_ENABLE_DB` is off by default in libuvcpp. It is what gives `rest-api`
   its store when the workspace declares `db`, and a workspace that declares the
   feature against a build without the module fails to compile rather than

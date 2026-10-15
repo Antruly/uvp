@@ -549,8 +549,11 @@ The probe binary is not vendored. `npm run build:native-probe` builds it against
 an installed libuvcpp with `UVCPP_ENABLE_CAPI=ON`, `UVP_NATIVE_PROBE` points at a
 build somewhere else, and a host with neither exits 2 with `toolchain_unavailable`
 — a fact about the host, not about the service, and one that says which of the
-two it was (`unavailable` when there is no binary, `undetermined` when there is
-one that did not answer its version check).
+three it was: `unavailable` when there is no binary, `unavailable` with the
+probe's own sentence when the binary answered but does not carry the exchange that
+was asked for — `--http-version 3` against a probe built without an HTTP/3-capable
+libuvcpp, where the remedy is the install and not a rebuild — and `undetermined`
+when there is a binary that did not answer its version check at all.
 
 ## `uvp mcp` and `uvp setup`
 
