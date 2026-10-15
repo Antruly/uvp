@@ -166,13 +166,17 @@ CLI 与 MCP 服务端都已经建好，而且两者都是作为**进程**被检�
 tarball 装进一个空 prefix，再从安装后的副本执行 CLI 的首批命令和 MCP 握手 ——
 `files[]` 里漏了文件，就是在这里暴露出来的。
 
-**进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
-对任何服务都能用，不只对 uvp 生成的。WebSocket 探测跑在两种栈上：默认是 Node 客户端，
-另一种是 `uvcpp-probe` —— 一个说 C ABI 的小型 C++ 程序 —— 走 libuvcpp 自己的客户端。
-第二种栈回答的正是「uvp 生成的服务，是否和它被生成时所面向的栈说得上话」：
+WebSocket 探测跑在两种栈上：默认是 Node 客户端，另一种是 `uvcpp-probe` —— 一个说
+C ABI 的小型 C++ 程序 —— 走 libuvcpp 自己的客户端。第二种栈回答的正是
+「uvp 生成的服务，是否和它被生成时所面向的栈说得上话」：
 两个都自称符合 RFC 6455 的客户端，可以在 RFC 留白的地方处处不一致。
 `uvcpp-probe` 由 `npm run build:native-probe` 构建，是一个独立进程而不是 uvp 加载的模块，
-uvp 生成的项目也不依赖它。工具链 provider 的
+uvp 生成的项目也不依赖它。`tests/toolchain/nativeProbe.test.ts` 会生成一个工程、
+用 uvp 找到的 CMake 构建它、启动它，再用真实的二进制探测它：这次运行报告了什么、
+这个栈在启动任何进程之前拒绝了什么，以及不带 `--json` 时人看到的是什么。
+
+**进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
+对任何服务都能用，不只对 uvp 生成的。它还缺的是触达范围：工具链 provider 的
 **端口（port）**已经定义，`local` provider 已实现；容器与远程 SSH provider 尚未编写。
 
 **尚未开始。** 发布自动化：`release-please-config.json` 和针对 PR 标题的

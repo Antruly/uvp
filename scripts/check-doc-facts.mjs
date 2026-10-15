@@ -100,6 +100,12 @@ for (const file of README_PAGES) {
 const STATUS_EVIDENCE = [
   "tests/boundary/cli/cliContract.test.ts",
   "tests/boundary/mcp/mcpSurface.test.ts",
+  // The one surface whose lane needs a C++ build the repository does not ship.
+  // It belongs here for the same reason as the other two: the sentence claims
+  // the native stack reaches a generated service, and this is the file that
+  // would fail if that stopped being true — on a host that has the probe, and
+  // by skipping (with the reason in the output) on one that does not.
+  "tests/toolchain/nativeProbe.test.ts",
 ];
 
 for (const file of README_PAGES) {

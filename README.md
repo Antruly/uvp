@@ -179,17 +179,22 @@ CI then installs the packed tarball into an empty prefix and runs the CLI's firs
 commands and the MCP handshake from the installed copy, which is where a file
 missing from `files[]` shows up.
 
+The WebSocket probe runs on two stacks: a Node client by default, and libuvcpp's
+own client through `uvcpp-probe`, a small C++ program that speaks the C ABI. That
+second stack is what answers whether a service uvp generated talks to the stack it
+was generated for, since two clients that both claim RFC 6455 can disagree about
+everything the RFC leaves open. `uvcpp-probe` is built by `npm run
+build:native-probe`, is a separate process rather than a module uvp loads, and is
+depended on by nothing uvp generates. `tests/toolchain/nativeProbe.test.ts`
+generates a workspace, builds it with the CMake uvp found, starts it, and probes
+it with the real binary: what the run reports, what the stack refuses before
+anything is spawned, and what a person reads without `--json`.
+
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp
-generates. The WebSocket probe runs on two stacks: a Node client by default, and
-libuvcpp's own client through `uvcpp-probe`, a small C++ program that speaks the
-C ABI. That second stack is what answers whether a service uvp generated talks
-to the stack it was generated for, since two clients that both claim RFC 6455
-can disagree about everything the RFC leaves open. `uvcpp-probe` is built by
-`npm run build:native-probe`, is a separate process rather than a module uvp
-loads, and is depended on by nothing uvp generates. The toolchain provider
-_port_ is defined and the `local` provider implements it; the container and
-remote-SSH providers are not written.
+generates. What it does not have yet is reach: the toolchain provider _port_ is
+defined and the `local` provider implements it; the container and remote-SSH
+providers are not written.
 
 **Not started.** Release automation: `release-please-config.json` and the
 conventional-commit gate on pull request titles exist, but nothing runs them yet,
