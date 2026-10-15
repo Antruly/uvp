@@ -250,8 +250,12 @@ uvp assert --exchange ex_… --assert status=200
 ```
 
 `uvp load` reports percentiles. Those are `derived`; the individual timings they
-came from are `observed` and are kept, because a p99 nobody can trace back to a
-sample is a number, not a measurement.
+came from are `observed` and come back with them, in the order they were taken,
+under `samples` — a p99 nobody can trace back to a sample is a number, not a
+measurement. `--max-samples` (default 10000) bounds how many are kept and
+`samples_dropped` says how many were timed and not kept; every number in the
+distribution is computed from exactly the samples returned, so a run that dropped
+some is a `partial` scope rather than a quiet approximation.
 
 `uvp capture read` truncates bodies above the recording limit and says so: the
 limit is returned as `body_limit_bytes`, each exchange carries

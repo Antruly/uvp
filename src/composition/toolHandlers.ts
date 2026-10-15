@@ -559,6 +559,7 @@ export const createToolHandlers = (
             timeout_ms: input.timeout_ms,
             warmup_requests: input.warmup_requests,
             verify_tls: input.verify_tls,
+            max_samples: input.max_samples,
           },
           context.signal,
         );
@@ -572,18 +573,31 @@ export const createToolHandlers = (
             requests_failed: measured.requests_failed,
             duration_ms: measured.duration_ms,
             status_histogram: measured.status_histogram,
+            samples_retained: measured.samples_retained,
           },
           derived: { throughput_rps: measured.throughput_rps, latency_ms: measured.latency_ms },
+          // The quantiles are computed from the retained samples, so a run that
+          // dropped some measured a sample of the run rather than the run. It is
+          // still a complete account of what was recorded, which is why the note
+          // says which of the two limits caused it.
           coverage:
-            measured.requests_failed === 0
-              ? { scope: "load test", status: "complete" }
-              : {
+            measured.requests_failed > 0
+              ? {
                   scope: "load test",
                   status: "partial",
                   note: `${String(measured.requests_failed)} request(s) failed and are excluded from the percentiles`,
                   examined: measured.requests_completed,
                   total: measured.requests_sent,
-                },
+                }
+              : measured.samples_dropped > 0
+                ? {
+                    scope: "load test",
+                    status: "partial",
+                    note: `the percentile sample is a uniform stride: ${String(measured.samples_dropped)} completed request(s) were timed and not kept`,
+                    examined: measured.samples_retained,
+                    total: measured.requests_completed,
+                  }
+                : { scope: "load test", status: "complete" },
           sources: [{ kind: "endpoint" as const, ref: input.url }],
           limitations: [
             "Throughput measured here includes uvp's own client cost, so it is a lower bound, not a vendor-neutral benchmark.",
@@ -605,7 +619,17 @@ export const createToolHandlers = (
           ...envelopeOf(recorder, {
             tool: loadTestContract.name,
             provider: identity,
-            limitations: ["Latency is measured from this machine and includes client-side cost."],
+            limitations: [
+              "Latency is measured from this machine and includes client-side cost.",
+              ...(measured.samples_dropped === 0
+                ? []
+                : [
+                    `Every number returned was computed from the ${String(measured.samples_retained)} ` +
+                      `retained samples; ${String(measured.samples_dropped)} more were timed and ` +
+                      "dropped by max_samples, so a spike falling between two retained samples is " +
+                      "not in them.",
+                  ]),
+            ],
           }),
           ...measured,
         };

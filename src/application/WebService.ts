@@ -604,6 +604,13 @@ export class WebService {
    * mean latency of 12 ms is consistent with both "uniformly fast" and "half the
    * requests timed out". The error breakdown names the causes, and the status
    * histogram shows a partial outage as a shape.
+   *
+   * The individual timings are kept, not only the summary. A p99 that cannot be
+   * traced back to a measurement is a number, and a caller who wants to know
+   * whether the tail was one outlier or a plateau has to be able to look. Keeping
+   * every sample would make a million-request run a memory leak, so the samples
+   * are retained on a uniform stride and the count not retained is reported:
+   * every number returned is computed from exactly the samples returned.
    */
   async loadTest(
     input: {
@@ -617,6 +624,7 @@ export class WebService {
       readonly timeout_ms: number;
       readonly warmup_requests: number;
       readonly verify_tls: boolean;
+      readonly max_samples: number;
     },
     signal: AbortSignal,
   ): Promise<{
@@ -638,6 +646,9 @@ export class WebService {
     status_histogram: Record<string, number>;
     errors: { kind: string; count: number; sample: string }[];
     completed_by_count: boolean;
+    samples: number[];
+    samples_retained: number;
+    samples_dropped: number;
   }> {
     const samples: number[] = [];
     const histogram = new Map<string, number>();
@@ -646,6 +657,10 @@ export class WebService {
     let completed = 0;
     let failed = 0;
     let stop = false;
+
+    // Derived from the requested count rather than from the run, so the same
+    // inputs retain the same samples however long the endpoint takes to answer.
+    const stride = Math.max(1, Math.ceil(input.requests / input.max_samples));
 
     const deadline = Date.now() + input.duration_ms;
     let completedByCount = false;
@@ -667,7 +682,7 @@ export class WebService {
             timeoutMs: input.timeout_ms,
           });
           const elapsed = Date.now() - started;
-          samples.push(Math.min(elapsed, MS_CAP));
+          if (completed % stride === 0) samples.push(Math.min(elapsed, MS_CAP));
           completed += 1;
           const key = String(exchange.status);
           histogram.set(key, (histogram.get(key) ?? 0) + 1);
@@ -710,13 +725,15 @@ export class WebService {
     stop = true;
     completedByCount = sent >= input.requests && Date.now() < deadline;
 
-    samples.sort((left, right) => left - right);
-    const total = samples.reduce((sum, value) => sum + value, 0);
-    const mean = samples.length === 0 ? 0 : total / samples.length;
+    // Sorted for the quantiles, copied so the returned samples stay in the order
+    // they were taken: the tail is easier to read as a sequence than as a list.
+    const ordered = [...samples].sort((left, right) => left - right);
+    const total = ordered.reduce((sum, value) => sum + value, 0);
+    const mean = ordered.length === 0 ? 0 : total / ordered.length;
     const variance =
-      samples.length === 0
+      ordered.length === 0
         ? 0
-        : samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / samples.length;
+        : ordered.reduce((sum, value) => sum + (value - mean) ** 2, 0) / ordered.length;
     const elapsedMs = Date.now() - startedAt;
 
     return {
@@ -726,12 +743,12 @@ export class WebService {
       duration_ms: elapsedMs,
       throughput_rps: elapsedMs === 0 ? 0 : (completed * 1000) / elapsedMs,
       latency_ms: {
-        min: samples[0] ?? 0,
-        p50: percentile(samples, 0.5),
-        p90: percentile(samples, 0.9),
-        p95: percentile(samples, 0.95),
-        p99: percentile(samples, 0.99),
-        max: samples.at(-1) ?? 0,
+        min: ordered[0] ?? 0,
+        p50: percentile(ordered, 0.5),
+        p90: percentile(ordered, 0.9),
+        p95: percentile(ordered, 0.95),
+        p99: percentile(ordered, 0.99),
+        max: ordered.at(-1) ?? 0,
         mean,
         stddev: Math.sqrt(variance),
       },
@@ -740,6 +757,11 @@ export class WebService {
         .map(([kind, entry]) => ({ kind, count: entry.count, sample: entry.sample }))
         .sort((left, right) => right.count - left.count),
       completed_by_count: completedByCount,
+      samples,
+      samples_retained: samples.length,
+      // Failed requests contribute no timing, so this counts completed requests
+      // the stride skipped and not requests that never answered.
+      samples_dropped: Math.max(0, completed - samples.length),
     };
   }
 

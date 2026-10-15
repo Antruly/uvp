@@ -496,7 +496,9 @@ describe("the web primitives", () => {
     },
     TIMEOUT,
   );
+});
 
+describe("the load test", () => {
   it(
     "reports the distribution rather than a single number, and it is monotonic",
     async () => {
@@ -527,6 +529,65 @@ describe("the web primitives", () => {
       expect((output["requests_completed"] as number) + (output["requests_failed"] as number)).toBe(
         12,
       );
+
+      // The timings the distribution was computed from come back with it. Without
+      // them a p99 is a number the caller has to take on trust, and a mutation
+      // that computed the quantiles from something else would be invisible.
+      const samples = output["samples"] as number[];
+      expect(output["samples_retained"]).toBe(samples.length);
+      expect(output["samples_dropped"]).toBe(0);
+      expect(samples.length).toBe(output["requests_completed"]);
+      expect(latency["min"], "latency_ms.min is not the minimum of the samples").toBe(
+        Math.min(...samples),
+      );
+      expect(latency["max"], "latency_ms.max is not the maximum of the samples").toBe(
+        Math.max(...samples),
+      );
+      for (const key of percentiles) {
+        expect(samples, `latency_ms.${key} is not one of the samples it came from`).toContain(
+          latency[key],
+        );
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps a bounded sample of a long run and says how much it did not keep",
+    async () => {
+      // A million-request run must not become a million-element response, and the
+      // numbers must still describe what was measured rather than silently
+      // describing the part that survived. Retained on a uniform stride, so this
+      // is the same run as above with nine of every twelve samples dropped.
+      const output = await call("uvp_load_test", {
+        url: `${fixture.origin}/hello`,
+        requests: 12,
+        concurrency: 3,
+        timeout_ms: 5_000,
+        max_samples: 4,
+      });
+      expectConforms("uvp_load_test", output);
+
+      const samples = output["samples"] as number[];
+      expect(samples.length).toBeLessThanOrEqual(4);
+      expect(output["samples_retained"]).toBe(samples.length);
+      expect(output["samples_dropped"]).toBe(
+        (output["requests_completed"] as number) - samples.length,
+      );
+      expect(output["samples_dropped"]).toBeGreaterThan(0);
+
+      const latency = output["latency_ms"] as Record<string, number>;
+      expect(latency["min"]).toBe(Math.min(...samples));
+      expect(latency["max"]).toBe(Math.max(...samples));
+
+      // A run whose distribution came from a subset of what it measured is a
+      // partial scope, not a complete one. Reporting `complete` here would be the
+      // "approximation presented as a measurement" this field exists to prevent.
+      const coverage = (
+        output["evidence"] as { coverage: { scope: string; status: string; note?: string } }[]
+      ).find((entry) => entry.coverage.scope === "load test")?.coverage;
+      expect(coverage?.status).toBe("partial");
+      expect(coverage?.note).toContain(String(output["samples_dropped"]));
     },
     TIMEOUT,
   );

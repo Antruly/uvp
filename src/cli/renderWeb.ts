@@ -165,6 +165,20 @@ export const renderLoad = (output: Record<string, unknown>): string[] => {
     ),
   ];
 
+  // The timings the row above was computed from. Printed as a count rather than
+  // as a list: the JSON has them, and a terminal does not want ten thousand
+  // numbers in it. What matters at a glance is whether any were dropped.
+  const retained = num(output["samples_retained"]) ?? 0;
+  const dropped = num(output["samples_dropped"]) ?? 0;
+  lines.push(
+    row(
+      "samples",
+      dropped === 0
+        ? `${String(retained)} kept, one per completed request`
+        : `${String(retained)} kept, ${String(dropped)} dropped by --max-samples — the numbers above describe the kept ones`,
+    ),
+  );
+
   const histogram = Object.entries(obj(output["status_histogram"]));
   if (histogram.length > 0) {
     lines.push(

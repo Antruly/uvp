@@ -99,8 +99,11 @@ response, with the raw body preserved alongside it.
 **`uvp_load_test`** — Measure latency under concurrency.
 Drives a fixed number of requests at a concurrency you set and reports
 percentiles and error counts. The percentiles are `derived`; the individual
-timings they came from are `observed`. `mut: true` because it puts load on a
-service, which is a real effect on the world even though uvp writes nothing.
+timings they came from are `observed` and are returned as `samples`, in order.
+`max_samples` bounds how many are kept, `samples_dropped` reports the rest, and
+the distribution is computed from exactly the samples returned. `mut: true`
+because it puts load on a service, which is a real effect on the world even
+though uvp writes nothing.
 
 **`uvp_capture_start`** — Start capturing traffic.
 Begins recording exchanges for a target. Records are held by the session.

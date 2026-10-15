@@ -393,7 +393,8 @@ export const loadCommand: CommandSpec = {
   usage:
     "uvp load URL [METHOD] [--header NAME:VALUE]... [--data BODY]\n" +
     "         [--concurrency N] [--requests N] [--duration MS] [--warmup N]\n" +
-    "         [--p99-under MS] [--max-error-rate PERCENT] [--no-tls] [--timeout MS] [--json]",
+    "         [--p99-under MS] [--max-error-rate PERCENT] [--max-samples N] [--no-tls]\n" +
+    "         [--timeout MS] [--json]",
   positionals: [
     { name: "URL", description: "URL to request repeatedly." },
     { name: "METHOD", description: "Optional HTTP method. Default GET." },
@@ -439,11 +440,21 @@ export const loadCommand: CommandSpec = {
       value: "PERCENT",
       description: "Exit 1 if more than this percentage of requests errored.",
     },
+    {
+      name: "max-samples",
+      type: "number",
+      value: "N",
+      description: "Individual timings to keep and compute the distribution from. Default 10000.",
+    },
   ],
   notes: [
     "The result is a distribution, never a single number: p50, p90, p95, p99, and a status",
     "histogram. There is deliberately no --mean flag; a mean without percentiles hides exactly the",
     "behaviour a load test is asking about.",
+    "",
+    "The individual timings come back with it, in the order they were taken, so a p99 can be traced",
+    "to the measurement it came from. --max-samples bounds how many are kept; the count dropped is",
+    "reported, and every number is computed from exactly the samples returned.",
     "",
     "Without --p99-under or --max-error-rate the run exits 0 whatever it measured. Those two flags",
     "are the whole of the pass/fail judgement, and the caller states them.",
@@ -465,6 +476,7 @@ export const loadCommand: CommandSpec = {
       ...optional("warmup_requests", asNumber(parsed, "warmup")),
       ...optional("timeout_ms", asNumber(parsed, "timeout")),
       ...optional("verify_tls", asBoolean(parsed, "tls")),
+      ...optional("max_samples", asNumber(parsed, "max-samples")),
     };
   },
   verdict: (output, parsed) => {

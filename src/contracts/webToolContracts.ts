@@ -302,6 +302,11 @@ export const loadTestContract = defineTool({
     timeout_ms: z.number().int().min(1).default(10_000),
     warmup_requests: z.number().int().min(0).max(10_000).default(0),
     verify_tls: z.boolean().default(true),
+    /**
+     * The most individual timings kept for the response. The distribution is
+     * computed from exactly those, and the count not kept is reported.
+     */
+    max_samples: z.number().int().min(1).max(1_000_000).default(10_000),
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
@@ -325,6 +330,10 @@ export const loadTestContract = defineTool({
     errors: z.array(z.object({ kind: z.string(), count: z.number().int(), sample: z.string() })),
     /** True when the run ended at the iteration count rather than the clock. */
     completed_by_count: z.boolean(),
+    /** The individual timings every number above was computed from, in order. */
+    samples: z.array(z.number()),
+    samples_retained: z.number().int(),
+    samples_dropped: z.number().int(),
   }),
   effects: {
     readsFilesystem: false,
