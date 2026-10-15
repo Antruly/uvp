@@ -94,6 +94,26 @@ export const httpRequestContract = defineTool({
       truncated: z.boolean(),
       /** True when the payload looks like text and was decoded as such. */
       decoded_as_text: z.boolean(),
+      /**
+       * Why the text is not the body's bytes, when it is not. Absent means
+       * re-encoding the text returns the bytes exactly, so a caller may compare it
+       * against `digest`.
+       *
+       * `truncated` — a cap cut the body inside a character, so the loss is the
+       *   cap's and the peer sent nothing invalid. A cut on a character boundary
+       *   leaves this absent, because there was nothing to lose.
+       * `invalid-utf8` — the peer sent bytes that are not UTF-8, so the text has
+       *   replacement characters where they were. The bytes themselves are not in
+       *   this answer: the body is handed over as text or as `base64` and never as
+       *   both, so `digest` is what a caller can compare and there is no field
+       *   carrying what the replacement characters replaced.
+       *
+       * The two are separate answers because only one of them is the peer's
+       * doing, and because a body cut mid-character is the ordinary case for a
+       * capped body rather than a finding about the service. Same vocabulary as
+       * the WebSocket frames' `text_omitted`.
+       */
+      text_lossy: z.enum(["truncated", "invalid-utf8"]).optional(),
       digest: z.string(),
     }),
     redirects: z.array(z.object({ status: z.number().int(), location: z.string() })),
@@ -359,8 +379,19 @@ export const soapCallContract = defineTool({
       .optional(),
     body: z.object({
       bytes: z.number().int(),
+      /**
+       * The response envelope decoded as UTF-8, cut to 64 Ki characters when it is
+       * longer — which is what `truncated` reports, alongside a body the transport
+       * capped.
+       */
       text: z.string().optional(),
       truncated: z.boolean(),
+      /**
+       * Why that decode is not the body's bytes, when it is not. Absent means
+       * re-encoding the text returns what was decoded; see the `uvp_http_request`
+       * output for the two values.
+       */
+      text_lossy: z.enum(["truncated", "invalid-utf8"]).optional(),
       digest: z.string(),
     }),
     timing: timingSchema,

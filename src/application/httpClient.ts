@@ -695,6 +695,87 @@ export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchang
 };
 
 /**
+ * The length of the trailing bytes that begin a UTF-8 sequence and do not finish
+ * one — the shape a byte-count cut leaves behind — and `0` when the last bytes
+ * are anything else.
+ *
+ * This is what tells a cut from a peer's rubbish, and it is deliberately about
+ * shape alone: a body ending in `e4 b8` is two of the three bytes of 中, and
+ * those two bytes are the same two bytes whether the sender stopped there or a
+ * cap did. The bytes cannot answer that question, so the caller does — see
+ * `decodeBody`.
+ */
+const danglingSequenceLength = (bytes: Buffer): number => {
+  let continuations = 0;
+  while (
+    continuations < 3 &&
+    bytes.length - 1 - continuations >= 0 &&
+    (bytes[bytes.length - 1 - continuations] ?? 0) >= 0x80 &&
+    (bytes[bytes.length - 1 - continuations] ?? 0) <= 0xbf
+  ) {
+    continuations += 1;
+  }
+  const lead = bytes.length - 1 - continuations;
+  if (lead < 0) return 0;
+  const byte = bytes[lead] ?? 0;
+  // The ranges are the encoding's, not a bit test: `f5`–`ff` have the length bits
+  // of a four-byte lead and are not one, and `c0`/`c1` cannot start a sequence
+  // that decodes to the character they spell. Treating those as leads is how
+  // `[ff]` came to be read as a character a cap had cut in half.
+  const needed =
+    byte >= 0xf0 && byte <= 0xf4
+      ? 4
+      : byte >= 0xe0 && byte <= 0xef
+        ? 3
+        : byte >= 0xc2 && byte <= 0xdf
+          ? 2
+          : 0;
+  return needed > 0 && continuations + 1 < needed ? continuations + 1 : 0;
+};
+
+/**
+ * Whether a UTF-8 decode gave back the bytes it was given, and why not when it
+ * did not.
+ *
+ * `undefined` means the text **is** the bytes: re-encoding it returns exactly what
+ * was decoded, so a caller may compare it against the body's digest and expect a
+ * match. The other two answers name the one property that broke, and they are
+ * different observations that only one of which is the peer's doing:
+ *
+ *   - `truncated` — the only thing wrong with these bytes is that they stop
+ *     inside a character. Every byte before it decoded to itself, so the loss is
+ *     the cut's and the peer sent nothing invalid. It is reported only when the
+ *     caller says it cut the body (`cutShort`), because the same bytes arriving
+ *     whole are a peer's invalid byte rather than a cut — which is the whole
+ *     reason this cannot be answered from the bytes alone.
+ *   - `invalid-utf8` — the bytes hold something that is not UTF-8: a byte no
+ *     sequence starts with, an overlong encoding, a surrogate, or a body that
+ *     stops inside a character when nothing cut it. The text carries U+FFFD where
+ *     those bytes were. Recovering them is the caller's to arrange and not this
+ *     function's: `decodeBody` answers with text *or* base64 and never both, so a
+ *     caller that hands the text over hands over the loss with it.
+ *
+ * The same vocabulary the WebSocket half of this repository already uses
+ * (`text_omitted: "truncated" | "invalid-utf8"`), because two spellings of one
+ * answer is how the two drift.
+ */
+export const textLossiness = (
+  bytes: Buffer,
+  decoded: string,
+  cutShort: boolean,
+): "truncated" | "invalid-utf8" | undefined => {
+  if (Buffer.from(decoded, "utf8").equals(bytes)) return undefined;
+  if (cutShort) {
+    const dangling = danglingSequenceLength(bytes);
+    if (dangling > 0) {
+      const kept = bytes.subarray(0, bytes.length - dangling);
+      if (Buffer.from(kept.toString("utf8"), "utf8").equals(kept)) return "truncated";
+    }
+  }
+  return "invalid-utf8";
+};
+
+/**
  * Decode a body as text when it plausibly is text.
  *
  * The answer carries exactly one of `text` and `base64`, so the caller reads the
@@ -703,20 +784,28 @@ export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchang
  *
  * `text` is the body decoded as UTF-8, and decoding bytes that are not UTF-8 is
  * **lossy** — `Buffer.from([0x48, 0x69, 0xff])` decodes to `"Hi�"`, which
- * re-encodes to three different bytes. A peer that declares `text/html` and sends
- * something else therefore gets `decoded_as_text: true` with text that is not the
- * response's bytes, and the caller has no field saying so; the WebSocket half of
- * this repository names the same condition (`text_omitted: "invalid-utf8"`)
- * instead of hiding it. It is not fixed here because the obvious rule — refuse to
- * call it text whenever a re-encode differs — also refuses every body truncated
- * mid-character, which is the ordinary case for a body cut to `max_body_bytes`
- * and is not the peer's doing. Telling the two apart changes what a caller sees,
- * so the roadmap carries it. `decodeBody`'s fuzz lane records the behaviour.
+ * re-encodes to three different bytes. That is why the answer also carries
+ * `textLossy`: a caller comparing the text against the body's digest finds a
+ * difference, and the field says whether the peer sent bytes that are not UTF-8
+ * or the caller's own cap cut a character in half. Absent means the text is the
+ * bytes. See `textLossiness` for the rule.
+ *
+ * `cutShort` is the caller's assertion that it shortened the body by a byte
+ * count — `max_body_bytes` on the way in, or the transport's own cap — and it is
+ * the one fact the decode cannot recover for itself. Without it the same trailing
+ * two bytes of 中 are reported as the peer's, which is the right answer to give
+ * when nobody said otherwise.
  */
 export const decodeBody = (
   body: Buffer,
   contentType: string | undefined,
-): { text?: string; base64?: string; decodedAsText: boolean } => {
+  options: { cutShort?: boolean } = {},
+): {
+  text?: string;
+  base64?: string;
+  decodedAsText: boolean;
+  textLossy?: "truncated" | "invalid-utf8";
+} => {
   const textual =
     contentType === undefined ||
     /^(text\/|application\/(json|xml|javascript|x-www-form-urlencoded|soap\+xml|graphql)|.*\+(json|xml))/iu.test(
@@ -734,5 +823,10 @@ export const decodeBody = (
   if (decoded.slice(0, 1024).includes("\u0000")) {
     return { base64: body.toString("base64"), decodedAsText: false };
   }
-  return { text: decoded, decodedAsText: true };
+  const textLossy = textLossiness(body, decoded, options.cutShort === true);
+  return {
+    text: decoded,
+    decodedAsText: true,
+    ...(textLossy === undefined ? {} : { textLossy }),
+  };
 };

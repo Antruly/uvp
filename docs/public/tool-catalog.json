@@ -2073,6 +2073,13 @@
               "decoded_as_text": {
                 "type": "boolean"
               },
+              "text_lossy": {
+                "type": "string",
+                "enum": [
+                  "truncated",
+                  "invalid-utf8"
+                ]
+              },
               "digest": {
                 "type": "string"
               }
@@ -2964,6 +2971,13 @@
               },
               "truncated": {
                 "type": "boolean"
+              },
+              "text_lossy": {
+                "type": "string",
+                "enum": [
+                  "truncated",
+                  "invalid-utf8"
+                ]
               },
               "digest": {
                 "type": "string"

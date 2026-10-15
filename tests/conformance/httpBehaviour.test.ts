@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { runCli } from "../../src/cli.js";
+import { EXIT_OK } from "../../src/cli/exitCodes.js";
+import type { OutputStreams } from "../../src/cli/output.js";
 import { createToolHandlers, handlerFor } from "../../src/composition/toolHandlers.js";
 import { createUvpServices } from "../../src/composition/uvpServices.js";
 import { toolContract } from "../../src/contracts/toolContracts.js";
@@ -9,9 +14,9 @@ import { startFixture } from "./fixtureServer.js";
 import type { FixtureServer } from "./fixtureServer.js";
 
 /**
- * How `uvp_http_request` behaves under the three conditions a debugging tool is
+ * How `uvp_http_request` behaves under the four conditions a debugging tool is
  * most likely to be believed about and most likely to be wrong about: a
- * redirect, a deadline, and the clock.
+ * redirect, a deadline, the clock, and the body it hands a caller as text.
  *
  * The contract lists `follow_redirects`, `max_redirects`, and `timeout_ms` as
  * inputs and `redirects` and `timing` as outputs; `handlers.test.ts` checks that
@@ -20,7 +25,7 @@ import type { FixtureServer } from "./fixtureServer.js";
  * request that is never redirected, never times out, and whose timings nobody
  * reads looks exactly like a correct one.
  *
- * The three claims, and the failure each would otherwise hide:
+ * The four claims, and the failure each would otherwise hide:
  *
  * - **A redirect is reported, not followed, unless asked.** A tool that followed
  *   silently would hand back a 200 from a URL the caller never named and call it
@@ -33,6 +38,12 @@ import type { FixtureServer } from "./fixtureServer.js";
  *   endpoint refused the connection" and "the endpoint accepted it and said
  *   nothing" decides whether the caller raises a timeout or restarts a service,
  *   so the two must not collapse into one error code.
+ * - **A body decoded as text says when the text is not the bytes.** Decoding is
+ *   lossy when the peer's bytes are not UTF-8, and also when a cap cut a
+ *   character in half — the first is a finding about the service and the second
+ *   is the caller's own doing, so a caller told they are the same thing goes
+ *   looking for a bug in a service that is fine. `text_lossy` names which, and
+ *   the three answers are checked against a real socket rather than a table.
  *
  * `timing` is checked the same way. Timings are the field most easily fabricated
  * — anything nonzero satisfies a reader — so the assertion is against a delay
@@ -254,6 +265,135 @@ describe("the timing breakdown", () => {
       const after = await conforming({ url: `${fixture.origin}/hello` });
       expect(after["status"]).toBe(200);
       expect(services.store.totalExchanges()).toBe(before + 1);
+    },
+    TIMEOUT,
+  );
+});
+
+describe("a body the text is not", () => {
+  /** The `body` block of a result the contract already accepted. */
+  const bodyOf = async (input: unknown): Promise<Record<string, unknown>> =>
+    (await conforming(input))["body"] as Record<string, unknown>;
+
+  // Written as a code point rather than as the character, because the point of
+  // every assertion below is which character it is, and a replacement character
+  // pasted into source is indistinguishable from one that arrived there by
+  // accident.
+  const replacement = String.fromCodePoint(0xff_fd);
+
+  it(
+    "says the text is not the bytes when the peer sent something that is not UTF-8",
+    async () => {
+      // This is the answer a caller comparing the text against `digest` would
+      // otherwise find no explanation for: `ff fe` start no UTF-8 sequence, so
+      // the decode lost them and the bytes that made it into the text are not the
+      // bytes the peer sent.
+      const body = await bodyOf({ url: `${fixture.origin}/not-utf8` });
+
+      expect(body["truncated"]).toBe(false);
+      expect(body["decoded_as_text"]).toBe(true);
+      expect(body["text"]).toBe(`Hi${replacement.repeat(2)}!`);
+      expect(body["text_lossy"]).toBe("invalid-utf8");
+
+      // The difference the field exists to explain, made explicit: the digest is
+      // over the bytes the fixture sent, and re-encoding the text does not
+      // reproduce it. A caller comparing the two would otherwise have a mismatch
+      // and nothing in the output to account for it.
+      const sent = Buffer.from([0x48, 0x69, 0xff, 0xfe, 0x21]);
+      const digest = (bytes: Uint8Array): string =>
+        createHash("sha256").update(bytes).digest("hex");
+      expect(body["digest"]).toBe(digest(sent));
+      expect(digest(Buffer.from(body["text"] as string, "utf8"))).not.toBe(body["digest"]);
+
+      // And the bytes themselves are not in this answer: a body decoded as text is
+      // handed over as text and not also as base64, so `text_lossy` is the whole
+      // of what a caller gets to know about the loss. The roadmap carries that as
+      // its own question rather than this lane inventing an answer.
+      expect(body["base64"]).toBeUndefined();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "blames the cap, not the peer, when the cap cut a character in half",
+    async () => {
+      // Sixteen three-byte characters, capped at seven bytes: two whole
+      // characters and one byte of the third. The peer sent nothing invalid, and
+      // a tool that reported this as the service's doing would be sending a
+      // caller to debug a service that is fine.
+      const cut = await bodyOf({ url: `${fixture.origin}/multibyte`, max_body_bytes: 7 });
+
+      expect(cut["truncated"]).toBe(true);
+      expect(cut["text"]).toBe(`中中${replacement}`);
+      expect(cut["text_lossy"]).toBe("truncated");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "blames the peer, not a cap, when nothing cut a body that stops mid-character",
+    async () => {
+      // Seven bytes the peer chose to send: two whole characters and the first
+      // byte of a third, with no cap in the way. Every byte of the loss is the
+      // peer's, and a client that answered "truncated" here — the tempting
+      // shortcut, since these are exactly the bytes a cap leaves — would send a
+      // caller to look for a limit they never set.
+      const half = await bodyOf({ url: `${fixture.origin}/half-character` });
+
+      expect(half["truncated"]).toBe(false);
+      expect(half["bytes"]).toBe(7);
+      expect(half["text"]).toBe(`中中${replacement}`);
+      expect(half["text_lossy"]).toBe("invalid-utf8");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "says nothing when a cap landed between two characters",
+    async () => {
+      // The same body capped at six bytes: two whole characters and nothing
+      // partial. There is no loss to report, and this is the case that makes
+      // "refuse to call a re-encode-different body text" the wrong fix — that
+      // rule would turn every truncated multi-byte body into base64 with the peer
+      // having done nothing at all.
+      const between = await bodyOf({ url: `${fixture.origin}/multibyte`, max_body_bytes: 6 });
+
+      expect(between["truncated"]).toBe(true);
+      expect(between["text"]).toBe("中中");
+      expect(between["text_lossy"]).toBeUndefined();
+      // And the text is the bytes that were kept, which is the property the field
+      // exists to certify.
+      expect(Buffer.from(between["text"] as string, "utf8").byteLength).toBe(6);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "renders the same distinction for a person, above the text it is about",
+    async () => {
+      // The rendering, not only the JSON: this is the surface where a lossy decode
+      // is most likely to be read as the response, because a terminal shows the
+      // text and nothing else. Asserted in both directions, since a line that
+      // appeared on every body — or on none — would be worse than no line.
+      const rendered = async (args: string[]): Promise<{ exit: number; text: string }> => {
+        const written: string[] = [];
+        const streams: OutputStreams = {
+          out: (text) => written.push(text),
+          err: (text) => written.push(text),
+        };
+        const exit = await runCli(args, { streams, services });
+        return { exit, text: written.join("\n") };
+      };
+
+      const lossy = await rendered(["http", `${fixture.origin}/not-utf8`, "--max-bytes", "8"]);
+      expect(lossy.exit).toBe(EXIT_OK);
+      expect(lossy.text).toMatch(/^\s+text is a lossy decode: the peer sent bytes.*$/mu);
+      // Above the text, so it is read before the response is taken at face value.
+      expect(lossy.text.indexOf("text is a lossy decode")).toBeLessThan(lossy.text.indexOf("Hi"));
+
+      const whole = await rendered(["http", `${fixture.origin}/multibyte`, "--max-bytes", "6"]);
+      expect(whole.exit).toBe(EXIT_OK);
+      expect(whole.text).not.toContain("lossy");
     },
     TIMEOUT,
   );

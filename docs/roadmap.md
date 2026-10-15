@@ -412,7 +412,8 @@ implicit.
 | ✅  | An SBOM in the release artifacts: `sbom.cdx.json` is CycloneDX 1.5 over the production npm closure, written by `npm run sbom:generate`, compared byte for byte by `npm run sbom:check` inside `docs:check`, and shipped in the tarball along with `THIRD_PARTY_NOTICES.md` and `licenses/npm-dependencies.json`, neither of which any tarball had contained. `npm sbom` was measured before it was rejected: under `--omit dev` it omits `zod`, a declared dependency a user installs; without it, it describes ~300 dev tools; and reading a tree describes this host's stale `node_modules`. The closure walk is shared with the licence file now, so the two cannot disagree. See [below](#sbom)                                                                                                                                                                                                                                                                                                                                               |
 | ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ✅  | A link failure has a diagnostic format here, written from captures of real ones rather than from a plausible-looking log: `ld: cannot find -luvcpp`, gold's `ld.gold: error: cannot find -luvcpp`, a located `undefined reference to` naming the symbol and the caller's own source line, the same reference in a build with no debug information where only a section offset is left to name, a `multiple definition of` with its "first defined here" trail, and the driver's `collect2: error: ld returned 1 exit status` — which is held back until the whole scan is read, so a link failure the linker stated plainly does not print twice. All of them answer `phase: "link"`, the phase the contract has had since the beginning with nothing producing it. The same captures found the other half: `ld` and GNU Make translate their messages, so on a `zh_CN.UTF-8` host this failure reads `找不到 -luvcpp` and matches nothing — every build subprocess now runs with the language its output is read in. See [below](#link-failures) |
-| ⬜  | `decodeBody` answers `decoded_as_text: true` with text that is not the response's bytes when a peer declares a text content type and sends something that is not UTF-8: `Buffer.from([0x48, 0x69, 0xff])` becomes `"Hi\uFFFD"`, which re-encodes to three different bytes, and no field in the output says so. The WebSocket half of the repository names the same condition (`text_omitted: "invalid-utf8"`). Not fixed alongside, because "refuse to call it text when a re-encode differs" also refuses every body truncated mid-character — the ordinary case for a body cut to `max_body_bytes`, and not the peer's doing — so the two have to be told apart first. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                    |
+| ✅  | `decodeBody` answered `decoded_as_text: true` with text that is not the response's bytes when a peer declared a text content type and sent something that is not UTF-8: `Buffer.from([0x48, 0x69, 0xff])` became `"Hi\uFFFD"`, which re-encodes to three different bytes, and no field in the output said so. `text_lossy` names which of the two causes it — the peer's bytes, or a cap of the caller's that cut a character in half — and the three answers are asserted over a real socket as well as against a known-answer table. The two had to be told apart first, and the fact that tells them apart is `cutShort`, which only the caller knows; the SOAP path, decoding the same bytes a second time, was the same defect in a third place. See [below](#lossy-text)                                                                                                                                                                                                                                                                    |
+| ⬜  | A body the text is not is handed over as text alone: `decodeBody` answers with `text` or with `base64` and never both, so a caller whose text came back lossy cannot obtain the bytes it was decoded from — `text_lossy` names the loss and `digest` is over bytes that no longer travel with the answer. Offering the bytes alongside, or in some other form, is a change to what the tool returns and a decision about which of the two a caller reads first. See [below](#lossy-text)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1120,21 +1121,23 @@ pair; `Buffer.from(text, "utf8")` turns that half into U+FFFD, so the generator 
 producing text that no caller could put on the wire. It spreads the alphabet into
 characters now.
 
-**Two things recorded rather than fixed, one of which has since been fixed.** The
-lane asserts them as they are, with the reasoning for leaving them, and each
-carries a row above. A link failure had no diagnostic format here: `ld:`,
-`collect2:` and `FAILED:` were dropped, and no test in this repository had ever
-captured a real link failure, so writing a pattern from a log that looks plausible
-is how a parser starts inventing diagnostics. That is what it took to close the
-row — captures, not a pattern — and the captures are in
-[the section below](#link-failures). And `decodeBody` calls lossy UTF-8 decoding
-"text": a peer that declares `text/html` and sends something else gets
-`decoded_as_text: true` with replacement characters in it, so a caller comparing
-the text against the response digest finds a difference no field explains. The
-obvious fix is wrong for a reason the lane also pins — refusing to call it text
-whenever a re-encode differs also catches a body truncated through a multi-byte
-character, which is the ordinary case for `max_body_bytes` and is not the peer's
-doing.
+**Two things recorded rather than fixed, and both since fixed.** The lane asserted
+them as they were, with the reasoning for leaving them, and each carried a row
+above; neither assertion is in the lane any more, because neither behaviour is in
+the code. A link failure had no diagnostic format here: `ld:`, `collect2:` and
+`FAILED:` were dropped, and no test in this repository had ever captured a real link
+failure, so writing a pattern from a log that looks plausible is how a parser starts
+inventing diagnostics. That is what it took to close the row — captures, not a
+pattern — and the captures are in [the section below](#link-failures). And
+`decodeBody` called lossy UTF-8 decoding "text": a peer that declared `text/html`
+and sent something else got `decoded_as_text: true` with replacement characters in
+it, so a caller comparing the text against the response digest found a difference no
+field explained. The obvious fix was wrong for a reason the lane had pinned —
+refusing to call it text whenever a re-encode differs also catches a body truncated
+through a multi-byte character, which is the ordinary case for `max_body_bytes` and
+is not the peer's doing — so the two had to be told apart first, which is what
+[the section below](#lossy-text) does: `text_lossy`, and the eight mutations each of
+its guards was shown to fail under.
 
 **And it corrected a comment rather than being satisfied by one.** The NUL guard in
 `decodeBody` is applied to the first 1024 _characters_ of the decoded string while
@@ -1150,6 +1153,112 @@ scope exists so that no reader has to work out which statement was made. The lan
 also do not replace the captured-fixture tests beside them: bytes a socket on this
 host actually produced are evidence about Node and about the peer, and generated
 bytes are not. The two files say which is which in their own headers.
+
+### A body decoded as text is not the bytes {#lossy-text}
+
+`decodeBody` hands a caller `text` with `decoded_as_text: true`, and a UTF-8 decode
+of bytes that are not UTF-8 is lossy: `Buffer.from([0x48, 0x69, 0xff])` decodes to
+`"Hi�"`, which re-encodes to three bytes that are not the three it was given.
+Nothing in the output said so, so a caller who compared the text against the body's
+`digest` had a mismatch and no field to account for it.
+
+The obvious repair — refuse to call it text whenever a re-encode differs — is wrong,
+and the fuzz lane had already pinned why: it also catches every body a cap stopped
+inside a multi-byte character, which is what `max_body_bytes` does to any multi-byte
+body whose byte length is not a multiple of the character width. That is the
+caller's own doing and not a finding about the service, and collapsing the two sends
+someone to debug a service that is fine. The row above waited on telling them apart.
+
+**The distinction, and the one fact that decides it.** A trailing run of one to
+three continuation bytes is a character that was cut — but only if a caller says it
+cut the body. Nothing in the bytes can say it: `[0xe4, 0xb8]` arriving whole is the
+peer's invalid bytes, and the same two bytes arriving after a cap are the cap's
+loss. The caller states it (`cutShort`), naming the two caps that are the caller's
+rather than the peer's — `max_body_bytes`, and the transport's own limit — and
+`textLossiness` answers one of three things:
+
+| answer         | means                                                                                                                      | whose it is              |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| absent         | re-encoding `text` returns exactly the bytes that were decoded                                                             | —                        |
+| `truncated`    | the only thing wrong with these bytes is that they stop inside a character                                                 | the cap that was applied |
+| `invalid-utf8` | the bytes hold a byte no sequence begins with, a lone continuation, an overlong encoding, a surrogate, or nothing cut them | the peer                 |
+
+Absent is the ordinary case, and it is the field that certifies the text against the
+digest. The vocabulary is the WebSocket half's (`text_omitted`), reused rather than
+respelled, because two spellings of one answer is how the two drift apart. `uvp http`
+and `uvp soap` print it as one line above the body, since a terminal shows the text
+and nothing else — that is the surface where a lossy decode is most likely to be read
+as the response itself.
+
+**One owner, three callers.** The rule is `textLossiness`, and every decode in the
+web service calls it: the HTTP/1.1 path, the HTTP/3 path, and — found by inspecting
+the consumers, which is what "told apart first" turned out to require — the SOAP
+path, where the same bytes were decoded a second time to read a fault out of them.
+That third instance was the same defect in a place the row had not named: the string
+a fault was parsed from and the string handed to the caller were two answers about
+one body. The SOAP path parses the string it hands over now, and reports the same
+field, and the HTTP/3 path reports it too — without `cutShort`, because the probe
+hands a body over whole or not at all. Both output schemas carry the field, so it is
+in the generated catalog as well.
+
+**The rule was measured before it was trusted.** The fuzz lane carries nineteen
+known answers — `[bytes, cutShort, expected]`, one shape each — and the table failed
+on its first run: `needed = byte >= 0xf0 ? 4 : …` read `0xff` as a four-byte lead,
+so a lone `ff` under a cap came back as the caller's cut rather than the peer's
+bytes. The ranges are the encoding's now — `c2`–`df`, `e0`–`ef`, `f0`–`f4` — with a
+comment saying why a bit test is not one: `f5`–`ff` carry a four-byte lead's length
+bits and are not leads, and `c0`/`c1` cannot start a sequence that decodes to the
+character they spell.
+
+**Verified by eight mutations, each applied, run, and reverted.** The two lanes are
+`httpClient.fuzz.test.ts` (8 tests, the rule) and `httpBehaviour.test.ts` (12 tests,
+the three answers over a socket):
+
+| mutation                                            | fuzz   | socket  |
+| --------------------------------------------------- | ------ | ------- |
+| the round-trip check short-circuited to `undefined` | 3 of 8 | 4 of 12 |
+| the `cutShort` branch dead                          | 2 of 8 | 1 of 12 |
+| `cutShort` forced true                              | 2 of 8 | 1 of 12 |
+| the lead-byte range loosened to `>= 0xf0`           | 1 of 8 | —       |
+| the prefix round-trip skipped                       | 2 of 8 | —       |
+| `decodeBody` computing the loss and dropping it     | 3 of 8 | 4 of 12 |
+| the HTTP tool no longer passing `cutShort`          | —      | 1 of 12 |
+| the renderer no longer printing the line            | —      | 1 of 12 |
+
+The two rows with a dash in the socket column are the rule's own cases — which byte
+may start a sequence, whether the prefix before a dangling tail decodes cleanly —
+and the fuzz lane's table is their owner: the socket lane's claim is the three
+answers end to end, not every shape the rule turns on.
+
+The third row is the one that changed something. It was caught by the fuzz lane and
+missed by the socket lane, which had no route whose body stopped inside a character
+with nothing having cut it — so the answer that exists to stop a caller blaming
+their own limit for a peer's bytes was, over a real socket, untested. The fixture has
+`/half-character` now, and that mutation fails both lanes. The first two rows are
+mutations a run reports and the third is the reason to make them.
+
+**Not claimed.** No capture from a real service is behind any of this. The answers
+are asserted against a fixture written here, so what these lanes establish is this
+client's rule and its three answers, not any real peer's behaviour; a peer that
+sends something stranger than `ff fe` and a half-character is a case the fuzz table
+covers by construction and no capture covers at all.
+
+**What the field does not do.** It does not hand the bytes over. `decodeBody` answers
+with `text` or with `base64` and never both, so a caller whose text came back lossy
+still holds text that is not the response — the field names the loss and `digest` is
+over bytes that no longer travel with the answer. Offering the bytes alongside is its
+own row above rather than something settled here.
+
+**An additive field, and breaking anyway.** `text_lossy` is optional and every
+previous answer is still valid, which is the shape a changelog would call a feature.
+It is not one here: the catalog's objects are closed (`additionalProperties: false`
+on the body of both tools), so a client that cached the previous output schema and
+validates against it rejects a body that now carries the field — the exact reader
+[`docs/releasing.md`](releasing.md#compatibility-promises) promises to keep working.
+The commit is marked `!` with a `BREAKING CHANGE:` footer, and release-please takes
+the major bump. What made this worth checking rather than assuming is that the
+repository's own history has the other shape in it: additive fields landed without
+the marker, which is a rule quietly not followed rather than a rule changed.
 
 ### A link failure, from captures {#link-failures}
 

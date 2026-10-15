@@ -54,6 +54,14 @@ export interface HttpRequestOutput {
     base64?: string;
     truncated: boolean;
     decoded_as_text: boolean;
+    /**
+     * Why the decoded text is not the body's bytes, when it is not. Absent means
+     * re-encoding `text` returns exactly the bytes that were decoded, so the text
+     * may be compared against `digest`. `truncated` names a cap that cut a
+     * character in half; `invalid-utf8` names bytes the peer sent that are not
+     * UTF-8. See `textLossiness` for the rule.
+     */
+    text_lossy?: "truncated" | "invalid-utf8";
     digest: string;
   };
   redirects: { status: number; location: string }[];

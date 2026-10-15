@@ -12,6 +12,20 @@ import { at, bool, list, num, obj, str, strings, yesNo } from "./readOutput.js";
 
 const CONTENT_WARNING = "the text below came from the target host";
 
+/**
+ * What `text_lossy` means, in words, for the two tools whose output carries it.
+ *
+ * Both sentences say whose doing the loss is, because that is the whole
+ * distinction: a cap cutting a body in half is the caller's, and bytes that are
+ * not UTF-8 are the peer's. A value a future contract adds prints as itself
+ * rather than as nothing, which is the direction to be wrong in for a field whose
+ * presence means "do not trust the text below".
+ */
+const LOSSY_TEXT: Record<string, string> = {
+  truncated: "the byte cap cut a character in half, so the last one is not what the peer sent",
+  "invalid-utf8": "the peer sent bytes that are not UTF-8, so this is not the response's text",
+};
+
 export const renderHttp = (output: Record<string, unknown>): string[] => {
   const request = obj(output["request"]);
   const body = obj(output["body"]);
@@ -68,6 +82,11 @@ export const renderHttp = (output: Record<string, unknown>): string[] => {
   if (bool(body["truncated"]) === true) {
     lines.push(row("", `truncated: only the first ${bytes(num(body["bytes"]) ?? 0)} were read`));
   }
+  // The text below is what a reader will take at face value, so the one line that
+  // says it is not the response's bytes goes above it rather than after 8000
+  // characters of it. Absent is the ordinary case and prints nothing.
+  const lossy = str(body["text_lossy"]);
+  if (lossy !== "") lines.push(row("", `text is a lossy decode: ${LOSSY_TEXT[lossy] ?? lossy}`));
 
   const text = str(body["text"]);
   if (text !== "") lines.push("", `# ${CONTENT_WARNING}`, clip(text, 8_000));
@@ -188,7 +207,13 @@ export const renderSoap = (output: Record<string, unknown>): string[] => {
   const body = obj(output["body"]);
   const text = str(body["text"]);
   if (text !== "") lines.push("", `# response envelope, ${CONTENT_WARNING}:`, clip(text, 8_000));
-  if (bool(body["truncated"]) === true) lines.push(row("truncated", "yes — the log is a prefix"));
+  // Both caps — the 64 Ki-character cut above and the transport's — are reported
+  // by `truncated`, which used to say "the log is a prefix" here, a sentence
+  // about the log renderer copied into the SOAP one.
+  if (bool(body["truncated"]) === true)
+    lines.push(row("truncated", "yes — only a prefix is shown"));
+  const lossy = str(body["text_lossy"]);
+  if (lossy !== "") lines.push(row("", `text is a lossy decode: ${LOSSY_TEXT[lossy] ?? lossy}`));
   return lines;
 };
 

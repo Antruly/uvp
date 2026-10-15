@@ -168,6 +168,58 @@ const soapRoutes = (route, request, response) => {
   return false;
 };
 
+/**
+ * The routes whose bodies are bytes rather than characters.
+ *
+ * One group because they are one question asked three ways — is the text the
+ * client hands a caller this body's text? — and because the answer differs only
+ * in what the client is entitled to blame: the peer for `/not-utf8` and
+ * `/half-character`, its own cap for `/multibyte`. Returns false for a route that
+ * is not one of them, so the caller can keep looking.
+ */
+const byteRoutes = (route, response) => {
+  if (route === "/not-utf8") {
+    // A peer that declares text and sends bytes that are not: `ff fe` begin no
+    // UTF-8 sequence at all, so the decode replaces them and the tool has to say
+    // that the text it hands over is not this body.
+    const body = Buffer.concat([Buffer.from("Hi"), Buffer.from([0xff, 0xfe]), Buffer.from("!")]);
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-length": String(body.length),
+    });
+    response.end(body);
+    return true;
+  }
+  if (route === "/multibyte") {
+    // Three-byte characters and nothing else, so a byte-count cap lands inside
+    // one for every length that is not a multiple of three. That is what lets a
+    // cap's loss be told from a peer's, and a cap that lands *between* two
+    // characters be told from both.
+    const body = Buffer.from("中".repeat(16), "utf8");
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-length": String(body.length),
+    });
+    response.end(body);
+    return true;
+  }
+  if (route === "/half-character") {
+    // A body that stops inside a three-byte character and that nothing cut: the
+    // peer sent seven bytes and said so. These are the same bytes a byte-count
+    // cap leaves behind, which is why the client cannot answer from the bytes
+    // alone, and this route is the one that makes a client which always answers
+    // "truncated" wrong about a peer that is the one at fault.
+    const body = Buffer.from("中".repeat(3), "utf8").subarray(0, 7);
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-length": String(body.length),
+    });
+    response.end(body);
+    return true;
+  }
+  return false;
+};
+
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(port)}`);
   const route = url.pathname;
@@ -248,6 +300,7 @@ const server = createServer((request, response) => {
     response.end(body);
     return;
   }
+  if (byteRoutes(route, response)) return;
   if (soapRoutes(route, request, response)) return;
 
   json(response, 404, { error: "no such route", route });

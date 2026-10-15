@@ -208,6 +208,10 @@ export class Http3Client {
         // it was over the cap rather than cut to it.
         truncated: report.bodyOmitted !== undefined,
         decoded_as_text: decoded.decodedAsText,
+        // No `cutShort` above: the probe hands the body over whole or not at all,
+        // so a character cannot be left half-copied here and the only lossy decode
+        // this path can report is the peer's own.
+        ...(decoded.textLossy === undefined ? {} : { text_lossy: decoded.textLossy }),
         digest: sha256(exchange.body),
       },
       // Always empty, and not because nothing redirected: `follow_redirects: true`

@@ -5,6 +5,7 @@ import { newId, sha256 } from "../domain/identity.js";
 import {
   decodeBody,
   performRequest,
+  textLossiness,
   transportFailureKind,
   TransportFailure,
 } from "./httpClient.js";
@@ -110,6 +111,61 @@ const toTls = (exchange: HttpExchange): ToolTlsReport | undefined => {
     ...(tls.reason === undefined ? {} : { reason: tls.reason }),
   };
 };
+
+/**
+ * A response body as the caller receives it: capped, then decoded once.
+ *
+ * The decode is of the bytes that survived the cap, and it happens here rather
+ * than at the call site because the loss `decodeBody` reports is a fact about a
+ * cap that was applied — the two have to be decided together or the answer is
+ * about different bytes than the text.
+ *
+ * Both caps are the caller's rather than the peer's: `maxBytes`, and the
+ * transport's own limit, which arrives as `bodyTruncated`. That is what makes a
+ * character left half-decoded at the end a `text_lossy: "truncated"` — a limit
+ * someone set — rather than a finding about the service. `truncated` is either
+ * cap, and it is the one the output reports.
+ */
+const readBody = (
+  body: Buffer,
+  bodyTruncated: boolean,
+  contentType: string | undefined,
+  maxBytes: number,
+): { decoded: ReturnType<typeof decodeBody>; truncated: boolean } => {
+  const cut = body.byteLength > maxBytes;
+  const kept = cut ? body.subarray(0, maxBytes) : body;
+  const truncated = cut || bodyTruncated;
+  return { decoded: decodeBody(kept, contentType, { cutShort: truncated }), truncated };
+};
+
+/**
+ * The body block of the answer, assembled in one place.
+ *
+ * Every optional field here is present exactly when there is something to say:
+ * `text` and `base64` are alternatives, `content_type` is absent for a response
+ * that declared none, and `text_lossy` is absent when the text is the bytes. The
+ * caller reads the field that is there rather than choosing between two, which is
+ * why they are written as one spread each rather than as undefined values.
+ *
+ * `bytes` and `digest` are the whole body's, not the decoded prefix's: the caps
+ * above decide what is handed over as text, and a digest of what was kept would be
+ * a different claim about a different body.
+ */
+const toBody = (
+  exchange: HttpExchange,
+  contentType: string | undefined,
+  decoded: ReturnType<typeof decodeBody>,
+  truncated: boolean,
+): HttpRequestOutput["body"] => ({
+  bytes: exchange.body.byteLength,
+  ...(contentType === undefined ? {} : { content_type: contentType }),
+  ...(decoded.text === undefined ? {} : { text: decoded.text }),
+  ...(decoded.base64 === undefined ? {} : { base64: decoded.base64 }),
+  truncated,
+  decoded_as_text: decoded.decodedAsText,
+  ...(decoded.textLossy === undefined ? {} : { text_lossy: decoded.textLossy }),
+  digest: sha256(exchange.body),
+});
 
 /**
  * Record an exchange in the session, so `uvp_assert_exchange` can re-evaluate it.
@@ -625,9 +681,12 @@ export class WebService {
       input.max_body_bytes,
       this.options.maxBodyBytes ?? input.max_body_bytes,
     );
-    const truncated = exchange.body.byteLength > maxBytes;
-    const bodyBytes = truncated ? exchange.body.subarray(0, maxBytes) : exchange.body;
-    const decoded = decodeBody(bodyBytes, contentType);
+    const { decoded, truncated } = readBody(
+      exchange.body,
+      exchange.bodyTruncated,
+      contentType,
+      maxBytes,
+    );
     const tls = toTls(exchange);
 
     // One exchange, one evidence record. The negotiated version and the TLS
@@ -648,16 +707,15 @@ export class WebService {
         // record claimed, about a plaintext request, the one thing that could
         // not be true of it.
         ...(tls === undefined ? {} : { tls_verification: tls.verification }),
-        truncated: truncated || exchange.bodyTruncated,
+        truncated,
       },
       coverage: coverageComplete("HTTP exchange"),
       sources: [endpointSource(exchange.url)],
-      limitations:
-        truncated || exchange.bodyTruncated
-          ? [
-              `The response body was capped at ${String(maxBytes)} bytes; the digest is over the full body.`,
-            ]
-          : [],
+      limitations: truncated
+        ? [
+            `The response body was capped at ${String(maxBytes)} bytes; the digest is over the full body.`,
+          ]
+        : [],
     });
 
     return {
@@ -669,15 +727,7 @@ export class WebService {
       request_http_version: exchange.requestHttpVersion,
       headers: { ...exchange.headers },
       timing: toTiming(exchange.timing),
-      body: {
-        bytes: exchange.body.byteLength,
-        ...(contentType === undefined ? {} : { content_type: contentType }),
-        ...(decoded.text === undefined ? {} : { text: decoded.text }),
-        ...(decoded.base64 === undefined ? {} : { base64: decoded.base64 }),
-        truncated: truncated || exchange.bodyTruncated,
-        decoded_as_text: decoded.decodedAsText,
-        digest: sha256(exchange.body),
-      },
+      body: toBody(exchange, contentType, decoded, truncated),
       redirects: [...exchange.redirects],
       ...(tls === undefined ? {} : { tls }),
     };
@@ -1141,7 +1191,14 @@ export class WebService {
       captureId: undefined,
     });
 
+    // One decode, one owner: the envelope is parsed from the same string the
+    // caller receives, so the text the fault was read out of and the text handed
+    // over cannot be two different answers about the same bytes.
     const text = exchange.body.toString("utf8");
+    // `text` is cut to 64 Ki characters below and `truncated` reports that; this
+    // says why the decode itself is not the body's bytes, which is a different
+    // fact and the transport's cap is what causes it.
+    const lossy = textLossiness(exchange.body, text, exchange.bodyTruncated);
     const fault = parseSoapFault(text);
     if (fault !== undefined) {
       recordUnknown(
@@ -1164,6 +1221,7 @@ export class WebService {
         bytes: exchange.body.byteLength,
         text: text.slice(0, 64 * 1024),
         truncated: exchange.body.byteLength > 64 * 1024 || exchange.bodyTruncated,
+        ...(lossy === undefined ? {} : { text_lossy: lossy }),
         digest: sha256(exchange.body),
       },
       timing: toTiming(exchange.timing),
