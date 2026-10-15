@@ -99,6 +99,14 @@ connection headers the proxy added. The session limit, the record, and the
 second origin are all real; nothing here is a fixture standing in for a
 different fixture.
 
+A failure here prints what both fixture children were doing when the request died
+— `running`, `exited with code 0`, `killed by SIGKILL`, with the last line the
+child said — because this is the only lane that has produced an unexplained
+failure (`TransportFailure: socket hang up`, twice, both inside a full gate) and
+the fixture's own exit is the one end of that request a run can answer for itself.
+The diagnostic is logged and the error rethrown unchanged. See
+[the roadmap](roadmap.md#socket-hang-up).
+
 `providerConformance.test.ts` and `providerContractFaults.test.ts` are the two
 halves of one question: does a toolchain satisfy the port it is injected through?
 `providerContract.ts` holds the twelve obligations every provider must meet, as

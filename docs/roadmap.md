@@ -418,7 +418,7 @@ implicit.
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and passed on every run since, local and CI. The mechanism is unknown and the row is here rather than in a commit message because an intermittent gate teaches people to re-run until it is green. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ⬜  | `tests/conformance/captureReplay.test.ts` failed once, locally, with `TransportFailure: socket hang up` from a request to a loopback fixture (2026-10-16T05:59:33Z, inside a full gate run) and has passed on every run since. The client keeps pooled connections, so this is the class where a peer closes a socket under a request — but reuse of a socket closed long ago was eliminated, the client's own idle close samples clean at 2400 reuses, and the mechanism is not established. The probes were scratch scripts outside the repository. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ⬜  | `tests/conformance/captureReplay.test.ts` has failed **twice** with `TransportFailure: socket hang up` from a request to a loopback fixture, both times inside a full local gate (2026-10-16T05:59:33Z, and again at 06:56Z the same day) and never in the runs of that file alone — three more of them while writing this row. The client keeps pooled connections, so this is the class where a peer closes a socket under a request — but reuse of a socket closed long ago was eliminated, the client's own idle close samples clean at 2400 reuses, and the mechanism is not established. A failure now prints what the fixture child was doing when the request died, which is the one end of the request a run can answer for itself. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                         |
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens                                                                                                                                         |
 | ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down. Six major bumps now sit open as Dependabot pull requests (`#1`–`#6`, per [the pins above](#action-pins)), each of which is where this would be addressed; two of those bodies name Node.js 24 in their release notes and four do not mention a runtime at all, so which majors clear the warning is unobserved                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -787,13 +787,21 @@ of the second prints `UvpFailure`, which is the whole difference between them.
 
 ### A socket hang-up in the conformance lane {#socket-hang-up}
 
-`tests/conformance/captureReplay.test.ts` failed once, on this machine, inside a
-full local gate: `reports a body that changed as a difference, with the status
-still matching` ended with `TransportFailure: socket hang up` from
-`src/application/httpClient.ts:414` (2026-10-16T05:59:33Z). That log lives outside
-the repository, so the run is described rather than linked; the same file passed
-in the gate run afterwards and in every other local and CI run, and its twelve
-tests take about 250 ms.
+`tests/conformance/captureReplay.test.ts` has failed twice, on this machine, each
+time inside a full local gate and each time the same way: one test ends with
+`TransportFailure: socket hang up` from `src/application/httpClient.ts:414`. The
+first was `reports a body that changed as a difference, with the status still
+matching` (2026-10-16T05:59:33Z) and the second `reports a status that changed even
+though the body did not` (the same day at 06:56Z). Both logs live outside the
+repository, so the runs are described rather than linked. Between them the file
+passed four full gates and every standalone run of it — three more while this row
+was being written — and its twelve tests take about 250 ms.
+
+**What the second occurrence adds is that it rules out the one-off.** Two failures
+in about ten full local gates, none in the runs of the file alone: whatever this
+is, it wants the load of a gate that is building C++ beside it, or it wants enough
+repetition that ten runs is not yet a sample. Those are different answers and this
+is not enough evidence to choose between them.
 
 Both ends are Node's own defaults, which is what makes this a class rather than a
 one-off. uvp's client calls `http.request` with no `agent`, so it gets
@@ -827,10 +835,25 @@ the model — the lane's own pattern is one socket at a time — and the probes 
 scratch scripts under `/tmp`, not lanes here, so nothing in this repository
 re-runs them.
 
-**What is left** is a peer that closes a connection exactly as a request is
-written to it: the fixture child process, the proxy, or the kernel under the load
-of a gate that was running real CMake builds alongside. None of those was
-examined, and the mechanism stays unknown. Nothing was changed on this evidence,
+**The first of those three is now observable.** A failing request through the
+proxy — and a replay that throws rather than returning an `outcome` — prints what
+each fixture child was doing at that moment: `running`, `exited with code 0`,
+`killed by SIGKILL`, with the last line the child said, capped and marked when
+truncated. The fixture is a child process and nothing here read its exit or its
+output after startup; its `stdout` and `stderr` are drained now, which also removes
+the case where an unread pipe fills and blocks it. Verified against all three
+branches before being kept: a healthy fixture says `running, last said "fixture
+listening …"`, one killed with `SIGKILL` says `killed by SIGKILL`, and one stopped
+through `stop()` — which sends `SIGTERM` and gets a clean exit — says `exited with
+code 0`. So the next occurrence answers its own first question: if the target was
+there, the failure was the proxy's or the kernel's, and if it was not, the exit
+says which way it went. The diagnostic is logged and the error is rethrown
+unchanged, because a diagnostic that changed the error under test would be a
+second defect.
+
+**What is left** is therefore two ends rather than three: a connection closed as a
+request is written to it, by the proxy or by the kernel under the load of a gate
+that was running real CMake builds alongside. Nothing was changed on this evidence,
 and one candidate fix is named so the next person does not have to re-derive the
 trade: making the client open one connection per exchange would remove the class
 and would also change what `uvp_load_test` measures, which is not a trade an

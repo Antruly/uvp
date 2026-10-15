@@ -112,23 +112,55 @@ const withCapture = async <T>(
   }
 };
 
+/**
+ * Note what the targets were doing when a request through the proxy failed, then
+ * let the failure go.
+ *
+ * Written for the one failure this lane has produced that nothing explains: a
+ * `TransportFailure: socket hang up` from a loopback target, seen twice inside a
+ * full gate (2026-10-16T05:59:33Z and 06:56Z) and never in the thirty-odd runs of
+ * this file alone. A socket hang up is a peer that closed a connection under a
+ * request, and the three ends of that request are the client, the proxy and the
+ * fixture — all in-process but the last, which is a child process whose exit and
+ * output nothing here read. Its state is the half a failing run can answer for
+ * itself, so the failure now carries it rather than leaving the next reader to
+ * re-derive whether the target was even there.
+ *
+ * Logged and rethrown, never wrapped: the error a test asserts on has to stay the
+ * error it was, and a diagnostic that changed it would be a second defect.
+ */
+const noteTargets = (what: string, cause: unknown): void => {
+  console.error(
+    `${what} failed: ${String(cause)}\n` +
+      `  fixture: ${fixture.state()}\n` +
+      `  elsewhere: ${elsewhere.state()}`,
+  );
+};
+
 /** Drive one request through the capture's proxy, as a client would. */
 const through = async (
   capture: Capture,
   path: string,
   options: { readonly method?: string; readonly body?: string } = {},
-): Promise<HttpExchange> =>
-  await performRequest({
-    url: `${capture.proxy}${path}`,
-    method: options.method ?? "GET",
-    headers: {},
-    body: options.body === undefined ? undefined : Buffer.from(options.body, "utf8"),
-    httpVersion: "auto",
-    followRedirects: false,
-    maxRedirects: 0,
-    verifyTls: true,
-    timeoutMs: 10_000,
-  });
+): Promise<HttpExchange> => {
+  const url = `${capture.proxy}${path}`;
+  try {
+    return await performRequest({
+      url,
+      method: options.method ?? "GET",
+      headers: {},
+      body: options.body === undefined ? undefined : Buffer.from(options.body, "utf8"),
+      httpVersion: "auto",
+      followRedirects: false,
+      maxRedirects: 0,
+      verifyTls: true,
+      timeoutMs: 10_000,
+    });
+  } catch (cause) {
+    noteTargets(`a request through the proxy to ${url}`, cause);
+    throw cause;
+  }
+};
 
 interface ReplayExchange {
   readonly exchange_id: string;
@@ -148,8 +180,21 @@ interface ReplayExchange {
 const exchangesOf = (output: Record<string, unknown>): readonly ReplayExchange[] =>
   (output["exchanges"] ?? []) as readonly ReplayExchange[];
 
-const replay = async (capture: Capture, input: unknown = {}): Promise<Record<string, unknown>> =>
-  await conforming("uvp_capture_replay", { capture_id: capture.id, ...(input as object) });
+/**
+ * Replay a capture, with the same note on the targets if the replay itself fails.
+ *
+ * The replay performs its own requests from inside the handler, so a transport
+ * failure on that hop would otherwise arrive as a `UvpFailure` naming neither end.
+ * A replay whose *result* says `failed` is not a throw and does not come here.
+ */
+const replay = async (capture: Capture, input: unknown = {}): Promise<Record<string, unknown>> => {
+  try {
+    return await conforming("uvp_capture_replay", { capture_id: capture.id, ...(input as object) });
+  } catch (cause) {
+    noteTargets("a capture replay", cause);
+    throw cause;
+  }
+};
 
 beforeAll(async () => {
   fixture = await startFixture();

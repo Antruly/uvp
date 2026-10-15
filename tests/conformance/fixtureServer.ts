@@ -21,6 +21,17 @@ export interface FixtureServer {
   readonly port: number;
   readonly origin: string;
   stop(): Promise<void>;
+  /**
+   * How the fixture process is leaving, or has left, and the last thing it said.
+   *
+   * For a failure that has to know whether the target was still there. Both other
+   * ends of this lane are in-process — the proxy and the client — and this one is
+   * a child, whose exit and output no lane here read after startup. A `socket hang
+   * up` from a loopback target is a peer that closed a socket under a request, so
+   * which peer it was is the first question, and this is the only end that can
+   * answer it.
+   */
+  state(): string;
 }
 
 /** Run the fixture for the duration of a test, on a reserved port. */
@@ -29,6 +40,29 @@ export const startFixture = async (): Promise<FixtureServer> => {
   const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port)], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, FIXTURE_PORT: String(port) },
+  });
+
+  /**
+   * What the child has said since it started, capped.
+   *
+   * Kept rather than drained and dropped, and drained at all: a piped stream with
+   * no reader fills its pipe and blocks the child on its next write, and this is
+   * the stream a fixture that has gone wrong would be writing to.
+   */
+  const said: string[] = [];
+  const remember = (chunk: string): void => {
+    said.push(chunk);
+    if (said.length > 20) said.shift();
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", remember);
+  child.stderr.on("data", remember);
+
+  /** Set once, by whichever came: a normal exit or a signal. */
+  let left: string | undefined;
+  child.once("exit", (code, signal) => {
+    left = signal === null ? `exited with code ${String(code)}` : `killed by ${String(signal)}`;
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -40,7 +74,6 @@ export const startFixture = async (): Promise<FixtureServer> => {
       clearTimeout(timer);
       resolve();
     };
-    child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       if (chunk.includes("fixture listening")) settle();
     });
@@ -57,6 +90,21 @@ export const startFixture = async (): Promise<FixtureServer> => {
   return {
     port,
     origin: `http://127.0.0.1:${String(port)}`,
+    state: () => {
+      const lines = said
+        .join("")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "");
+      const last = lines.at(-1);
+      // Truncated with a count rather than silently: this goes into a failure's
+      // output, and a half-line that looks whole is worse than a marked one.
+      const detail =
+        last === undefined
+          ? ""
+          : `, last said ${JSON.stringify(last.length > 200 ? `${last.slice(0, 200)}…` : last)}`;
+      return `${left ?? "running"}${detail}`;
+    },
     stop: async () => {
       if (child.exitCode !== null || child.signalCode !== null) return;
       const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
