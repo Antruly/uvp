@@ -1,0 +1,68 @@
+version: 2
+
+# Dependency updates, so that the commit-SHA pins in `.github/` are maintained
+# rather than merely made.
+#
+# `npm run verify:actions` requires every third-party `uses:` to name a commit
+# SHA with the release beside it. A pin nothing updates is a pin that goes stale,
+# so the pin and this file are one change: pinning without a bot is how a
+# repository ends up running a known-vulnerable action with a comment claiming it
+# is a release, which is worse than an unpinned tag because it looks reviewed.
+#
+# Dependabot rather than Renovate, because Renovate is an app installed on the
+# repository and Dependabot is GitHub reading a file in it. Neither has anything
+# uvp must ask the user to authorise; only one of them needs no new authority.
+#
+# Two facts this configuration depends on, both from GitHub's own documentation
+# rather than from memory:
+#
+#   - Dependabot rewrites a SHA pin's version comment **only when the comment is
+#     on the same line** as the `uses:`, which is why `verify-actions.mjs`
+#     requires one there. Without it, an update changes a hash a reviewer cannot
+#     identify and leaves no trace of what moved.
+#   - Dependabot alerts do **not** cover actions pinned to a SHA — alerts apply
+#     only to semantic-version references. Pinning therefore trades an alert for
+#     immutability, and the weekly update pull request is where a bump is seen.
+#     That is the reason `open-pull-requests-limit` is not zero and why the group
+#     below covers routine bumps but not majors.
+#
+# Every pull request opened here is reviewed like any other, and a human owns the
+# final diff per CONTRIBUTING.md. The `chore(deps)` prefix is not cosmetic:
+# `pr-title.yml` requires a conventional title, and Dependabot's default
+# ("Bump x from a to b") would fail the gate before anyone read it.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:17"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # Routine bumps arrive as one pull request. A major does not: it changes
+      # what an action does, and a grouped major is a major nobody read the
+      # changelog for.
+      actions-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:37"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      npm-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

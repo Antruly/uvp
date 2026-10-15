@@ -47,11 +47,11 @@ jobs:
       toolchain: ${{ steps.plan.outputs.toolchain }}
     steps:
       - name: Check out the caller revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Select verification lanes
@@ -69,9 +69,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -98,7 +98,7 @@ jobs:
         run: npm run format:check
       - name: Upload static diagnostics
         if: always() && needs.changes.outputs.code == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: static-check-reports
           path: .cache/static-checks/
@@ -114,9 +114,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -127,7 +127,7 @@ jobs:
       - name: Generate the derived artifacts the built lanes read
         run: npm run artifacts:tool-catalog
       - name: Upload the runtime the built lanes consume
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: uvp-test-runtime
           path: |
@@ -144,8 +144,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -158,7 +158,7 @@ jobs:
           VITEST_BLOB_LABEL: source
       - name: Upload source test reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vitest-report-source
           path: .vitest/blob/*
@@ -177,8 +177,8 @@ jobs:
       matrix:
         shard: ["1/3", "2/3", "3/3"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -186,7 +186,7 @@ jobs:
         uses: ./.github/actions/npm-cache
       - run: npm ci
       - name: Download the built runtime
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: uvp-test-runtime
           path: .
@@ -196,7 +196,7 @@ jobs:
           VITEST_BLOB_LABEL: built
       - name: Upload shard reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vitest-report-built-${{ strategy.job-index }}
           path: .vitest/blob/*
@@ -212,8 +212,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -221,12 +221,12 @@ jobs:
         uses: ./.github/actions/npm-cache
       - run: npm ci
       - name: Download the built runtime
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: uvp-test-runtime
           path: .
       - name: Download the shard reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: vitest-report-*
           path: .vitest/blob
@@ -255,7 +255,7 @@ jobs:
           fi
       - name: Upload merged results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results
           path: |
@@ -276,8 +276,8 @@ jobs:
     # room to spare. Every run after the first reads the caches instead.
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -302,7 +302,7 @@ jobs:
             cmake ninja-build g++ pkg-config libsqlite3-dev libuv1-dev
       - name: Cache OpenSSL 3.5 with the QUIC API
         id: openssl-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/openssl-quic
           key: openssl-3.5.0-${{ runner.os }}-${{ runner.arch }}-quic
@@ -369,7 +369,7 @@ jobs:
             >> "$GITHUB_ENV"
       - name: Cache the libuvcpp build
         id: libuvcpp-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /tmp/uvcpp-prefix
           # The key names the flag set as well as the version: a change to the
@@ -477,7 +477,7 @@ jobs:
         run: npm run test:toolchain
       - name: Upload toolchain diagnostics
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: toolchain-lane-${{ github.run_attempt }}
           path: .cache/toolchain/
@@ -492,8 +492,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
@@ -501,7 +501,7 @@ jobs:
         uses: ./.github/actions/npm-cache
       - run: npm ci
       - name: Download the built runtime
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: uvp-test-runtime
           path: .
@@ -572,8 +572,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
       - name: Cache npm package downloads
