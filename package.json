@@ -88,7 +88,7 @@
     "docs:preview": "vitepress preview docs",
     "check": "turbo run typecheck lint format:check metadata:check knip",
     "check:fast": "turbo run typecheck lint",
-    "check:ci": "turbo run typecheck lint format:check metadata:check knip jscpd docs:check",
+    "check:ci": "turbo run typecheck lint format:check metadata:check knip jscpd docs:check docs:build",
     "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run test:run",
     "prepare": "husky"
   },

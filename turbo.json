@@ -133,6 +133,22 @@
       ],
       "outputs": []
     },
+    "docs:build": {
+      "dependsOn": ["artifacts:tool-catalog", "artifacts:skills", "artifacts:error-schema"],
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "docs/**",
+        "!docs/.vitepress/cache/**",
+        "!docs/.vitepress/dist/**",
+        "README*.md",
+        {
+          "mode": "dependencyOutputs",
+          "globs": ["skills/**", "docs/public/tool-catalog.json", "docs/error-contract.schema.json"]
+        }
+      ],
+      "outputs": ["docs/.vitepress/dist/**"]
+    },
     "artifacts:tool-catalog": {
       "dependsOn": ["compile"],
       "inputs": [

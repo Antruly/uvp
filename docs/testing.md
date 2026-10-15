@@ -137,6 +137,13 @@ write vocabulary and exact `network` list are described below. This section
 previously described a `rules.test.ts` in this directory; no such file has ever
 existed, and the four places above are where that coverage actually lives.
 
+`docs:build` is the other half of the documentation check and is in the gate for
+the same reason the `--check` scripts are: it renders every page and fails on a
+link or an anchor that does not resolve, which nothing else here can see. The one
+dead link CI has caught was a relative path to the repository README that
+`docs:check` accepted and this refuses, so a page can be consistent with the code
+and still send a reader nowhere.
+
 `handlers.test.ts` also holds the capture recording limit from both ends, in
 `the recording limit`. A capture has two size limits and they are not the same
 one: what it records, and what it will buffer in order to forward a body intact.
@@ -593,7 +600,7 @@ npm run test:built        # built projects
 npm test                  # everything
 npm run test:toolchain    # only the real-libuvcpp project
 npm run test:mutation     # Stryker
-npm run check:ci          # lint, format check, knip, jscpd, typecheck
+npm run check:ci          # lint, format check, knip, jscpd, typecheck, docs
 ```
 
 `test:fast` is what you run while working. `test:built` is what CI shards three
