@@ -63,7 +63,7 @@ Takes an optional `features` list and an optional provider id.
 ### Workspace
 
 **`uvp_workspace_create`** — Create a libuvcpp workspace.
-Scaffolds a CMake project from one of five templates, at a path you name. It
+Scaffolds a CMake project from one of six templates, at a path you name. It
 writes files and starts nothing. Refuses to overwrite an existing workspace
 unless told to.
 

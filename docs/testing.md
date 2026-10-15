@@ -260,7 +260,7 @@ describe name. A silent skip and a passing test look identical in a summary.
 ### A build that fails
 
 `tests/toolchain/buildFailure.test.ts` is the other half of the same claim. A
-green run of five templates says the templates work; this says a workspace that
+green run of six templates says the templates work; this says a workspace that
 does **not** build is reported as one. Both halves serve the same caller, because
 "your workspace is broken", "the library is missing", and "this tool could not
 tell" are three different next steps.
@@ -388,7 +388,11 @@ client reaching `websocket-echo` says nothing about this one.
 It has the same shape as the rest of the lane — generate, build, start, drive,
 stop — with one addition: the probe is a **binary**, `uvcpp-probe`, that
 `npm run build:native-probe` produces against a libuvcpp with
-`UVCPP_ENABLE_CAPI=ON`. The lane does not build it, because that would make a test
+`UVCPP_ENABLE_CAPI=ON` and the HTTP/3 C headers. Both, because the probe compiles
+all three of its translation units: against an install whose libuvcpp was built
+without HTTP3/QUIC it fails to compile at all, on `capi/uvcpp_c_http3.h`, which is
+a fact about the install and not about the WebSocket half it was asked for. The
+lane does not build it, because that would make a test
 run depend on a C++ compiler and a particular install; a host without it skips,
 and the skip names which of the two problems it has — no libuvcpp, or no probe —
 since only one of them is fixed by installing libuvcpp.

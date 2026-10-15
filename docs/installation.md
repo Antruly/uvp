@@ -61,7 +61,9 @@ cmake -S libuvcpp -B libuvcpp/build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
   -DUVCPP_BUILD_WEB=ON \
-  -DUVCPP_BUILD_WEBAPP=ON
+  -DUVCPP_BUILD_WEBAPP=ON \
+  -DUVCPP_ENABLE_CAPI=ON \
+  -DUVCPP_ENABLE_DB=ON
 cmake --build libuvcpp/build
 cmake --install libuvcpp/build
 ```
@@ -77,6 +79,34 @@ export CMAKE_PREFIX_PATH="$HOME/.local:$CMAKE_PREFIX_PATH"
 WebSocket and web-app modules the `websocket-echo`, `soap-service`, and
 `rest-api` templates need. There is no standalone WebSocket switch. See
 [libuvcpp feature mapping](libuvcpp-features.md#websocket-needs-two-switches-not-one).
+
+Two of the flags are for uvp rather than for the templates. `UVCPP_ENABLE_CAPI`
+is the C ABI `uvcpp-probe` reaches libuvcpp through — without it the probe does
+not build and `npm run test:toolchain` skips the half of itself that talks to
+libuvcpp's own client stack. `UVCPP_ENABLE_DB` is **off by default** upstream;
+without it the `db` feature reads as unavailable and a rest-api workspace that
+declares it fails to compile rather than falling back to memory. Add OpenSSL,
+QUIC and HTTP/3 as well if you want `http3-service`, which needs an OpenSSL at or
+above 3.2 built with the QUIC API — [libuvcpp feature
+mapping](libuvcpp-features.md#building-libuvcpp-for-uvp) has that recipe and what
+each switch costs.
+
+### Put the prefix on the loader path
+
+A source install links libuv, libllhttp, libssl/libcrypto and libsqlite3
+dynamically and gives `libuvcpp.so` no `RUNPATH` of its own:
+
+```bash
+export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
+```
+
+Without it a generated service starts and dies with `libllhttp.so.9.2: cannot
+open shared object file`, with that file in the very directory the service's own
+`RUNPATH` points at — a binary's `RUNPATH` resolves its own direct dependencies
+and is not consulted for theirs. `uvp doctor` reporting the install is not a
+statement that a service built against it can start; this entry is what makes the
+difference. The prebuilt release archives do not need it: their `libuvcpp.so` is
+self-contained.
 
 ### Route 2 — unpack a prebuilt release archive
 

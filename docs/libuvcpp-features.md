@@ -348,8 +348,8 @@ and the header is what the compiler will actually see.
 
 ## Building libuvcpp for uvp
 
-The configuration the uvp toolchain CI lane uses, and the one all five templates
-were verified against:
+The line uvp's own CI lane uses, and the one every generated template is built
+against:
 
 ```bash
 git clone --depth 1 --branch v1.7.0 https://github.com/Antruly/libuvcpp.git
@@ -358,25 +358,60 @@ cmake -S libuvcpp -B libuvcpp/build -G Ninja \
   -DCMAKE_INSTALL_PREFIX=/path/to/prefix \
   -DUVCPP_BUILD_WEB=ON \
   -DUVCPP_BUILD_WEBAPP=ON \
-  -DUVCPP_ENABLE_CAPI=ON
-cmake --build libuvcpp/build
+  -DUVCPP_ENABLE_CAPI=ON \
+  -DUVCPP_ENABLE_DB=ON \
+  -DUVCPP_ENABLE_OPENSSL=ON \
+  -DUVCPP_ENABLE_QUIC=ON \
+  -DUVCPP_ENABLE_HTTP3=ON \
+  -DOPENSSL_ROOT_DIR=/path/to/openssl-3.5-prefix
+cmake --build libuvcpp/build --parallel
 cmake --install libuvcpp/build
 ```
 
-`UVCPP_ENABLE_CAPI=ON` is not needed for generated projects. It is on in CI
-because `uvcpp-probe` — the program that answers the WebSocket probe's
-`libuvcpp` stack — reaches libuvcpp through its C ABI rather than through C++
-name mangling. It is built separately from uvp (`npm run build:native-probe`)
-and is not needed to use any other tool.
+That is a floor for the templates, not a general-purpose build. The switches are
+here because a template needs them:
 
-To confirm what you built, ask the config header directly:
+- `UVCPP_BUILD_WEB` and `UVCPP_BUILD_WEBAPP` are what every template links
+  against, and there is no separate switch for WebSocket — the server lives in the
+  web layer and is routed in the web-app layer.
+- `UVCPP_ENABLE_CAPI` is not needed by a generated project. It is on because
+  `uvcpp-probe` — the program that answers the WebSocket probe's `libuvcpp` stack
+  and the HTTP/3 probe's client — reaches libuvcpp through its C ABI rather than
+  through C++ name mangling. It is built by `npm run build:native-probe`,
+  separately from uvp, and is not needed to use any other tool. It compiles all
+  three of its translation units, so an install without the h3 C headers cannot
+  build the probe at all, WebSocket half included.
+- `UVCPP_ENABLE_DB` is off by default in libuvcpp. It is what gives `rest-api`
+  its store when the workspace declares `db`, and a workspace that declares the
+  feature against a build without the module fails to compile rather than
+  falling back, because the generated code includes the module's header. The
+  SQLite backend needs libsqlite3 at build time as well.
+- `UVCPP_ENABLE_OPENSSL`, `UVCPP_ENABLE_QUIC` and `UVCPP_ENABLE_HTTP3` are the
+  three behind `http3-service`: the serving half of HTTP/3 is
+  `uvcpp_http_server`, which lives in the web layer, and h3 has no transport
+  other than QUIC. QUIC is TLS 1.3 only, so it needs an OpenSSL **at or above
+  3.2 with the QUIC API** — Ubuntu 24.04's 3.0.13 is not one, and libuvcpp's
+  configure step says so and forces QUIC off rather than producing a library
+  that cannot link against ngtcp2. That is why the CI lane builds OpenSSL 3.5.0
+  from source into a prefix of its own and points `OPENSSL_ROOT_DIR` at it, which
+  is what libuvcpp's own `quic` and `http3` CI legs do.
+
+Which modules a build ended up with is the config header's answer and not the
+command line's: a precheck that forces a switch off leaves the `-D` in
+`CMakeCache.txt`.
 
 ```bash
-grep -E '^#define UVCPP_[A-Z0-9_]+_ENABLE' /path/to/prefix/include/uvcpp/uvcpp_config.h
+grep -E '^#[[:space:]]*define[[:space:]]+UVCPP_[A-Z0-9_]+_ENABLE' \
+  /path/to/prefix/include/uvcpp/uvcpp_config.h
 ```
 
-Every one of those lines is defined, and every one is `0` or `1`. That output is
-the same evidence the CI lane prints, and the same evidence `uvp doctor` reads.
+The pattern matches the indented `#  define` lines this header is written with. An
+anchored `^#define` matches none of them and prints nothing, which reads exactly
+like a build with no modules enabled. Every macro that comes back is `0` or `1`,
+with one exception the header explains in a comment: `UVCPP_HTTP_COMPRESS_ENABLE`
+is the `||` of the two encoder switches, because compression is on when either
+encoder is. That output is the same evidence the CI lane prints, and the same
+evidence `uvp doctor` reads.
 
 ## When something is missing
 

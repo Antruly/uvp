@@ -151,6 +151,65 @@ for (const evidence of STATUS_EVIDENCE) {
   }
 }
 
+/**
+ * A count stated as a total has to be the total.
+ *
+ * The template count has drifted twice into prose that said "five" after the
+ * sixth template landed — once in the MCP page and once in the testing page, in
+ * both cases in a sentence about *all* of them, where the wrong number is a claim
+ * about coverage rather than a typo. The identifier checks above cannot see it:
+ * every template id was still listed.
+ *
+ * `one template` is deliberately not matched. It is how the docs say "exactly one
+ * of them does this" — of the six templates, one has a store — and that is a
+ * statement about a subset, not a miscount. A count of two or more is read as a
+ * statement about the whole set, because that is what it has meant every time it
+ * was wrong. A sentence that really does mean a subset should name the templates
+ * instead, which is what the failure message asks for.
+ *
+ * The Chinese page is checked in the same shape, with its own numerals: it states
+ * the count as 六个模板, and the two pages disagreeing about how many templates
+ * there are is the drift this file exists to catch.
+ */
+const COUNT_WORDS = ["two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const CHINESE_NUMERALS = { 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+const COUNT_PATTERN = new RegExp(
+  `\\b(\\d+|${COUNT_WORDS.join("|")})\\s+(?:web-app |web |app |generated )?templates\\b`,
+  "giu",
+);
+const CHINESE_COUNT_PATTERN = /(\d+|[两三四五六七八九十])\s*个模板/gu;
+
+/** The count a phrase states, or `NaN` when this file cannot read it. */
+const statedCount = (stated) => {
+  const digits = Number.parseInt(stated, 10);
+  if (!Number.isNaN(digits)) return digits;
+  const index = COUNT_WORDS.indexOf(stated.toLowerCase());
+  return index === -1 ? (CHINESE_NUMERALS[stated] ?? Number.NaN) : index + 2;
+};
+
+/** Every page that states how many templates there are, in either language. */
+const PAGES_STATING_TEMPLATE_COUNTS = [
+  ...DOC_PAGES_WITH_TOOLS,
+  "docs/testing.md",
+  "docs/libuvcpp-features.md",
+  "docs/roadmap.md",
+  "docs/tool-design.md",
+  "docs/architecture.md",
+  "CONTRIBUTING.md",
+];
+
+for (const file of PAGES_STATING_TEMPLATE_COUNTS) {
+  const text = await read(file);
+  for (const match of [...text.matchAll(COUNT_PATTERN), ...text.matchAll(CHINESE_COUNT_PATTERN)]) {
+    if (statedCount(match[1]) !== TEMPLATE_IDS.length) {
+      failures.push(
+        `${file}: says "${match[0].trim()}", and there are ${TEMPLATE_IDS.length} templates. ` +
+          `If the sentence means a subset, name which ones.`,
+      );
+    }
+  }
+}
+
 /** Every documented feature must exist in the vocabulary, and the reverse. */
 {
   const file = "docs/libuvcpp-features.md";
