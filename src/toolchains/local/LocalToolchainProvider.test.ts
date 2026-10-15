@@ -189,7 +189,7 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(configure).not.toContain(installPrefix);
   });
 
-  it("names no prefix it did not find, and carries the environment into the record", async () => {
+  it("names no prefix it did not find, and carries the locale into the record", async () => {
     // The other direction, written against discovery's own answer so that it
     // holds on a host with no libuvcpp at all: when there is nothing to find,
     // nothing is invented — no empty assignment, no guessed `/usr/local`.
@@ -200,26 +200,35 @@ describe("the libuvcpp a build points CMake at", () => {
     if (found.found) {
       expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBe(found.installPrefix);
     } else {
-      expect(configure.startsWith("env ")).toBe(false);
-      expect(configure).not.toContain("CMAKE_PREFIX_PATH=");
+      expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBeUndefined();
     }
 
     // The recorded command is what a caller re-runs to read a failure, and the
-    // environment is part of it: without `CMAKE_PREFIX_PATH` the re-run reports
-    // a missing library for a build that failed on something else entirely.
-    // `env NAME=value` is the POSIX spelling of the same environment.
-    expect(configure.startsWith("env ")).toBe(found.found);
+    // environment is part of it: without `CMAKE_PREFIX_PATH` the re-run reports a
+    // missing library for a build that failed on something else entirely. The
+    // locale pin is there unconditionally, because it is not a fact about the
+    // install — it is the language the output is *read* in, so a record without it
+    // re-runs into a linker that answers in the host's language while every
+    // diagnostic uvp reports is English. `env NAME=value` is the POSIX spelling of
+    // both, and the two halves are asserted apart for that reason.
+    expect(configure.startsWith("env ")).toBe(true);
+    expect(assignmentOf(configure, "LC_MESSAGES")).toBe("C");
     expect(configure.slice(configure.indexOf("cmake"))).toContain("cmake -S ");
   });
 
-  it("records the compile as a second command, without the configure environment", async () => {
-    // `cmake --build` does not search for anything: the configure already wrote
-    // the paths into the build tree. Carrying the environment there would be
-    // noise in the record, and noise in a record is where a caller stops
-    // reading it.
+  it("records the compile as a second command, with the locale pin and no prefix", async () => {
+    // `cmake --build` does not search for anything: the configure already wrote the
+    // paths into the build tree, so a prefix here would be noise in the record, and
+    // noise in a record is where a caller stops reading it. The locale pin is the
+    // other half and is not conditional — this is the step the compiler and the
+    // linker print in, and the step whose output is parsed, so it is the one where
+    // re-running the recorded line without it would answer in another language.
     const outcome = await buildWithoutPrefix();
     expect(outcome.commands).toHaveLength(2);
-    expect(outcome.commands[1]).toBe(`cmake --build ${buildDir}`);
+    const compile = outcome.commands[1] ?? "";
+    expect(assignmentOf(compile, "CMAKE_PREFIX_PATH")).toBeUndefined();
+    expect(assignmentOf(compile, "LC_MESSAGES")).toBe("C");
+    expect(compile.endsWith(`cmake --build ${buildDir}`)).toBe(true);
     expect(outcome.succeeded).toBe(true);
   });
 });

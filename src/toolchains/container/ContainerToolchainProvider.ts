@@ -15,7 +15,7 @@ import type {
 } from "../../application/ToolchainProvider.js";
 import { UvpFailure, cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
-import { noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
+import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
 import { versionOf, whichOnPath } from "../host.js";
 import {
   CONFIG_HEADER_RELATIVE_PATHS,
@@ -644,7 +644,12 @@ class ContainerToolchainClient implements ToolchainClient {
       });
 
     const libuvcppPrefix = request.libuvcppPrefix ?? this.options.libuvcppPrefix;
-    const env: Record<string, string> = {};
+    // The message locale is not a host value being passed through — the container
+    // supplies its own environment — but the language the output is read in, and
+    // this build's output is read by the same parser `local` uses. Spread from its
+    // owner rather than restated, so the two providers cannot come to disagree
+    // about the language a diagnostic is written in.
+    const env: Record<string, string> = { ...buildOutputEnvironment() };
     if (libuvcppPrefix !== undefined) {
       // Built from nothing rather than extended from this process's environment:
       // the container's environment is the image's, and a host `CMAKE_PREFIX_PATH`

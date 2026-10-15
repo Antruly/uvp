@@ -54,10 +54,9 @@ const PHASES: readonly BuildPhase[] = ["configure", "compile", "link", "post"];
  * reporting a problem that does not exist, which is the failure this module's
  * doc comment calls out by name.
  *
- * Deliberately absent: the driver lines that carry a failure without carrying a
- * location, `collect2: error: ld returned 1 exit status` and its `ld: cannot find
- * -lfoo` relative. They are not in this list because whether they *should* be
- * reported is unresolved — see the last block.
+ * Deliberately absent: the lines a link failure prints. They are diagnostics now,
+ * and they are rendered as such by `linkCase` below — this list is for output that
+ * holds no diagnostic at all, which is the other half of the same claim.
  */
 const ORDINARY_OUTPUT = [
   "-- The CXX compiler identification is GNU 13.2.0",
@@ -242,6 +241,118 @@ const cmakeBareCase = (f: Fuzzer, phase: BuildPhase): RenderedCase => {
 
 const RENDERERS = [gccCase, msvcCase, cmakeLocatedCase, cmakeBareCase];
 
+/** A section offset as a linker writes one: what is left of a location with no line. */
+const sectionValue = (f: Fuzzer): string =>
+  `(${f.pick([".text", ".text.startup", ".text.unlikely"])}+0x${f.string("0123456789abcdef", 1, 3)})`;
+
+/** A symbol a link failure can be about, mangled or not. */
+const symbolValue = (f: Fuzzer): string =>
+  `${f.string("abcdefghijklmnopqrstuvwxyz_", 2, 8)}${f.chance(0.3) ? "()" : ""}`;
+
+/**
+ * A link failure, rendered from the formats the captures in `diagnostics.test.ts`
+ * were written from — the format rather than the regex, for the reason every other
+ * renderer here is: an expectation computed from what the tool is being asked to
+ * say cannot agree with a parser that changed its mind about the format.
+ *
+ * Four shapes, one of which is the driver's rather than the linker's, and the
+ * phase is `link` in all four however the caller's own phase reads. Two of them
+ * print a first line naming the object and the enclosing function, which is not a
+ * diagnostic and is rendered to make sure of it: the location on the line below
+ * says the same thing and says where.
+ *
+ * These are not in `RENDERERS`, because the mixed log cannot expect them: the
+ * driver's summary is reported only when no linker complaint was *anywhere* in the
+ * log, and that is a property of the whole parse rather than of one line.
+ * `diagnostics.test.ts` holds the pair that pins it.
+ */
+const linkCase = (f: Fuzzer): RenderedCase => {
+  const kind = f.pick(["summary", "cannot find", "undefined reference", "multiple definition"]);
+
+  if (kind === "summary") {
+    const status = 1 + f.int(9);
+    const said = `ld returned ${String(status)} exit status`;
+    return {
+      text: `collect2: error: ${said}`,
+      expected: [{ severity: "error", message: said, phase: "link" }],
+    };
+  }
+
+  if (kind === "cannot find") {
+    const name = f.chance(0.5)
+      ? `-l${f.string("abcdefghijklmnopqrstuvwxyz", 2, 8)}`
+      : pathValue(f, false);
+    if (f.chance(0.4)) {
+      // gold's spelling: an `error:` marker and no errno text.
+      const said = `cannot find ${name}`;
+      return {
+        text: `/usr/bin/ld.gold: error: ${said}`,
+        expected: [{ severity: "error", message: said, phase: "link" }],
+      };
+    }
+    // ld.bfd's: the description appended after it is the C library's, not the
+    // linker's, so it is rendered with and without. A parser that required it would
+    // be depending on a libc's wording for its own failure detection.
+    const said = f.chance(0.7)
+      ? `cannot find ${name}: ${f.pick(["No such file or directory", "Permission denied"])}`
+      : `cannot find ${name}`;
+    return {
+      text: `/usr/bin/ld: ${said}`,
+      expected: [{ severity: "error", message: said, phase: "link" }],
+    };
+  }
+
+  const file = pathValue(f, f.chance(0.25));
+  const line = 1 + f.int(9_999);
+  const section = sectionValue(f);
+  const symbol = symbolValue(f);
+
+  if (kind === "undefined reference") {
+    // Both captures: a source line plus a section when the build has debug
+    // information, and the object's own file plus a section when it has none. The
+    // section is in the message either way, because on the second shape it is the
+    // only locator there is.
+    const withLine = f.chance(0.5);
+    const said = `undefined reference to \`${symbol}'`;
+    return {
+      text: [
+        `/usr/bin/ld: CMakeFiles/hello.dir/main.cpp.o: in function \`main':`,
+        `${file}:${withLine ? `${String(line)}:` : ""}${section}: ${said}`,
+      ].join("\n"),
+      expected: [
+        {
+          severity: "error",
+          file,
+          ...(withLine ? { line } : {}),
+          message: `${said} ${section}`,
+          phase: "link",
+        },
+      ],
+    };
+  }
+
+  const origin = `${pathValue(f, false)}:${String(1 + f.int(9_999))}`;
+  const said = `multiple definition of \`${symbol}'; ${origin}: first defined here`;
+  // One location and not two, which is what makes this a shape of its own: the
+  // debug form has a source line, the other has a section, and never both.
+  const withLine = f.chance(0.5);
+  return {
+    text: [
+      `/usr/bin/ld: CMakeFiles/main.cpp.o: in function \`${symbol}':`,
+      `${file}:${withLine ? `${String(line)}:` : `${section}:`} ${said}`,
+    ].join("\n"),
+    expected: [
+      {
+        severity: "error",
+        file,
+        ...(withLine ? { line } : {}),
+        message: withLine ? said : `${said} ${section}`,
+        phase: "link",
+      },
+    ],
+  };
+};
+
 /** Some ordinary build output, as lines. */
 const noise = (f: Fuzzer): string[] =>
   Array.from({ length: f.int(6) }, () => f.pick(ORDINARY_OUTPUT));
@@ -389,7 +500,13 @@ const malformedDiagnostic = (
     ) {
       return `column ${JSON.stringify(diagnostic.column)}`;
     }
-    if (diagnostic.phase !== phase) return `phase ${String(diagnostic.phase)}`;
+    // The linker's formats answer with their own phase whatever the caller asked
+    // for: `cmake --build` compiles and links in one call, so the phase a caller
+    // passes names the step, and which of the two a failure was is named by the
+    // line. Every other format answers with the phase it was given.
+    if (diagnostic.phase !== phase && diagnostic.phase !== "link") {
+      return `phase ${String(diagnostic.phase)}`;
+    }
     const key = identity(diagnostic);
     if (seen.has(key)) return `duplicate ${JSON.stringify(key)}`;
     seen.add(key);
@@ -405,7 +522,12 @@ describe("the build-output parser, against generated input", () => {
       for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
         const f = fuzzer(seedFor(seed, iteration));
         const phase = f.pick(PHASES);
-        const base = mixedLog(f, phase).text;
+        // Every so often from a link failure rather than from a mixed log, because
+        // the linker's formats are the ones a truncation is most likely to cut: they
+        // are the last thing a build prints, and the byte caps on captured output
+        // mean the last thing is what goes. A half-line of one must be read as
+        // nothing rather than as a diagnostic invented from the remainder.
+        const base = f.chance(0.25) ? linkCase(f).text : mixedLog(f, phase).text;
         const text = MUTATORS[f.int(MUTATORS.length - 1)]?.(f, base) ?? base;
         const input = f.chance(0.5) ? { stdout: text, stderr: "" } : { stdout: "", stderr: text };
 
@@ -439,6 +561,34 @@ describe("the build-output parser, against generated input", () => {
         const f = fuzzer(seedFor(seed, iteration));
         const phase = f.pick(PHASES);
         const { text, expected } = mixedLog(f, phase);
+        const diagnostics = parseDiagnostics(text, "", phase);
+        if (JSON.stringify(diagnostics) !== JSON.stringify(expected)) {
+          throw new Error(
+            replay({
+              seed,
+              iteration,
+              input: text,
+              problem: `expected ${JSON.stringify(expected)}\n  received ${JSON.stringify(diagnostics)}`,
+            }),
+          );
+        }
+      }
+    }
+  });
+
+  it("reads a link failure out of the linker's own rendering of one", () => {
+    // Each rendering is parsed on its own rather than folded into `mixedLog`, and
+    // that is the whole-log rule in `parseDiagnostics` rather than a convenience:
+    // the driver's summary is reported only when no linker complaint was found
+    // *anywhere* in the log, so a log holding both has to expect the summary to be
+    // absent — an expectation about the parse and not about the format. Alone, the
+    // answer is the rendering: a linker complaint comes back as itself, and a
+    // summary with nothing beside it comes back too.
+    for (const seed of SEEDS) {
+      for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
+        const f = fuzzer(seedFor(seed, iteration));
+        const phase = f.pick(PHASES);
+        const { text, expected } = linkCase(f);
         const diagnostics = parseDiagnostics(text, "", phase);
         if (JSON.stringify(diagnostics) !== JSON.stringify(expected)) {
           throw new Error(
@@ -587,22 +737,43 @@ describe("the build-output parser's format edges", () => {
     ).toHaveLength(2);
   });
 
-  it("reports a driver failure that carries no location as nothing at all", () => {
-    // Recorded, not endorsed. `collect2: error: ld returned 1 exit status` and
-    // `ld: cannot find -lfoo` are what a link failure prints, and both are dropped:
-    // every format this module matches requires a line and a column (or a CMake
-    // header), and a driver's message has neither. `src/toolchains/diagnostics.test.ts`
-    // records the same shape from the other side — its negative cases are lines that
-    // must not be read as diagnostics — and `tests/toolchain/buildFailure.test.ts`
-    // covers a compile failure and a configure failure but no link failure, so what
-    // a real link failure's output looks like has not been observed here.
-    // Changing this means adding a fourth format, and adding one on a guess is how
-    // a parser starts inventing diagnostics; the roadmap carries the row.
+  it("reads the linker's own line out of a driver failure and holds its summary back", () => {
+    // The capture this was written from, from a real `ld: cannot find -luvcpp`, and
+    // the two lines around it that stay unread. `FAILED: hello` is Ninja's and names
+    // the target rather than the failure — the command echo under it is the same
+    // step again — and the `collect2:` line is the driver repeating what the linker
+    // already said, so it is reported only when the linker said nothing this module
+    // could read. Here the linker spoke, so one diagnostic comes out and not two;
+    // the other half of that rule is in `diagnostics.test.ts`, where the linker's
+    // spelling is one this module does not know.
     const text = [
       "FAILED: hello",
       "ld: cannot find -luvcpp",
       "collect2: error: ld returned 1 exit status",
     ].join("\n");
-    expect(parseDiagnostics(text, "", "link")).toEqual([]);
+    expect(parseDiagnostics(text, "", "link")).toEqual([
+      {
+        severity: "error",
+        message: "cannot find -luvcpp",
+        phase: "link",
+      },
+    ]);
+  });
+
+  it("reports the driver's summary alone when the linker's spelling is one it does not know", () => {
+    // The capture from `ld --bogus-option`, which is a real link failure whose
+    // linker lines this module cannot read: neither carries a file, a line, or a
+    // column. The phase would then be lost entirely — every other line of the log is
+    // the compiler's or the generator's, and the caller asked for `compile` — and a
+    // caller deciding what to re-run wants to know the link was the failing step, so
+    // the driver's line is what carries it.
+    const text = [
+      "/usr/bin/ld: unrecognized option '--bogus-option'",
+      "/usr/bin/ld: use the --help option for usage information",
+      "collect2: error: ld returned 1 exit status",
+    ].join("\n");
+    expect(parseDiagnostics(text, "", "compile")).toEqual([
+      { severity: "error", message: "ld returned 1 exit status", phase: "link" },
+    ]);
   });
 });

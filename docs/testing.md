@@ -322,19 +322,33 @@ tell" are three different next steps.
 It breaks a generated workspace rather than hand-writing a CMake project, so the
 subject is a project uvp produced itself, and it checks one failure per phase:
 
-| Failure            | Produced by  | What must come back                                                 |
-| ------------------ | ------------ | ------------------------------------------------------------------- |
-| Compile error      | the compiler | the compiler's file, line, and message                              |
-| Configure error    | CMake        | CMake's own error, naming the line in the caller's `CMakeLists.txt` |
-| Warning on success | CMake        | the warning, on a build that still succeeds                         |
+| Failure            | Produced by       | What must come back                                                 |
+| ------------------ | ----------------- | ------------------------------------------------------------------- |
+| Compile error      | the compiler      | the compiler's file, line, and message, at `phase: "compile"`       |
+| Configure error    | CMake             | CMake's own error, naming the line in the caller's `CMakeLists.txt` |
+| Link error         | the linker (`ld`) | the linker's words, the caller's file and line, at `phase: "link"`  |
+| Warning on success | CMake             | the warning, on a build that still succeeds                         |
 
 The configure row is a regression: CMake's errors are not compiler diagnostics in
 any spelling, and the parser knew only the compiler formats — so a configure
 failure came back as `succeeded: false` with `diagnostics: []`, under a
 limitation promising "the diagnostics below are the compiler's own output". The
-formats are now parsed in `src/toolchains/local/diagnostics.ts`, one module for
-all three spellings (GCC, MSVC, CMake), tested against text captured from the
-real tools rather than text written to match the parser.
+link row is the same defect one phase later: the linker's lines carry a file, a
+line and a section and no column, so every format passed them by and a link
+failure reported nothing either. Both are parsed now in
+`src/toolchains/diagnostics.ts`, one module for all four producers (GCC, MSVC,
+CMake, the linker), tested against text captured from the real tools rather than
+text written to match the parser — the captures and what they decided are in
+[the roadmap](roadmap.md#link-failures).
+
+The link test also carries the half that is not about formats. `ld` and GNU Make
+translate their messages, so the same failure on a `zh_CN.UTF-8` host is
+`找不到 -luvcpp` and matches nothing; the second test runs the build with that
+locale in the _caller's_ environment and asserts the diagnostic is still the
+English one. It probes the host's own `ld` first and prints a named reason when
+this machine's linker does not localize, because on such a host the hostile
+environment would change nothing and the test would pass without having shown
+anything.
 
 Two behaviours found while writing this are **recorded rather than fixed**,
 because both are product decisions rather than defects in the parser:

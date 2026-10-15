@@ -13,7 +13,7 @@
     "entry": ["docs/.vitepress/config.ts"]
   },
   "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["openssl"],
+  "ignoreBinaries": ["openssl", "ld"],
   "rules": {
     "files": "error",
     "dependencies": "error",

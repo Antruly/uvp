@@ -323,7 +323,11 @@ export const createToolHandlers = (
                   "A successful build is not a running service. Launch it with uvp_run to observe it.",
                 ]
               : built.outcome.diagnostics.length > 0
-                ? ["The diagnostics below are the compiler's own output, reproduced as data."]
+                ? [
+                    "The diagnostics below are the tools' own messages, reproduced as data. " +
+                      "Each carries the phase that produced it, which is what tells a compile " +
+                      "failure from a link failure.",
+                  ]
                 : [
                     "The build failed and no diagnostic in the tool's output was recognisable; " +
                       "the commands below are what to re-run to read it in full.",

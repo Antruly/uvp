@@ -502,7 +502,14 @@ describe("the container provider, building in the image", () => {
       const { provider, calls } = providerWith([{ exitCode: 0 }], { libuvcppPrefix: "/opt/mine" });
       await provider.createClient().build(requestFor(live(), { configureOnly: true }));
 
+      // The locale pair leads because it is spread in first, from the module that
+      // owns the language the build's output is read in; the two prefix variables
+      // are this provider's own addition. Asserted as the whole list rather than by
+      // membership, so a variable that stopped being passed is a failure here and
+      // not something a reader has to notice.
       expect(envPairs(calls[0])).toEqual([
+        "LC_ALL=",
+        "LC_MESSAGES=C",
         "CMAKE_PREFIX_PATH=/opt/mine",
         "PKG_CONFIG_PATH=/opt/mine/lib/pkgconfig:/opt/mine/lib64/pkgconfig",
       ]);
@@ -521,7 +528,10 @@ describe("the container provider, building in the image", () => {
 
     // Not the host's, and not a guessed `/usr/local`: a workspace that needs a
     // prefix uvp invented would configure against a libuvcpp uvp never checked.
-    expect(envPairs(calls[0])).toEqual([]);
+    // The locale pair is neither of those and is not conditional — it is the
+    // language the output is read in, so leaving it out would let the image's
+    // linker answer in its own locale while every format uvp parses is English.
+    expect(envPairs(calls[0])).toEqual(["LC_ALL=", "LC_MESSAGES=C"]);
     expect(calls[0]?.args.join(" ")).not.toContain("CMAKE_PREFIX_PATH");
   });
 

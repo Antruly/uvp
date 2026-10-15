@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -39,6 +40,18 @@ import {
  *   promised "the diagnostics below are the compiler's own output". Both halves of
  *   that were wrong — there were no diagnostics below, and a configure failure was
  *   never going to produce the compiler's output anyway.
+ * - **A link failure**, produced by `ld` through the compiler driver. This was the
+ *   last of the three with no format, and the phase the contract has for it —
+ *   `link` — had no producer at all: the linker's lines carry no file, no line and
+ *   no column, so every format in the parser passed them by, and a link failure
+ *   came back as a build that failed with nothing to act on. A compiler that
+ *   failed to *link* is a different next step from one that failed to compile, so
+ *   the test below asserts the phase as well as the words.
+ *
+ * The link failure is also where the environment the build runs in became part of
+ * the parser: `ld` and GNU Make translate their messages, so on a host whose
+ * locale is not English the linker's complaint is one no format here matches —
+ * measured on this host, and covered by the second link test below.
  *
  * A third thing a failing build can lead to is a launch, and the last test here
  * covers the join: a workspace that failed to build has nothing to run, and
@@ -108,6 +121,72 @@ const breakSource = (workspace: { readonly root: string }): void => {
 const breakConfigure = (workspace: { readonly root: string }): void => {
   const path = join(workspace.root, "CMakeLists.txt");
   writeFileSync(path, `${readFileSync(path, "utf8")}\n${BROKEN_CMAKE_LINE}\n`);
+};
+
+/**
+ * The symbol a link failure is made from: declared, called, and never defined.
+ *
+ * A *definition* is what has to be missing, so the compile has to succeed — a call
+ * to an undeclared name is a compile error, which is the case the first test above
+ * already covers and would prove nothing about linking. With the declaration in
+ * place the translation unit is valid and the failure belongs to the link, and the
+ * call site is what lets the linker name a place in the caller's own source, which
+ * is the half of a link failure a caller acts on.
+ *
+ * `extern "C"` is deliberately not used: the name below is a C++ one, so what the
+ * linker prints is a demangled symbol, which is the shape the format in
+ * `src/toolchains/diagnostics.ts` was captured from.
+ */
+const ABSENT_SYMBOL = "uvp_absent_symbol";
+const ABSENT_DECLARATION = `extern void ${ABSENT_SYMBOL}();`;
+const ABSENT_CALL = `  ${ABSENT_SYMBOL}();`;
+
+/**
+ * Break the link: declare a symbol nothing defines, then call it from `main`.
+ *
+ * The declaration goes immediately above `int main() {` and the call immediately
+ * inside it. Both are at the file's top level of scope, so a template that grows
+ * more code around `main` still gets a valid translation unit that fails at the
+ * link and not before it.
+ */
+const breakLink = (workspace: { readonly root: string }): void => {
+  const path = join(workspace.root, "src", "main.cpp");
+  const lines = readFileSync(path, "utf8").split("\n");
+  const anchor = lines.findIndex((line) => MAIN_ANCHOR.test(line));
+  if (anchor < 0) throw new Error(`no \`int main() {\` in ${path} to break`);
+  lines.splice(anchor, 0, ABSENT_DECLARATION);
+  // `main`'s opening brace moved down with the declaration, so the body's first
+  // line is one further along than the call to `splice` above suggests.
+  lines.splice(anchor + 2, 0, ABSENT_CALL);
+  writeFileSync(path, lines.join("\n"));
+};
+
+/**
+ * Whether this host's own linker answers in another language when asked to.
+ *
+ * The hostile-locale test below rests on a property of the *host* rather than of
+ * uvp, so it is probed rather than assumed: on a machine with no `zh_CN` locale
+ * installed an environment full of `zh_CN` changes nothing, and the test would
+ * pass whether or not the build pinned a language for its subprocesses.
+ *
+ * `ld` directly rather than `g++`, because the linker's own message is the one
+ * that goes missing when the format does not match. A driver would add a
+ * translated line of its own (`collect2:`, `gmake: ***`) which says nothing about
+ * whether the *linker's* line was readable. The option does not exist on any
+ * linker, which is the point of the probe: the failure is instant, and the tool
+ * says so in whatever language it was asked for.
+ */
+const probeHostLinkerLocale = (): { readonly localized: boolean; readonly said: string } => {
+  const probe = spawnSync("ld", ["--uvp-locale-probe"], {
+    env: { ...process.env, LANG: "zh_CN.UTF-8", LC_ALL: "zh_CN.UTF-8" },
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const said = `${probe.stdout ?? ""}${probe.stderr ?? ""}`.trim();
+  // The English wording the formats are written from; its absence is the
+  // observation. So is no output at all, which is what a host without `ld` on
+  // PATH produces and which is not a localization either.
+  return { localized: said !== "" && !/unrecognized option/iu.test(said), said };
 };
 
 interface Diagnostic {
@@ -244,11 +323,91 @@ describe.skipIf(realLibuvcpp === undefined)(
       // this test exists for, so the sentence is asserted rather than left to the
       // fix's good intentions.
       const limitations = result["limitations"] as readonly string[];
-      expect(limitations.some((line) => line.includes("the compiler's own output"))).toBe(true);
+      expect(limitations.some((line) => line.includes("the tools' own messages"))).toBe(true);
       expect(
         limitations.some((line) => line.includes("no diagnostic")),
         `the limitation still claims diagnostics are missing: ${JSON.stringify(limitations)}`,
       ).toBe(false);
+    });
+
+    it("reports a link failure as a link failure, with the linker's own diagnostic", async () => {
+      const workspace = await generatedThenBroken("hello-http", 8100, breakLink);
+      const expectedLine = lineOf(join(workspace.root, "src", "main.cpp"), ABSENT_CALL);
+
+      const outcome = await buildWorkspace(workspace);
+      expect(outcome.exit).toBe(EXIT_NO);
+      const result = resultOrThrow(outcome);
+      expect(result["succeeded"]).toBe(false);
+      expect(result["exit_code"]).not.toBe(0);
+      // The compile ran and finished before the link failed, so time went into it.
+      // Zero here would be the configure case — the compiler never ran at all.
+      expect(result["compile_duration_ms"]).toBeGreaterThan(0);
+
+      const diagnostics = diagnosticsOf(result);
+      const error = diagnostics.find((entry) => entry.severity === "error");
+      expect(error, `no error diagnostic in ${JSON.stringify(diagnostics)}`).toBeDefined();
+      // **The regression.** The contract has had a `link` phase with no producer:
+      // the linker's lines name a file, a line and a section and no column, so
+      // every format the parser knew passed them by, and a link failure came back
+      // as a build that failed with an empty diagnostic list — which reads as a
+      // failure with no cause, and sends a caller back to re-run a compile that had
+      // already succeeded.
+      expect(error?.phase).toBe("link");
+      // The caller's own file and the line in it, which is what a caller needs to
+      // open the file where the missing symbol is used.
+      expect(String(error?.file)).toContain("main.cpp");
+      expect(error?.line).toBe(expectedLine);
+      // The linker's own words. A substring, because the spelling of the demangled
+      // symbol and the wording around it are the toolchain's, and pinning the whole
+      // message would make this fail on a compiler upgrade for a reason that is not
+      // a regression.
+      expect(String(error?.message)).toContain(`undefined reference to \`${ABSENT_SYMBOL}()`);
+    });
+
+    it("asks the linker for English even when the caller's own locale is not English", async () => {
+      const probe = probeHostLinkerLocale();
+      // Never built successfully: this test is about the language of a failure's
+      // diagnostics and not about attributing the failure to the edit, so the extra
+      // successful build `generatedThenBroken` would do is work nothing asserts on.
+      const workspace = await createWorkspace("hello-http", 8101);
+      breakLink(workspace);
+
+      // The environment someone with a Chinese locale actually has, passed to uvp
+      // itself: the build inherits it, and this is the invocation that used to end
+      // in a diagnostic list nothing could read.
+      const outcome = await runCli(["build", workspace.root, "--json"], {
+        env: { LANG: "zh_CN.UTF-8", LC_ALL: "zh_CN.UTF-8", LC_MESSAGES: "zh_CN.UTF-8" },
+      });
+      expect(outcome.exit).toBe(EXIT_NO);
+      const diagnostics = diagnosticsOf(resultOrThrow(outcome));
+      const error = diagnostics.find((entry) => entry.severity === "error");
+      expect(error, `no error diagnostic in ${JSON.stringify(diagnostics)}`).toBeDefined();
+      expect(error?.phase).toBe("link");
+      expect(String(error?.file)).toContain("main.cpp");
+      expect(String(error?.message)).toContain(`undefined reference to \`${ABSENT_SYMBOL}()`);
+
+      if (probe.localized) {
+        // The same `ld`, on the same host, asked by the environment rather than by
+        // uvp — the contrast is the evidence, and this is the text that would have
+        // reached the parser had the build not set the language its output is read
+        // in. `localized` already means the wording is not the English one, so what
+        // is asserted here is the separate fact that a translated catalogue was
+        // loaded at all: a message carrying a non-ASCII byte is one no pattern in
+        // `src/toolchains/diagnostics.ts` matches.
+        expect(
+          /\P{ASCII}/u.test(probe.said),
+          `the probe answered, but in ASCII: ${probe.said}`,
+        ).toBe(true);
+      } else {
+        // Named rather than silent, and in the output: a host whose linker does not
+        // localize cannot show the half that matters, so the run says so instead of
+        // passing as though it had.
+        console.log(
+          "locale probe: this host's ld did not answer in another language " +
+            `(${probe.said === "" ? "it printed nothing" : probe.said}), so the hostile ` +
+            "environment was not shown to change anything — only the English half is asserted",
+        );
+      }
     });
 
     it("refuses to launch a workspace that failed to build", async () => {

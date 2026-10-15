@@ -16,7 +16,7 @@ import type {
 } from "../../application/ToolchainProvider.js";
 import { cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
-import { noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
+import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
 import { configHeaderPaths, modulesFromConfigHeader } from "../libuvcppConfig.js";
 import { isWindows, versionOf, whichOnPath } from "../host.js";
 import { runProcess } from "../processRunner.js";
@@ -124,6 +124,24 @@ const prefixEnvironment = (prefix: string): Record<string, string> => {
     PKG_CONFIG_PATH: extendPathList(process.env["PKG_CONFIG_PATH"], [lib, lib64]),
   };
 };
+
+/**
+ * The environment every build subprocess gets: the prefix, on top of the one the
+ * output's formats are written for.
+ *
+ * Both halves are always present, and that is the point of doing it here. The
+ * locale half was missing from the compile until a link failure was reported as
+ * nothing: `cmake --configure` sets the prefix and `cmake --build` sets nothing,
+ * so a localized host's linker message and Make's own words were the ones the
+ * parser saw last and understood least. `buildOutputEnvironment` carries the
+ * measurement and the reason. The prefix half is conditional only because a
+ * caller may have named no prefix and discovery may have found none, and inventing
+ * one would point CMake at a directory that does not exist.
+ */
+const buildEnvironment = (prefix: string | undefined): Readonly<Record<string, string>> => ({
+  ...buildOutputEnvironment(),
+  ...(prefix === undefined ? {} : prefixEnvironment(prefix)),
+});
 
 const extendPathList = (existing: string | undefined, entries: readonly string[]): string => {
   const kept = (existing ?? "").split(delimiter).filter((entry) => entry !== "");
@@ -370,12 +388,11 @@ class LocalToolchainClient implements ToolchainClient {
         `-DCMAKE_BUILD_TYPE=${request.buildType}`,
         ...generatorArgs(request.generator),
       ],
-      ...(libuvcppPrefix === undefined ? {} : { env: prefixEnvironment(libuvcppPrefix) }),
+      env: buildEnvironment(libuvcppPrefix),
       timeoutMs: request.timeoutMs,
       signal: request.signal,
     });
     const configureDurationMs = Date.now() - configureStart;
-
     // Before the exit code is read. A configure the caller killed exits
     // non-zero on this host for the ordinary reason — the signal — and an
     // outcome built from that says the workspace does not configure, which is a
@@ -410,6 +427,11 @@ class LocalToolchainClient implements ToolchainClient {
     const compile = await runProcess({
       command: "cmake",
       args: buildArgs,
+      // No prefix: `cmake --build` searches for nothing, because the configure
+      // already wrote the paths into the build tree. The message locale is a
+      // different matter and is set here too — this is the step the compiler and
+      // the linker print in, and the step whose output is parsed.
+      env: buildOutputEnvironment(),
       timeoutMs: request.timeoutMs,
       signal: request.signal,
     });
