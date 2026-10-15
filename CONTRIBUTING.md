@@ -177,9 +177,12 @@ npm run test:local -- src/application/templates.test.ts
 `package.json` or a contract, regenerate the derived metadata:
 
 ```bash
-npm run metadata:generate
-npm run mcp-catalog:generate
+npm run docs:generate
 ```
+
+That one command regenerates every derived file — the package metadata, the tool
+catalog, the shipped skills, the error-contract schema and the licence
+inventory — and `npm run docs:check` fails when any of them is stale.
 
 ### Working on the C++ side
 
@@ -215,15 +218,16 @@ hand — edit `src/contracts/` and regenerate.
 
 ## Generated files and command ownership
 
-| Path                              | Owner                          |
-| --------------------------------- | ------------------------------ |
-| `docs/public/tool-catalog.json`   | `npm run mcp-catalog:generate` |
-| `src/generatedPackageMetadata.ts` | `npm run metadata:generate`    |
-| `skills/`                         | `npm run artifacts:skills`     |
-| `docs/error-contract.schema.json` | `npm run docs:error-schema`    |
+| Path                              | Owner                            |
+| --------------------------------- | -------------------------------- |
+| `docs/public/tool-catalog.json`   | `npm run artifacts:tool-catalog` |
+| `src/generatedPackageMetadata.ts` | `npm run docs:generate`          |
+| `skills/`                         | `npm run artifacts:skills`       |
+| `docs/error-contract.schema.json` | `npm run artifacts:error-schema` |
+| `licenses/npm-dependencies.json`  | `npm run licenses:generate`      |
 
-`npm run docs:check` and `npm run mcp-catalog:check` fail when a generated file is
-stale, so CI catches a manual edit.
+`npm run docs:check`, `npm run tool-catalog:check` and `npm run licenses:check`
+fail when a generated file is stale, so CI catches a manual edit.
 
 ## Validation
 
@@ -235,7 +239,7 @@ without a result is incomplete.
 | Domain or contract semantics | `npm run test:local -- PATH...`, plus boundary cases across a port |
 | Application workflow         | The workflow test, plus a real build-and-run case                  |
 | A template                   | Generate, build, and run it against real libuvcpp                  |
-| A tool contract              | `npm run mcp-catalog:check`, plus the MCP boundary test            |
+| A tool contract              | `npm run tool-catalog:check`, plus the MCP boundary test           |
 | Documentation                | `npm run docs:check` and `npm run docs:build`                      |
 | Generated toolchain facts    | The file and line that establish them                              |
 

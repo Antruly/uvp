@@ -242,8 +242,12 @@ providers are not written.
 **Not started.** Release automation: `release-please-config.json` and the
 conventional-commit gate on pull request titles exist, but nothing runs them yet,
 so no version has been cut and the package is installed from a clone or a
-tarball. Also ahead: the hardening items the roadmap tracks — a Windows lane,
-SHA-pinned actions, a reproducible tarball, an SBOM.
+tarball. Also ahead: the hardening items the roadmap still tracks — a Windows
+lane and an SBOM. The rest of that list has landed and is checked: every action
+under `.github/` is SHA-pinned with the release named beside it
+(`npm run verify:actions`), and the tarball packs to the same digest from the
+tree, from an unpacked copy at another path, and after a clean rebuild of `dist/`
+(`npm run verify:pack-reproducible`).
 
 See the [roadmap](docs/roadmap.md) for what is planned and the
 [testing guide](docs/testing.md) for which lanes exist.

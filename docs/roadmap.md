@@ -408,6 +408,7 @@ implicit.
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ✅  | The packaged tarball is a fact about its contents: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — and fails if any digest differs. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ✅  | A published docs page was an empty shell: `docs/roadmap.md` quoted a GitHub workflow expression in an inline code span, Vue read its braces as an interpolation, the render threw, and VitePress logged the error and **exited 0** — so CI stayed green while the roadmap page shipped with no content in it, 16 KB against 73 KB for `testing.html`. The expression is escaped now, and `npm run verify:docs-interpolation` fails the next one, asking `docs/.vitepress/config.ts` which files are pages rather than restating its `srcExclude`. See [below](#docs-interpolation)                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ✅  | The documentation told a reader to run six commands that do not exist, and the licence inventory it pointed at for the dependency set was stale in the commit that imported it — 24 packages and 5 direct dependencies recorded against a `package.json` declaring 3. Nothing read either, because nothing ran the generator. Both are checked now, and each new rule is measured against known text before it is trusted. See [below](#dependency-inventory)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ✅  | A link failure has a diagnostic format here, written from captures of real ones rather than from a plausible-looking log: `ld: cannot find -luvcpp`, gold's `ld.gold: error: cannot find -luvcpp`, a located `undefined reference to` naming the symbol and the caller's own source line, the same reference in a build with no debug information where only a section offset is left to name, a `multiple definition of` with its "first defined here" trail, and the driver's `collect2: error: ld returned 1 exit status` — which is held back until the whole scan is read, so a link failure the linker stated plainly does not print twice. All of them answer `phase: "link"`, the phase the contract has had since the beginning with nothing producing it. The same captures found the other half: `ld` and GNU Make translate their messages, so on a `zh_CN.UTF-8` host this failure reads `找不到 -luvcpp` and matches nothing — every build subprocess now runs with the language its output is read in. See [below](#link-failures) |
@@ -1366,6 +1367,123 @@ that can affect a verdict: a step-output comparison such as
 `steps.openssl-cache.outputs.cache-hit != 'true'` is recorded and not parsed, since
 parsing it would make the check refuse to run on workflows holding expressions it
 has no business judging.
+
+### The commands that were not there, and the inventory nothing ran {#dependency-inventory}
+
+Every other check in this repository reads a file. This one reads an
+_instruction_, and nothing did: the pages were checked for facts about the code —
+tool names, template ids, the libuvcpp floor — while the commands they told a
+reader to run were taken on trust. Six of them did not exist, and they had not
+existed since the framework was imported:
+
+| Page                     | The script it named        | What has that name now                                                           |
+| ------------------------ | -------------------------- | -------------------------------------------------------------------------------- |
+| `CONTRIBUTING.md`        | `metadata:generate`        | `docs:generate` writes it; `metadata:check` verifies it                          |
+| `CONTRIBUTING.md`        | `mcp-catalog:generate`     | `artifacts:tool-catalog`                                                         |
+| `CONTRIBUTING.md`        | `docs:error-schema`        | `artifacts:error-schema`                                                         |
+| `CONTRIBUTING.md`        | `mcp-catalog:check`        | `tool-catalog:check`                                                             |
+| `docs/mcp-contracts.md`  | `tool-catalog:check:built` | `tool-catalog:check`, and it is the _source_ job, not a built lane, that runs it |
+| `THIRD_PARTY_NOTICES.md` | `licenses:generate`        | nothing — the script it named was never defined                                  |
+
+The table gives script names rather than command lines, which is a consequence of
+the check it describes: a page naming a command that does not exist is what that
+check refuses, this page included.
+
+Measured rather than remembered: every markdown page in the repository was
+scanned for `npm run <name>` and the names compared with `package.json#scripts`.
+The import commit's `package.json` already had the `artifacts:*` names and none of
+the four `CONTRIBUTING.md` names, so this is not drift that accumulated — the
+prose arrived describing a `package.json` that was not the one in the commit, and
+survived the 60 commits since — every full gate included, since none of them read
+a page as an instruction — because a command a page names is only wrong when
+somebody runs it.
+
+**The inventory had the same cause and a longer reach.** `THIRD_PARTY_NOTICES.md`
+told a reader to run `npm run licenses:generate` for a machine-checked inventory;
+`scripts/licenses.mjs` exists, does that, supports `--check`, and is listed in
+`knip.json` as an entry point — so it was maintained and reviewed. No npm script
+ran it. The committed `licenses/npm-dependencies.json` therefore recorded 24
+packages and 5 direct dependencies — `pino` 10.4.0, `incur` 0.6.1, `yaml` 2.9.1,
+and a second `@modelcontextprotocol/server` at 2.0.0-alpha.4 — while the
+`package.json` in the same commit declared three. The file was stale in the commit
+that imported it and stayed stale, since `licenses:check` did not exist either.
+
+The notices file was wrong in the same direction and about the same packages. Its
+distributed-dependency table listed `incur` and `pino`, neither of which is a
+dependency or appears anywhere in the tree, and gave the licence as MIT for
+`canonicalize` and `@modelcontextprotocol/server` — two of the three cells — where
+the lockfile and the installed `package.json` both record **Apache-2.0**. A reader
+auditing the package for a library they care about was reading a list that named
+code they will not get, and not reading the two they will.
+
+**What landed.** `licenses:generate` and `licenses:check` exist now, under the
+name the notices file already promised, and run inside `docs:generate` and
+`docs:check` — which CI runs — so the inventory is regenerated and compared like
+every other derived file. The inventory was regenerated (4 packages, 3 direct),
+and both documents corrected. Two rules were added to `scripts/check-doc-facts.mjs`:
+every `npm run <name>` in a page must be a script `package.json` defines, and the
+distributed-dependency table must match `package.json` by name and the lockfile by
+licence, `node_modules/<name>` being where a direct dependency resolves.
+
+**Why each rule is shaped the way it is.** Names are compared across every
+markdown page in the repository — all 24 of them, in both languages, with no list
+of pages to maintain — because the six were spread across three files and a
+curated list is exactly what would have missed them. The pages are the ones git
+lists rather than the ones a directory walk finds: `dev.md` is a scratch file
+under `.gitignore`, and a gate that fails on a page nobody committed is the sort
+of false failure that gets a check disabled. git refusing to answer exits 2
+rather than passing — scanning nothing finds nothing wrong, which is the one
+reading that must not arrive by accident. Versions are not compared at
+all: they are pinned in `package.json` and resolved in the lockfile, and the table
+does not restate them. The licence is read from the lockfile entry npm resolved
+rather than from the registry or from a table in a README, because the file the
+version is resolved from is the file the licence belongs to. The development table
+is not checked: it groups several packages into one cell (`vitest`,
+`@vitest/coverage-v8`) and shortens scoped names, so reading it mechanically means
+guessing, and a check that guesses reports failures a reader has to adjudicate.
+
+**A check is only as good as what its cache key covers.** The gate is cached, and
+`turbo.json`'s inputs for `docs:check` listed `package.json`, `docs/**` and
+`README*.md` — not `CONTRIBUTING.md`, which the template-count rule in this same
+file already read, nor `licenses/`, nor `AGENTS.md`. A page that changed without
+the cache key changing is a page whose check was answered from a previous run, so
+those three paths and `scripts/licenses.mjs` are inputs now, added in the same
+change as the rules that read them.
+
+**A dependency the lockfile records no licence for is a note, not a failure.** The
+check names the package and says the cell was not checked, the same third state
+the rest of this repository keeps for a probe that could not look. Verified: adding
+a declared dependency with a lockfile entry carrying no `license` field exits 0
+with the note printed, rather than passing silently or failing on a comparison it
+could not make.
+
+**Both rules fail open, so both are measured before they are trusted.** A pattern
+that stops matching finds no rows and no commands, which reads exactly like
+nothing being wrong — the shape of the VitePress page that rendered empty while
+the build exited 0. So the two extractors run first against text whose answer is
+known, and a rule that can no longer see what it is written to see stops the check
+with exit 2. Writing them found a real defect in the second rule before it was
+committed: `npm run --silent lint` captured `--silent` as the script name, which
+would have reported a command no page ever meant; flags are stepped over now.
+
+Each rule was then verified against mutations of this repository, one at a time: a
+renamed script in a page, a dropped table row, an added row, a wrong licence cell,
+a dependency with no recorded licence, the same dead command in an ignored page
+and in a tracked one, and git unavailable. The first four and the tracked-page one
+failed with a message naming the page and the disagreement; the ignored page and
+the package with no recorded licence passed, the second with a note; git
+unavailable exited 2. Five of the mutations were made in a copy that was then
+discarded. They are not a lane, because what they establish is the check, not the
+product.
+
+**What this does not establish.** The scan reads one dialect — `npm run <name>` —
+so a page that reaches a script another way (`npm exec`, `npx`, a script that
+calls another) is not held to anything. A name existing is not the same as the
+command doing what the page says it does; that remains a reader's question. And
+the inventory says what the tarball installs, not what those packages do at
+runtime.
+
+`docs/testing.md` names both rules where it describes the gate.
 
 ### Pack reproducibility {#pack-reproducibility}
 

@@ -37,16 +37,16 @@ upgrade, or modify either. `uvp doctor` reports what it found.
 
 These are runtime dependencies: they are installed when you install uvp.
 
-| Package                        | License | Used for                                            |
-| ------------------------------ | ------- | --------------------------------------------------- |
-| `@modelcontextprotocol/server` | MIT     | The MCP server transport and tool registration      |
-| `zod`                          | MIT     | Contract and manifest validation                    |
-| `canonicalize`                 | MIT     | Stable JSON digests over contract and catalog input |
-| `incur`                        | MIT     | The CLI command surface                             |
-| `pino`                         | MIT     | Structured diagnostics written to stderr            |
+| Package                        | License    | Used for                                            |
+| ------------------------------ | ---------- | --------------------------------------------------- |
+| `@modelcontextprotocol/server` | Apache-2.0 | The MCP server transport and tool registration      |
+| `zod`                          | MIT        | Contract and manifest validation                    |
+| `canonicalize`                 | Apache-2.0 | Stable JSON digests over contract and catalog input |
 
 Exact versions are pinned in `package.json` (`save-exact=true`) and resolved from
-`package-lock.json`.
+`package-lock.json`. These are the packages uvp declares; what they in turn pull
+in is `@modelcontextprotocol/core`, and the closure is listed in
+`licenses/npm-dependencies.json`.
 
 ## Development dependencies
 
@@ -56,7 +56,6 @@ Not distributed with the published package.
 | -------------------------------------------------------------- | ---------- | --------------------------------------------- |
 | `typescript`                                                   | Apache-2.0 | Compilation and type checking                 |
 | `vitest`, `@vitest/coverage-v8`                                | MIT        | Test runner and coverage                      |
-| `@modelcontextprotocol/client`                                 | MIT        | MCP boundary tests                            |
 | `@stryker-mutator/core`, `typescript-checker`, `vitest-runner` | Apache-2.0 | Mutation testing                              |
 | `oxlint`, `oxfmt`                                              | MIT        | Linting and formatting                        |
 | `knip`                                                         | ISC        | Unused-file, export, and dependency detection |
@@ -82,3 +81,7 @@ change — a dependency review that does not update the inventory is incomplete.
 For a machine-checked inventory of the installed dependency tree, run
 `npm run licenses:generate`, which writes into `licenses/`. That output reflects
 the resolved lockfile, and this file explains the intent behind the choices.
+`npm run licenses:check` fails when it is stale, and `npm run docs:check` — which
+CI runs — also checks the table above against `package.json` and
+`package-lock.json`: a dependency added or removed without a row here is a build
+failure rather than something a reviewer has to notice.

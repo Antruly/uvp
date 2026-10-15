@@ -706,9 +706,24 @@ question without a second implementation of npm's file selection. It needs
 [the roadmap](roadmap.md#pack-reproducibility) for what it does and does not
 establish.
 
-**Generated files.** The tool catalog, package metadata, skill metadata, and
-error schema are generated from source. CI regenerates them and fails on a diff,
-so a stale generated file is a build failure rather than a review comment.
+**Generated files.** The tool catalog, package metadata, skill metadata, error
+schema, and the licence inventory under `licenses/` are generated from source. CI
+regenerates them and fails on a diff, so a stale generated file is a build
+failure rather than a review comment. The licence inventory is the one whose
+input is `package-lock.json` rather than `src/`, and it had drifted by twenty
+packages — the script existed and nothing ran it. See
+[the roadmap](roadmap.md#dependency-inventory) for what that cost.
+
+**Instructions, not only facts.** `scripts/check-doc-facts.mjs` also reads the
+pages as instructions: every `npm run <name>` a page tells a reader to run has to
+be a script `package.json` defines, and the distributed-dependency table in
+`THIRD_PARTY_NOTICES.md` has to match `package.json` and, row by row, the licence
+the lockfile records for each package. Both were found by this check being
+written: six documented commands did not exist (`metadata:generate` among them, a
+rename that never reached `CONTRIBUTING.md`) and two of the three licence cells
+were wrong. A dependency the lockfile records no licence for is a note
+rather than a failure — the check says it could not read the fact instead of
+deciding it.
 
 **Effect declarations.** A tool description containing "write", "create",
 "scaffold", "generate", "save", "delete", or "remove" while `writesFilesystem`

@@ -214,9 +214,11 @@ MySQL 和 PostgreSQL 走的是同一份生成代码、同一条运行时加载�
 
 **尚未开始。** 发布自动化：`release-please-config.json` 和针对 PR 标题的
 传统提交（Conventional Commits）门禁都已经存在，但还没有任何工作流去跑它们，
-所以至今没有切过版本，包只能从 clone 或 tarball 安装。同样还没有的，
-是路线图里列出的加固项 —— Windows 通道、把 GitHub Actions 固定到 SHA、
-可复现的 tarball、SBOM。
+所以至今没有切过版本，包只能从 clone 或 tarball 安装。路线图里列出的加固项
+也还剩下两项：Windows 通道与 SBOM。同一列表里的其余各项已经落地并有检查兜底：
+`.github/` 下的每个 action 都固定到 SHA 并在旁边写明release
+（`npm run verify:actions`），tarball 无论从工作树打包、从解包到另一路径的副本打包，
+还是在 `dist/` 干净重建之后打包，摘要都一致（`npm run verify:pack-reproducible`）。
 
 计划中的内容见[路线图](../roadmap.md)，已有的测试通道见[测试指南](../testing.md)。
 

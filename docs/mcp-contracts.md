@@ -265,7 +265,7 @@ form ships two ways:
 
 ```bash
 npm run artifacts:tool-catalog      # regenerate
-npm run tool-catalog:check:built    # what CI runs; fails on a stale file
+npm run tool-catalog:check          # what CI runs; fails on a stale file
 ```
 
 Each entry carries the tool name, title, description, kind, JSON Schema for input

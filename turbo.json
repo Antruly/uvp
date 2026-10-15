@@ -125,6 +125,7 @@
         "scripts/generate-mcp-tool-catalog.mjs",
         "scripts/generate-skill-metadata.mjs",
         "scripts/generate-error-schema.mjs",
+        "scripts/licenses.mjs",
         "scripts/check-doc-facts.mjs",
         "scripts/lib/*.mjs",
         "src/contracts/**/*.ts",
@@ -135,6 +136,10 @@
         "!docs/.vitepress/cache/**",
         "!docs/.vitepress/dist/**",
         "README*.md",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "THIRD_PARTY_NOTICES.md",
+        "licenses/**",
         {
           "mode": "dependencyOutputs",
           "globs": ["skills/**", "docs/public/tool-catalog.json", "docs/error-contract.schema.json"]
