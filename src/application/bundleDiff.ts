@@ -54,7 +54,12 @@ export type ComparedBundle = Pick<
 type Exchange = ComparedBundle["exchanges"][number];
 
 /** The fields of an exchange this comparison reads. */
-export type ExchangeField = "status" | "assertions_passed" | "assertions_failed" | "failures";
+export type ExchangeField =
+  | "status"
+  | "http_version"
+  | "assertions_passed"
+  | "assertions_failed"
+  | "failures";
 
 /** Same number, different field: named once so the table below stays readable. */
 const differsFrom =
@@ -100,6 +105,16 @@ const FIELDS: readonly FieldRule[] = [
     digestDiffers: (a, b) => (a.status ?? 0) !== (b.status ?? 0),
   },
   {
+    field: "http_version",
+    differs: differsFrom((entry: Exchange) => entry.http_version),
+    // Null, and deliberately. The digest covers the verdict — how many assertions
+    // passed and failed — and not the transport the verdict arrived over, so a
+    // workspace_verify asked over HTTP/1.1 and the same one asked over HTTP/2 hash
+    // the same. Two passes a caller can read as the same verdict and as different
+    // experiments is the read this row exists to make possible.
+    digestDiffers: null,
+  },
+  {
     field: "assertions_passed",
     differs: differsFrom((entry: Exchange) => entry.assertions_passed),
     digestDiffers: differsFrom((entry: Exchange) => entry.assertions_passed),
@@ -131,6 +146,8 @@ export type DiffChange = "unchanged" | "changed" | "added" | "absent";
 
 export interface ExchangeSummary {
   readonly status?: number | undefined;
+  /** The version that answered. Absent when nothing did. */
+  readonly http_version?: string | undefined;
   readonly assertions_passed: number;
   readonly assertions_failed: number;
   readonly failures: readonly string[];
@@ -178,6 +195,7 @@ export type BundleDiffOutcome = "identical" | "changed" | "incomparable";
 
 const summarise = (entry: Exchange): ExchangeSummary => ({
   ...(entry.status === undefined ? {} : { status: entry.status }),
+  ...(entry.http_version === undefined ? {} : { http_version: entry.http_version }),
   assertions_passed: entry.assertions_passed,
   assertions_failed: entry.assertions_failed,
   failures: [...entry.failures],

@@ -6,8 +6,8 @@ import { flagError } from "./args.js";
  * A shell makes every assertion a single argument, and a JSON assertion object
  * typed on a command line is unreadable. So the CLI accepts the compact forms the
  * documentation lists — `status=200`, `json:$.value=first`,
- * `header:content-type=application/json`, `body~=substring`, `latency<250ms` —
- * and lowers them to the contract's assertion objects.
+ * `header:content-type=application/json`, `body~=substring`, `latency<250ms`,
+ * `http_version=2.0` — and lowers them to the contract's assertion objects.
  *
  * Lowering, not reimplementing. The resulting `{kind, target, expected}` goes
  * through the same evaluator as an MCP caller's assertion, so a CLI assertion and
@@ -137,7 +137,8 @@ const lower = (text: string): AssertionInput => {
   }
   flagError(
     `--assert ${text} is not an assertion. Use status=200, json:$.value=first, ` +
-      `header:content-type=application/json, body~=substring, latency<250ms, or a JSON object.`,
+      `header:content-type=application/json, body~=substring, latency<250ms, ` +
+      `http_version=2.0, or a JSON object.`,
   );
 };
 
@@ -194,6 +195,17 @@ const withSubject = (subject: string, value: string, regex: boolean): AssertionI
       return regex
         ? { kind: "body_matches", expected: value }
         : { kind: "body_contains", expected: value };
+    case "http_version": {
+      // The literal, not `literal(value)`: `JSON.parse("2.0")` is the number
+      // `2`, and the evaluator compares the observed version exactly — so
+      // parsing here would turn every `http_version=2.0` into an assertion that
+      // can never pass, against a service that did exactly what was asked.
+      const version = value.trim();
+      if (version === "") {
+        flagError("http_version= needs the version as the wire spells it: http_version=2.0.");
+      }
+      return { kind: "http_version_equals", expected: version };
+    }
     default:
       // A bare subject with no namespace is a JSON path, which is what a caller
       // writing `--assert '$.status=ok'` means.
@@ -201,7 +213,7 @@ const withSubject = (subject: string, value: string, regex: boolean): AssertionI
         return { kind: "body_json_path_equals", target: namespace, expected: literal(value) };
       }
       flagError(
-        `--assert names the subject "${namespace}", which is not one of status, header, json, body, latency, or a JSONPath starting with $.`,
+        `--assert names the subject "${namespace}", which is not one of status, header, json, body, latency, http_version, or a JSONPath starting with $.`,
       );
   }
 };

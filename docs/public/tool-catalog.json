@@ -4569,7 +4569,8 @@
                     "body_json_path_equals",
                     "body_json_path_exists",
                     "body_bytes_under",
-                    "latency_under_ms"
+                    "latency_under_ms",
+                    "http_version_equals"
                   ]
                 },
                 "target": {
@@ -4958,6 +4959,17 @@
                 "body": {
                   "type": "string"
                 },
+                "http_version": {
+                  "default": "auto",
+                  "description": "The protocol version to attempt for this request: auto, 1.1, 2, or 3. What came back is reported per exchange and is assertable with `http_version_equals`.",
+                  "type": "string",
+                  "enum": [
+                    "2",
+                    "3",
+                    "auto",
+                    "1.1"
+                  ]
+                },
                 "assertions": {
                   "default": [],
                   "type": "array",
@@ -4977,7 +4989,8 @@
                           "body_json_path_equals",
                           "body_json_path_exists",
                           "body_bytes_under",
-                          "latency_under_ms"
+                          "latency_under_ms",
+                          "http_version_equals"
                         ]
                       },
                       "target": {
@@ -5259,6 +5272,9 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "http_version": {
+                  "type": "string"
                 },
                 "elapsed_ms": {
                   "type": "integer",
@@ -5847,6 +5863,7 @@
                         "type": "string",
                         "enum": [
                           "status",
+                          "http_version",
                           "assertions_passed",
                           "assertions_failed",
                           "failures"
@@ -5863,6 +5880,9 @@
                           "type": "integer",
                           "minimum": -9007199254740991,
                           "maximum": 9007199254740991
+                        },
+                        "http_version": {
+                          "type": "string"
                         },
                         "assertions_passed": {
                           "type": "integer",
@@ -5895,6 +5915,9 @@
                           "type": "integer",
                           "minimum": -9007199254740991,
                           "maximum": 9007199254740991
+                        },
+                        "http_version": {
+                          "type": "string"
                         },
                         "assertions_passed": {
                           "type": "integer",

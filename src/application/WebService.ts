@@ -578,16 +578,34 @@ export class WebService {
       const message = cause instanceof Error ? cause.message : String(cause);
       // The transport classified the failure where it saw it; matching the
       // message here instead made the two disagree the moment either changed.
-      const timedOut = transportFailureKind(cause) === "timeout";
+      const kind = transportFailureKind(cause);
+      const timedOut = kind === "timeout";
+      // A version the caller *pinned* that the peer did not answer in is not an
+      // unreachable endpoint. The service is listening — it replied something
+      // this client could not parse as HTTP/2 — and telling the caller to check
+      // the host and port sends them to look at the one thing that is working.
+      // `auto` never lands here: it falls back rather than failing.
+      const wrongProtocol = kind === "protocol" && input.http_version !== "auto";
       throw new UvpFailure({
-        code: timedOut ? "timeout" : "endpoint_unreachable",
-        message: `${input.method} ${input.url} did not complete: ${message}`,
+        code: timedOut ? "timeout" : wrongProtocol ? "unsupported_target" : "endpoint_unreachable",
+        message: wrongProtocol
+          ? `${input.method} ${input.url} reached a service that did not answer in HTTP/${input.http_version}: ${message}`
+          : `${input.method} ${input.url} did not complete: ${message}`,
         remediation: {
           action: timedOut
             ? "Raise timeout_ms, or check whether the service is still starting up."
-            : "Check that the service is listening on that host and port, then retry.",
+            : wrongProtocol
+              ? `Ask over a version the service speaks, or make it speak this one. For a ` +
+                `generated service that means the http2 feature at creation time ` +
+                `(uvp init --features http2), which turns on cleartext h2 alongside HTTP/1.1.`
+              : "Check that the service is listening on that host and port, then retry.",
         },
-        details: { url: input.url, method: input.method, elapsed_ms: Date.now() - started },
+        details: {
+          url: input.url,
+          method: input.method,
+          requested_http_version: input.http_version,
+          elapsed_ms: Date.now() - started,
+        },
       });
     });
 

@@ -41,6 +41,18 @@ export interface VerifyRequest {
   readonly path: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string | undefined;
+  /**
+   * The protocol version to **attempt**, in the same spelling
+   * `uvp_http_request` takes: `auto`, `1.1`, `2`, `3`.
+   *
+   * Per request rather than per pass, because a verification whose subject is a
+   * transport is a verification that has to say which transport — and because
+   * the same service is legitimately asked over two of them in one pass, which
+   * is how "h1 and h2c share this port" is established rather than assumed.
+   * What came back is a separate fact, reported per exchange and assertable with
+   * `http_version_equals`.
+   */
+  readonly http_version: "auto" | "1.1" | "2" | "3";
   readonly assertions: readonly {
     readonly kind: AssertionSpec["kind"];
     readonly target?: string | undefined;
@@ -89,6 +101,8 @@ export interface VerifyResult {
     name: string;
     exchange_id: string;
     status?: number;
+    /** The version the response arrived in. Absent when none did. */
+    http_version?: string;
     elapsed_ms?: number;
     assertions_passed: number;
     assertions_failed: number;
@@ -285,7 +299,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
           headers: spec.headers,
           body: spec.body,
           body_encoding: "utf8",
-          http_version: "auto",
+          http_version: spec.http_version,
           follow_redirects: false,
           max_redirects: 0,
           verify_tls: false,
@@ -296,12 +310,18 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
         context.signal,
       )
       .catch((cause: unknown) => {
-        recordUnknown(
-          recorder,
-          `Does ${spec.name} (${spec.method} ${spec.path}) behave as asserted?`,
-          "not_attempted",
-          { blockedBy: cause instanceof Error ? cause.message : String(cause) },
-        );
+        const blockedBy = cause instanceof Error ? cause.message : String(cause);
+        const question = `Does ${spec.name} (${spec.method} ${spec.path}) behave as asserted?`;
+        recordUnknown(recorder, question, "not_attempted", { blockedBy });
+        // Carried into the bundle as well as into the evidence, because
+        // `unverified` is where a caller reads what the pass could not establish
+        // and why. Without it the bundle says only "the request did not complete",
+        // which is one sentence for two unrelated facts: a transport refused by
+        // design — `--http-version 3`, which uvp's client does not have — and a
+        // connection that dropped. A reader deciding whether to retry needs the
+        // difference, and the exchange record is the only other place it is
+        // written down.
+        unverified.push({ question, reason: `the request did not complete: ${blockedBy}` });
         return undefined;
       });
 
@@ -369,6 +389,9 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       name: spec.name,
       exchange_id: exchange.exchange_id,
       status: exchange.status,
+      // What the wire reported, not what was asked for. The two differ whenever a
+      // request for `2` reached a service that only speaks `1.1`.
+      http_version: exchange.http_version,
       elapsed_ms: Date.now() - startedAt,
       assertions_passed: outcomes.length - failures.length,
       assertions_failed: failures.length,

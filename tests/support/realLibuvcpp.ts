@@ -276,7 +276,11 @@ const WORKSPACE_NAME = "svc";
 let made = 0;
 
 /** Generate a workspace from a template, the way a person would. */
-export const createWorkspace = async (template: string, port: number): Promise<Workspace> => {
+export const createWorkspace = async (
+  template: string,
+  port: number,
+  features: readonly string[] = [],
+): Promise<Workspace> => {
   const root = join(scratch(), `${template}-${String((made += 1))}`);
   const init = await runCli([
     "init",
@@ -287,6 +291,10 @@ export const createWorkspace = async (template: string, port: number): Promise<W
     template,
     "--port",
     String(port),
+    // Omitted rather than passed empty, so `uvp init`'s own default — the module
+    // set a plain web service needs — is what applies. A lane that passed `""`
+    // would be testing a workspace no caller can produce.
+    ...(features.length === 0 ? [] : ["--features", features.join(",")]),
     "--json",
   ]);
   if (init.exit !== 0) {

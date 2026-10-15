@@ -16,6 +16,8 @@
 export interface Exchange {
   readonly name?: unknown;
   readonly status?: unknown;
+  /** The version the response arrived in, as the wire spells it. */
+  readonly http_version?: unknown;
   readonly elapsed_ms?: unknown;
   readonly assertions_passed?: unknown;
   readonly assertions_failed?: unknown;

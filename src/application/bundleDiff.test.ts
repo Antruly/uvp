@@ -34,6 +34,8 @@ interface ExchangeSpec {
   readonly name: string;
   /** Absent means the request got no response at all, which is not status 0. */
   readonly status?: number | undefined;
+  /** The version that answered. Absent for the same reason `status` is. */
+  readonly http_version?: string | undefined;
   readonly passed?: number | undefined;
   readonly failed?: number | undefined;
   readonly failures?: readonly string[] | undefined;
@@ -57,6 +59,7 @@ const pass = (spec: PassSpec = {}): ComparedBundle => {
     name: entry.name,
     exchange_id: mintedNow("ex"),
     ...(entry.status === undefined ? {} : { status: entry.status }),
+    ...(entry.http_version === undefined ? {} : { http_version: entry.http_version }),
     elapsed_ms: minted++,
     assertions_passed: entry.passed ?? 1,
     assertions_failed: entry.failed ?? 0,
@@ -233,6 +236,41 @@ describe("the verdict and the evidence behind it", () => {
     expect(result.exchanges.entries.at(0)?.after?.status).toBe(0);
   });
 
+  it("reports the protocol two otherwise identical passes ran over", () => {
+    // The read this field exists for. The same assertions, the same service, the
+    // same verdict — reached once over HTTP/1.1 and once over HTTP/2. Nothing a
+    // caller asserted moved, so the digest agrees; the transport did, so a reader
+    // is told which side was which rather than having to go back to the two
+    // command lines.
+    const result = compare(
+      oneExchange({ name: "hello", status: 200, http_version: "1.1", failures: [] }),
+      oneExchange({ name: "hello", status: 200, http_version: "2.0", failures: [] }),
+    );
+    expect(result.outcome).toBe("changed");
+    expect(result.same_digest).toBe(true);
+    const [hello] = result.exchanges.entries;
+    expect(hello?.changed_fields).toEqual(["http_version"]);
+    expect(hello?.verdict_changed).toBe(false);
+    expect(hello?.before?.http_version).toBe("1.1");
+    expect(hello?.after?.http_version).toBe("2.0");
+    // And the limitation says why the two digests agree, so `same_digest: true`
+    // beside `changed` is explained rather than surprising.
+    expect(result.limitations.some((line) => line.includes("digests agree"))).toBe(true);
+  });
+
+  it("does not read a request nobody answered as one answered over HTTP/1.1", () => {
+    // Absent and `"1.1"` are different records: the first is a request that
+    // completed in no protocol, the second is one that completed in a specific
+    // one. Compared as the report states them, with no default filled in — the
+    // same distinction `status` draws between absent and `0`.
+    const result = compare(
+      oneExchange({ name: "hello", status: 200 }),
+      oneExchange({ name: "hello", status: 200, http_version: "1.1" }),
+    );
+    expect(result.exchanges.entries.at(0)?.changed_fields).toEqual(["http_version"]);
+    expect(result.exchanges.entries.at(0)?.before?.http_version).toBeUndefined();
+  });
+
   it("counts a missing status against a real status as a change in the verdict", () => {
     const result = compare(
       oneExchange({ name: "hello" }),
@@ -256,7 +294,7 @@ describe("exchanges only one pass asked", () => {
     expect(result.outcome).toBe("changed");
     expect(shape(result.exchanges.entries)).toEqual([["bye", "added"]]);
     expect(result.exchanges.entries.map((entry) => entry.changed_fields)).toEqual([
-      ["status", "assertions_passed", "assertions_failed", "failures"],
+      ["status", "http_version", "assertions_passed", "assertions_failed", "failures"],
     ]);
     expect(result.exchanges.entries.at(0)?.after?.status).toBe(200);
     expect(result.exchanges.entries.at(0)?.before).toBeUndefined();
@@ -555,10 +593,18 @@ describe("the digest's coverage, checked against what the digest does", () => {
    * against `bundleDigest` itself: for each field the comparison reads, move that
    * field alone on a copy of an exchange and see whether the digest follows.
    */
-  const BASE: ExchangeSpec = { name: "hello", status: 200, passed: 1, failed: 0, failures: [] };
+  const BASE: ExchangeSpec = {
+    name: "hello",
+    status: 200,
+    http_version: "1.1",
+    passed: 1,
+    failed: 0,
+    failures: [],
+  };
 
   const ALTERED: Readonly<Record<ExchangeField, ExchangeSpec>> = {
     status: { ...BASE, status: 500 },
+    http_version: { ...BASE, http_version: "2.0" },
     assertions_passed: { ...BASE, passed: 2 },
     assertions_failed: { ...BASE, failed: 1 },
     failures: { ...BASE, failures: ["status_equals: expected 500, got 200"] },
@@ -566,6 +612,7 @@ describe("the digest's coverage, checked against what the digest does", () => {
 
   const FIELDS_READ: readonly ExchangeField[] = [
     "status",
+    "http_version",
     "assertions_passed",
     "assertions_failed",
     "failures",
@@ -587,6 +634,11 @@ describe("the digest's coverage, checked against what the digest does", () => {
     // the digest where it was, which is what makes the pairing in the tool's
     // output (`same_digest: true` beside `changed`) possible at all.
     expect(digestOf(BASE)).toBe(digestOf(ALTERED.failures));
+    // `http_version` is the second such field, and the reason it is one: the same
+    // assertions asked over HTTP/1.1 and over HTTP/2 reach the same verdict, so
+    // they have to hash the same — while the comparison still reports that the
+    // two passes were different experiments.
+    expect(digestOf(BASE)).toBe(digestOf(ALTERED.http_version));
     expect(base.bundle_digest).toBe(digestOf(BASE));
   });
 });

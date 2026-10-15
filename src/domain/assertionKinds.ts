@@ -37,6 +37,24 @@ export const ASSERTION_KINDS = [
   "body_bytes_under",
   /** The exchange took less than this many milliseconds. */
   "latency_under_ms",
+  /**
+   * The protocol version the response actually arrived in.
+   *
+   * The one assertion that says whether a transport was exercised rather than
+   * whether the service answered. Every other kind here is satisfied by a
+   * response; this one is satisfied only by a response that came back over the
+   * version asked for — so a service that serves HTTP/1.1 whatever it is sent
+   * cannot pass it, and asking for HTTP/2 and getting a green result over
+   * HTTP/1.1 stops being possible.
+   *
+   * It compares the version **as observed**, spelled the way the wire spells it:
+   * `"1.1"`, `"2.0"`. That is deliberately not the spelling of
+   * `uvp_http_request`'s `http_version` input, which names the version to
+   * *attempt* (`"2"`). One is what was asked for and the other is what happened;
+   * collapsing them into one string is how a caller ends up asserting on their
+   * own request. A failure names the value to write.
+   */
+  "http_version_equals",
 ] as const;
 
 export type AssertionKind = (typeof ASSERTION_KINDS)[number];

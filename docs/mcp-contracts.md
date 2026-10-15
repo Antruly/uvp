@@ -91,7 +91,13 @@ signal a process uvp did not start.
 
 **`uvp_http_request`** — Send an HTTP request.
 Method, URL, headers, body, redirect policy, timeout. Returns status, headers,
-body, and timing as observed facts.
+body, and timing as observed facts. `http_version` names the version to
+_attempt_ — `auto`, `1.1`, `2`, or `3` — and the version the response actually
+arrived in comes back as `http_version` in the result, spelled as the wire spells
+it (`"1.1"`, `"2.0"`). `auto` negotiates and falls back; a pinned version the peer
+does not answer in is `unsupported_target` rather than `endpoint_unreachable`,
+because the service replied and the caller should not be sent to check whether it
+is listening. `3` is refused: uvp has no HTTP/3 client.
 
 **`uvp_websocket_probe`** — Probe a WebSocket endpoint.
 Performs the upgrade handshake, optionally sends frames, and returns the
@@ -170,13 +176,20 @@ The whole closure in one supervised pass: configure, compile, launch, drive the
 requests you describe, evaluate the assertions, stop, and return a bundle whose
 status is `verified`, `partial`, `failed`, or `unknown`. See
 [Evidence model](evidence.md#verification-status) for what each status requires.
+Each request carries its own `http_version` to attempt, so one pass can put the
+same question to the same service over two protocols; what came back is reported
+per exchange as `http_version`, and a request that never completed reports none
+at all rather than a default. A queued request that fails is named in
+`unverified` with the client's own reason, so a transport refused by design is
+distinguishable from a connection that dropped.
 
 **`uvp_bundle_diff`** — Compare two verification reports.
 Takes two paths to reports `uvp_verify` wrote and says what moved between them:
 the status, each request's verdict and failures, the questions left unanswered.
 It reports separately what the pass's own `bundle_digest` covers and what falls
-outside it — failure _text_, the build, the service state — because two reports
-can share a digest while the sentence explaining a failure changed. It refuses to
+outside it — failure _text_, the protocol each exchange arrived in, the build, the
+service state — because two reports can share a digest while the sentence
+explaining a failure changed. It refuses to
 read a difference as a change when the two reports are not comparable at all: a
 different workspace is two subjects rather than two moments, and a supplied
 digest that does not match the contents it arrived with is a record nothing can

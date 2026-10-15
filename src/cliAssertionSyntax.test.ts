@@ -128,6 +128,31 @@ describe("parseAssertion: latency and size", () => {
   });
 });
 
+describe("parseAssertion: the negotiated protocol version", () => {
+  it("lowers http_version=2.0 to the version assertion, as a string", () => {
+    expect(parseAssertion("http_version=2.0")).toEqual({
+      kind: "http_version_equals",
+      expected: "2.0",
+    });
+  });
+
+  it("keeps the version a string even when it parses as a number", () => {
+    // `JSON.parse("2.0")` is the number `2`, and the evaluator compares the
+    // observed version exactly — so a parser that ran the value through the
+    // shared literal helper would produce `http_version=2.0` meaning "the peer
+    // reported the number 2", which no exchange ever does. The assertion would
+    // fail against a service that did exactly what was asked.
+    const { expected } = parseAssertion("http_version=2.0");
+    expect(typeof expected).toBe("string");
+    expect(expected).toBe("2.0");
+    expect(parseAssertion("http_version=1.1").expected).toBe("1.1");
+  });
+
+  it("rejects a version it was not given, rather than asserting the empty string", () => {
+    expect(rejection("http_version=")).toContain("http_version=");
+  });
+});
+
 describe("parseAssertion: negation", () => {
   it("expresses negation with a leading !", () => {
     // This syntax can say "not that": a leading `!` sets `negate`. That is

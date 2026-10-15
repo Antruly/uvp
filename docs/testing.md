@@ -339,11 +339,32 @@ not notice a bundle that disagreed with it.
 | `verifyClosure.test.ts`       | The four verdicts, and that a pass stops what it started            |
 | `assertionVocabulary.test.ts` | Every `--assert` form against a real response, and every refusal    |
 | `manualPath.test.ts`          | `uvp run --no-detach` → drive it → Ctrl-C, and who owns the process |
+| `http2.test.ts`               | A workspace generated with `--features http2` really speaks HTTP/2  |
 
 The four verdicts are asked of one workspace on one port, reusing one build,
 because that is what a caller does — and because a pass that leaked its service
 would show up as the _next_ pass failing to bind. Ports are allocated per file
-(`8301`, `8311`, `8321`) and stay disjoint from the toolchain lane's `8090–8094`.
+(`8301`, `8311`, `8321`, `8322`) and stay disjoint from the toolchain lane's
+`8090–8094`.
+
+`http2.test.ts` is the one file here whose subject is a transport rather than a
+verdict, and it is written so that it cannot pass by accident. The generated
+workspace is built and asked for HTTP/2 in cleartext, then asked on the same port
+for HTTP/1.1 without restarting anything — a pair, because "the port speaks
+HTTP/2" and "the port speaks only HTTP/2" are different claims. The assertion
+that carries the weight is `http_version=2.0`, which reads the version the
+response arrived in; it is run where it must pass and where it must fail, and the
+failing run is required to name `1.1` rather than merely to be red. The negative
+control for the whole file is the third test: `auto` negotiates down, so an
+evaluator that answered `passed: true` for any response at all would go red there.
+
+HTTP/3 is not tested because there is nothing to test — see
+[libuvcpp features](libuvcpp-features.md#http3-and-quic-travel-together) — and the
+file says so in its header rather than leaving a reader to wonder. What it
+asserts instead is the refusal, and the last test uses a plain Node HTTP/1.1
+server rather than a second generated workspace: the fact under test is uvp's
+classification of a protocol mismatch, which needs a real socket and a real
+response but no C++.
 
 `manualPath.test.ts` is the only file here that spawns uvp itself rather than
 calling it: `uvp run --no-detach` does not exit while it holds a service, so the
@@ -356,10 +377,12 @@ would leave nothing behind to notice.
 `assertionVocabulary.test.ts` pins the vocabulary from both ends: the forms that
 must work, and the three that must be refused with a named reason rather than
 lowered into something else. It is the file that would have caught
-`uvp_verify`'s contract listing eight of the eleven assertion kinds the
-evaluator implements, which made `body_bytes<1024`, `header:<name>`, and
-`json:<path>` parse and then fail validation one layer above the check they
-described.
+`uvp_verify`'s contract listing eight of the assertion kinds the evaluator
+implements, which made `body_bytes<1024`, `header:<name>`, and `json:<path>`
+parse and then fail validation one layer above the check they described. The
+contract's list is `ASSERTION_KINDS` rather than a second copy, so that
+particular drift cannot recur — the count moved from eleven to twelve when
+`http_version_equals` was added, and it is named in one place.
 
 ## The process-global project
 

@@ -311,6 +311,34 @@ const latencyUnderMs: RawEvaluator = (record, spec) => {
 };
 
 /**
+ * The protocol version the response came back in.
+ *
+ * `undefined` is a real state and is not a failure of the assertion: an exchange
+ * whose request never completed has no response, so nothing negotiated anything.
+ * Reporting it as `expected "2.0"` with no observation would read as a service
+ * that answered over something else; saying no version was recorded is the fact.
+ */
+const httpVersionEquals: RawEvaluator = (record, spec) => {
+  const observed = record.httpVersion;
+  const expectation = shown(spec.expected);
+  if (observed === undefined) {
+    return {
+      passed: false,
+      observed,
+      message: `no http version was recorded, expected ${expectation}`,
+    };
+  }
+  return {
+    passed: observed === spec.expected,
+    observed,
+    // Exact, not `looseEquals`: `"2.0"` and `"2"` are the observed and the
+    // requested spellings of one protocol, and treating them as equal here is
+    // exactly the confusion this assertion exists to catch.
+    message: `http version ${observed}, expected ${expectation}`,
+  };
+};
+
+/**
  * One evaluator per kind, in a table rather than a switch.
  *
  * The table is `Record<AssertionKind, …>`, so a new kind in `ASSERTION_KINDS`
@@ -329,6 +357,7 @@ const EVALUATORS: Record<AssertionKind, RawEvaluator> = {
   body_json_path_exists: bodyJsonPathExists,
   body_bytes_under: bodyBytesUnder,
   latency_under_ms: latencyUnderMs,
+  http_version_equals: httpVersionEquals,
 };
 
 export const evaluateAssertion = (

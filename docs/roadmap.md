@@ -177,11 +177,47 @@ five that need neither when they are not, and reachable from nothing.
 
 |     |                                                                       |
 | --- | --------------------------------------------------------------------- |
-| ⬜  | HTTP/2 and HTTP/3 end-to-end, template through probe                  |
+| ✅  | HTTP/2 end-to-end, template through probe                             |
+| ⬜  | HTTP/3, gated on the TLS row below                                    |
 | ⬜  | TLS with real certificates, including the failure paths               |
 | ⬜  | Database-backed templates                                             |
 | ✅  | Replaying a capture as a regression suite                             |
 | ✅  | Comparing two evidence bundles by semantic digest to see what changed |
+
+HTTP/2 is the first row here that had to be established on the wire rather than
+in a string. `uvp init --features http2` now changes the generated C++ — every web
+template opens with `app.set_h2c_enabled(true)` when the workspace declared the
+module, emitted once from a shared helper rather than five times — and
+`tests/acceptance/http2.test.ts` generates, compiles, launches, and asks such a
+service for a response over HTTP/2 and then, on the same port and in the same
+service lifetime, for one over HTTP/1.1. That second request is the point: h2c and
+h1 share one port and are told apart by the 24-byte connection preface RFC 9113
+defines, so "the port speaks HTTP/2" and "the port speaks only HTTP/2" are
+different claims and only the pair settles which one holds.
+
+What makes the lane evidence rather than a green light is `http_version=2.0`, an
+assertion on the version the response **arrived in** — a fact recorded from the
+wire, which the caller's `--http-version` cannot supply because that names what to
+_attempt_. It is checked where it must pass and where it must fail; a service
+asked to negotiate answers HTTP/1.1, so the same assertion goes red and says
+`1.1`. The same pair of facts is carried into a bundle, so an HTTP/2 verification
+whose report does not say which protocol answered no longer exists, and
+`uvp bundle diff` reports two passes over the same verdict at different protocols
+as `changed_fields: ["http_version"]` beside `same_digest: true` rather than as
+`identical`.
+
+HTTP/3 is split out because it is not a smaller version of the same work. libuvcpp
+1.7.0's web layer has no HTTP/3 listener at all — `uvcpp_web_app` documents the
+h2c switch and adds "将来有 h3 时同理", the same treatment when there is h3 — so
+there is no generated service that could be asked for h3 and nothing a probe could
+observe. The C ABI does carry an h3 client and server
+(`capi/uvcpp_c_http3.h`, `quic/uvcpp_quic_client.h`), but QUIC mandates TLS 1.3,
+so serving it needs a real certificate: the row below is a prerequisite rather
+than a neighbour. What uvp says in the meantime is a refusal — `--http-version 3`
+is `unsupported_target`, non-retryable, naming the reason — because a client that
+quietly sent HTTP/1.1 instead would make the flag a claim about a transport it
+never used. The same refusal now also reaches the bundle's `unverified`, so a
+report of a pass that could not ask says why.
 
 The bundle comparison is the reason `digest` is semantic rather than a record
 hash. Two runs of the same check on the same subject produce the same digest, so

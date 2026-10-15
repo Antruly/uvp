@@ -97,6 +97,7 @@ const asComparedBundle = (parsed: z.infer<typeof verificationBundleSchema>): Com
     name: entry.name,
     exchange_id: entry.exchange_id,
     ...(entry.status === undefined ? {} : { status: entry.status }),
+    ...(entry.http_version === undefined ? {} : { http_version: entry.http_version }),
     ...(entry.elapsed_ms === undefined ? {} : { elapsed_ms: entry.elapsed_ms }),
     assertions_passed: entry.assertions_passed,
     assertions_failed: entry.assertions_failed,

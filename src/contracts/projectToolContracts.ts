@@ -292,6 +292,19 @@ export const verificationBundleShape = {
       name: z.string(),
       exchange_id: z.string(),
       status: z.number().int().optional(),
+      /**
+       * The protocol version the response actually arrived in — `"1.1"`, `"2.0"`.
+       *
+       * Absent for a request that never completed, because nothing negotiated
+       * anything; that is a different record from a request answered over HTTP/1.1,
+       * and the same distinction `status` makes between absent and `0`.
+       *
+       * Reported rather than left to the caller's `http_version` input, which says
+       * what was *attempted*. A pass that asked for `2` and was answered over `1.1`
+       * is exactly the pass a reader has to be able to see, and one field carrying
+       * both meanings is a field that cannot report it.
+       */
+      http_version: z.string().optional(),
       elapsed_ms: z.number().int().optional(),
       assertions_passed: z.number().int(),
       assertions_failed: z.number().int(),
@@ -337,6 +350,13 @@ export const verifyContract = defineTool({
           path: z.string(),
           headers: z.record(z.string(), z.string()).default({}),
           body: z.string().optional(),
+          http_version: z
+            .enum(["auto", "1.1", "2", "3"])
+            .default("auto")
+            .describe(
+              "The protocol version to attempt for this request: auto, 1.1, 2, or 3. What came " +
+                "back is reported per exchange and is assertable with `http_version_equals`.",
+            ),
           assertions: z
             .array(
               // Strict, and with `negate` declared in order to refuse it. Both
@@ -436,6 +456,15 @@ const reportedSideSchema = z.object({
  */
 const exchangeSummarySchema = z.object({
   status: z.number().int().optional(),
+  /**
+   * The version that answered, as the wire spells it. Absent when none did.
+   *
+   * Compared, unlike `elapsed_ms`: a run of the same assertions over HTTP/1.1 and
+   * the same run over HTTP/2 established the same verdict by different means, and
+   * that is a difference a reader of the comparison needs and `bundle_digest`
+   * deliberately does not encode.
+   */
+  http_version: z.string().optional(),
   assertions_passed: z.number().int(),
   assertions_failed: z.number().int(),
   failures: z.array(z.string()),
@@ -444,7 +473,9 @@ const exchangeSummarySchema = z.object({
 const diffedExchangeSchema = z.object({
   name: z.string(),
   change: z.enum(["unchanged", "changed", "added", "absent"]),
-  changed_fields: z.array(z.enum(["status", "assertions_passed", "assertions_failed", "failures"])),
+  changed_fields: z.array(
+    z.enum(["status", "http_version", "assertions_passed", "assertions_failed", "failures"]),
+  ),
   /** Whether the change reached a field `bundle_digest` reads. */
   verdict_changed: z.boolean(),
   before: exchangeSummarySchema.optional(),

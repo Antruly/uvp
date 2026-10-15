@@ -338,6 +338,14 @@ export const verifyCommand: CommandSpec = {
       description: "A request body for the last --request.",
     },
     {
+      name: "http-version",
+      type: "string",
+      value: "VERSION",
+      description:
+        "The protocol version to attempt for the last --request: auto, 1.1, 2, or 3. " +
+        "Default auto.",
+    },
+    {
       name: "assert",
       type: "list",
       value: "ASSERTION",
@@ -392,7 +400,15 @@ export const verifyCommand: CommandSpec = {
         ...optional("ready_path", asString(parsed, "ready-path")),
         ...optional("timeout_ms", asNumber(parsed, "timeout")),
       },
-      requests,
+      requests: requests.map((request) => ({
+        name: request.name,
+        method: request.method,
+        path: request.path,
+        headers: request.headers,
+        ...(request.body === undefined ? {} : { body: request.body }),
+        ...(request.httpVersion === undefined ? {} : { http_version: request.httpVersion }),
+        assertions: request.assertions,
+      })),
       ...optional("keep_running", asBoolean(parsed, "keep-running")),
       ...optional("goal", asString(parsed, "goal")),
     };
@@ -410,11 +426,13 @@ interface RequestDraft {
   path: string;
   headers: Record<string, string>;
   body?: string;
+  httpVersion?: string;
   assertions: AssertionInput[];
 }
 
 /**
- * Group `--request`, `--header`, `--data`, and `--assert` by order of appearance.
+ * Group `--request`, `--header`, `--data`, `--http-version`, and `--assert` by
+ * order of appearance.
  *
  * Order is the association. The alternative — requiring `--request` to carry a
  * name that the others repeat — is more explicit and much worse to type for the
@@ -439,7 +457,7 @@ const collectRequests = (parsed: ParsedArgv): RequestDraft[] => {
       continue;
     }
 
-    if (!["header", "data", "assert"].includes(occurrence.name)) continue;
+    if (!["header", "data", "http-version", "assert"].includes(occurrence.name)) continue;
 
     const current = requests.at(-1);
     if (current === undefined) {
@@ -448,6 +466,17 @@ const collectRequests = (parsed: ParsedArgv): RequestDraft[] => {
     if (occurrence.name === "data") {
       const body = occurrence.values[0];
       if (body !== undefined) current.body = body;
+    } else if (occurrence.name === "http-version") {
+      const version = occurrence.values[0]?.trim();
+      // Refused here rather than by the contract, because the contract's message
+      // would name `requests.2.http_version` — a path the caller never typed,
+      // for a flag they did.
+      if (version === undefined || !HTTP_VERSIONS.includes(version)) {
+        flagError(
+          `--http-version ${version ?? ""} is not a version uvp can attempt. Use auto, 1.1, 2, or 3.`,
+        );
+      }
+      current.httpVersion = version;
     } else if (occurrence.name === "header") {
       Object.assign(current.headers, parseHeaders(occurrence.values));
     } else {
@@ -466,6 +495,9 @@ const collectRequests = (parsed: ParsedArgv): RequestDraft[] => {
 
   return requests;
 };
+
+/** The versions `uvp_http_request` takes, so `--http-version` refuses the same set. */
+const HTTP_VERSIONS: readonly string[] = ["auto", "1.1", "2", "3"];
 
 const buildSection = (parsed: ParsedArgv): Record<string, unknown> => {
   const type = buildType(parsed);

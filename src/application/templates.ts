@@ -188,6 +188,38 @@ const webTail = (input: TemplateInput): string => `
 }
 `;
 
+/**
+ * The two lines every web template starts from: the port, and — when the
+ * workspace asked for the `http2` module — cleartext HTTP/2.
+ *
+ * Shared rather than repeated in five templates because the point of the second
+ * half is that it is a *consequence* of the declared feature list, and five
+ * copies of a consequence is five places for the declaration and the code to
+ * drift apart. The declaration is what `uvp doctor --workspace` is asked about,
+ * so a workspace that says `http2` and compiles code that never mentions it is a
+ * claim with nothing behind it.
+ *
+ * Only h2c is switched on. HTTP/2 over TLS is already advertised by default in
+ * `uvcpp_web_app` and needs no line here; h2c is off by default because
+ * recognising an HTTP/2 connection preface on an unencrypted socket is a change
+ * in protocol behaviour rather than a negotiation that falls back when it fails.
+ */
+const webAppSetup = (input: TemplateInput): string => {
+  const h2c = input.features.includes("http2")
+    ? `
+  // Cleartext HTTP/2 on this same port, because this workspace declared the
+  // http2 module. h1 and h2c share the port and are told apart by the 24-byte
+  // connection preface RFC 9113 defines — byte for byte, not by sniffing, and
+  // without needing a second port or an Upgrade handshake. Over TLS, h2 is
+  // advertised through ALPN already; this is the unencrypted leg.
+  app.set_h2c_enabled(true);`
+    : "";
+
+  return `  uvcpp_web_app app;
+  app.set_port(${String(input.port)});${h2c}
+`;
+};
+
 const helloHttpMain = (input: TemplateInput): string =>
   `${webPreamble(input)}
 // A single route, wired by hand. Everything uvp generates ends up looking like
@@ -197,9 +229,7 @@ const helloHttpMain = (input: TemplateInput): string =>
 // response is the normal case; calling it would pass the request on to the next
 // matching handler.
 int main() {
-  uvcpp_web_app app;
-  app.set_port(${String(input.port)});
-
+${webAppSetup(input)}
   app.get("/hello", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
     resp.status(200).json_str(R"({"message":"Hello, AI"})");
     resp.end();
@@ -221,9 +251,7 @@ std::string JsonItem(const std::string& id, const std::string& value) {
 }  // namespace
 
 int main() {
-  uvcpp_web_app app;
-  app.set_port(${String(input.port)});
-
+${webAppSetup(input)}
   app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
     resp.status(200).json_str(R"({"status":"ok"})");
     resp.end();
@@ -269,9 +297,7 @@ const websocketEchoMain = (input: TemplateInput): string =>
 // separate enable call. The connection outlives this handler, and the framework
 // owns it — never delete it.
 int main() {
-  uvcpp_web_app app;
-  app.set_port(${String(input.port)});
-
+${webAppSetup(input)}
   app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
     resp.status(200).json_str(R"({"status":"ok"})");
     resp.end();
@@ -312,9 +338,7 @@ std::string QuoteEnvelope(const std::string& symbol) {
 // Both the header and the envelope body are the caller's to validate; this
 // template answers every request so that the transport is what gets exercised.
 int main() {
-  uvcpp_web_app app;
-  app.set_port(${String(input.port)});
-
+${webAppSetup(input)}
   app.post("/ws", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
     resp.status(200);
     resp.set_header("content-type", "text/xml; charset=utf-8");
@@ -336,9 +360,7 @@ const staticFilesMain = (input: TemplateInput): string =>
 // is printed at startup. Keep the root inside the workspace; a static root
 // computed from user input is how directory traversal happens.
 int main() {
-  uvcpp_web_app app;
-  app.set_port(${String(input.port)});
-
+${webAppSetup(input)}
   app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
     resp.status(200).json_str(R"({"status":"ok"})");
     resp.end();

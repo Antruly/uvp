@@ -112,6 +112,39 @@ transport underneath it — the worst kind of failure, because everything compil
 
 Both switches and both macros are required, and both are checked.
 
+A build can satisfy the `http3` feature — the macros are `1`, the headers are
+installed — and still serve no HTTP/3, which is the state of the baseline itself.
+`uvcpp_web_app` has no HTTP/3 listener: it documents `set_http2_enabled` and
+`set_h2c_enabled`, and notes that HTTP/3 will be handled the same way _when there
+is h3_. The C ABI carries an h3 client and server of its own
+(`capi/uvcpp_c_http3.h`, `quic/uvcpp_quic_client.h`), so the feature is a real
+build requirement with real headers behind it; serving h3 from a generated web
+service is what does not exist. Generating a workspace with `--features http3`
+therefore asks the build for a module and emits its guard, and writes no HTTP/3
+code — stated in the manifest, not implied by it.
+
+### HTTP/2 in the web-app layer
+
+Two switches, two protocols, and neither defaults where you would guess:
+
+| Call                | Default | What it does                                                     |
+| ------------------- | ------- | ---------------------------------------------------------------- |
+| `set_http2_enabled` | **on**  | Over TLS it puts `h2` in the ALPN list and falls back to h1.1    |
+| `set_h2c_enabled`   | **off** | Cleartext HTTP/2 by prior knowledge; needs `http2_enabled()` too |
+
+Both are only read at `start()`, so a call placed after the server is listening
+compiles, runs, and changes nothing. Without nghttp2 compiled in,
+`set_http2_enabled` records the intent as a no-op and `http2_enabled()` honestly
+returns false — which is why a workspace that declares `http2` and is built
+against such a library fails visibly rather than serving HTTP/1.1 quietly.
+
+h1 and h2c share one port. They are told apart byte-exactly by the 24-byte
+connection preface RFC 9113 defines, not by sniffing and not by `Upgrade: h2c` —
+that mechanism was deleted in RFC 9113, so the request that used to be the
+textbook h2c handshake is now the thing a service should not be sent. uvp's own
+client speaks prior knowledge for `--http-version 2`, which is what makes
+`uvp verify` able to establish that one port serves both rather than assuming it.
+
 ### SOAP does not need WSDL
 
 `UVCPP_ENABLE_WSDL` generates and parses service descriptions. A SOAP call that

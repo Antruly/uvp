@@ -392,6 +392,60 @@ describe("measurement assertions", () => {
   });
 });
 
+describe("http_version_equals", () => {
+  it("passes when the response arrived in the version asked for", () => {
+    const outcome = only(exchange({ httpVersion: "2.0" }), {
+      kind: "http_version_equals",
+      expected: "2.0",
+    });
+    expect(outcome.passed).toBe(true);
+    expect(outcome.observed).toBe("2.0");
+  });
+
+  it("fails when the service answered in another version, naming both", () => {
+    // The whole reason this kind exists: a service that serves HTTP/1.1 whatever
+    // it is sent must not satisfy a claim about HTTP/2. Every other kind in the
+    // vocabulary passes here — the response is a 200 with the right body.
+    const outcome = only(exchange({ status: 200, httpVersion: "1.1" }), {
+      kind: "http_version_equals",
+      expected: "2.0",
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.observed).toBe("1.1");
+    expect(outcome.message).toContain("1.1");
+    expect(outcome.message).toContain("2.0");
+  });
+
+  it("does not treat the requested spelling as the observed one", () => {
+    // `uvp_http_request` takes `http_version: "2"` — the version to *attempt* —
+    // and reports `http_version: "2.0"` — what was negotiated. If the assertion
+    // compared loosely, `http_version=2` would pass against a service that spoke
+    // HTTP/2 and also against one that spoke HTTP/1.1, which is no check at all.
+    const outcome = only(exchange({ httpVersion: "2.0" }), {
+      kind: "http_version_equals",
+      expected: "2",
+    });
+    expect(outcome.passed).toBe(false);
+  });
+
+  it("reports that nothing negotiated anything when no response was recorded", () => {
+    const outcome = only(exchange({ httpVersion: undefined }), {
+      kind: "http_version_equals",
+      expected: "2.0",
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.observed).toBeUndefined();
+    expect(outcome.message).toContain("no http version was recorded");
+  });
+
+  it("is satisfied by a service that spoke HTTP/2 and also by asserting the absence of it", () => {
+    // Both directions pinned, so the kind cannot be one that accepts everything.
+    const spokeH2 = exchange({ httpVersion: "2.0" });
+    expect(only(spokeH2, { kind: "http_version_equals", expected: "2.0" }).passed).toBe(true);
+    expect(only(spokeH2, { kind: "http_version_equals", expected: "1.1" }).passed).toBe(false);
+  });
+});
+
 describe("negate", () => {
   it("inverts the verdict and says so in the message", () => {
     const outcome = only(exchange({ status: 200 }), {

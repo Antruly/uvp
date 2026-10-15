@@ -184,6 +184,24 @@ uvp verify ./svc --port 8080 \
   --assert 'json:$.value=first'
 ```
 
+`--http-version` applies to the `--request` before it, defaulting to `auto`, so
+one pass can put the same question to the same service over two protocols:
+
+```bash
+uvp verify ./svc --port 8080 \
+  --request GET /hello --http-version 2 --assert http_version=2.0 \
+  --request GET /hello --assert http_version=1.1
+```
+
+That is what establishes "this port serves both" rather than assuming it: an
+h2c-capable service shares one port between HTTP/1.1 and HTTP/2, tells them apart
+by the connection preface RFC 9113 defines, and needs no second listener. A
+pinned `--http-version 2` against a service that answers HTTP/1.1 anyway is
+reported as `unsupported_target` — non-retryable, with the remediation naming
+`uvp init --features http2` — rather than as an unreachable endpoint, because the
+service answered and the caller is being sent to inspect the one thing that
+works.
+
 The whole closure in one supervised pass: configure, compile, launch, drive, assert,
 stop, report. Returns a bundle whose status is one of four:
 
@@ -213,6 +231,7 @@ half of it was not examined.
 | `body~=<regex>`                        | A regular expression in the raw body |
 | `body_bytes<1024`                      | The size of the raw body             |
 | `latency<250ms`                        | Elapsed time for the exchange        |
+| `http_version=2.0`                     | The protocol the response arrived in |
 
 The short forms cover the common cases; `--assert '{"kind": …}'` takes a JSON
 object and reaches the whole evaluator vocabulary, which is also how the kinds
@@ -224,6 +243,21 @@ only accepted against a header and the raw body: no assertion in the vocabulary
 matches a regular expression against a JSON path, so `json:$.value~=^a` is
 refused rather than quietly widened to a whole-body check. Use `json:$.value=<v>`
 to compare the parsed value.
+
+`http_version` is the one assertion that says whether a _transport_ was
+exercised rather than whether the service answered, so it is spelled for what
+happened and not for what was asked for. It compares the version the response
+arrived in — `"1.1"`, `"2.0"`, as the wire spells it — while `--http-version`
+names the version to _attempt_ (`auto`, `1.1`, `2`, `3`). The two spellings differ
+deliberately: `--assert http_version=2.0` against a pass that ran `--http-version
+2` is a check on the wire, and one that ran `auto` against an HTTP/1.1-only
+service fails it, which is exactly the case a single spelling would hide. Both
+values are reported per exchange in the bundle, as `http_version` — what came
+back — beside the request that was made.
+
+A request that never completed records no `http_version` at all. That is not
+`"1.1"`: nothing negotiated anything, and filling in a default would report a
+protocol the exchange never used. The assertion fails and says so.
 
 Negation is the one thing the two assertion surfaces do not share. A leading `!`
 negates any form, including a JSON object, and `uvp assert` accepts it. `uvp
@@ -271,7 +305,13 @@ The report separates three things a reader would otherwise conflate:
 `changed_fields` beside `verdict_changed: false` is the case worth knowing:
 `bundle_digest` covers the verdict and not the sentence explaining it, so two
 passes can share a digest while the failure text moved. That pairing is reported
-rather than smoothed over, and `limitations` says it in words.
+rather than smoothed over, and `limitations` says it in words. `http_version` is
+a field of the same kind, and for a related reason: the same assertions put to
+the same service over HTTP/1.1 and over HTTP/2 reach the same verdict, so they
+hash the same, and the comparison reports that the two passes were different
+experiments. Both sides' versions are carried in `before` and `after`, so
+`changed_fields: ["http_version"]` can be read without going back to the two
+command lines that produced the files.
 
 Identifiers and the clock are never compared — `bundle_id`, `exchange_id`,
 `elapsed_ms`, `service.run_id`, `service.endpoint`. Each is minted per pass or

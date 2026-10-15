@@ -510,6 +510,7 @@ export const createToolHandlers = (
               path: request.path,
               headers: request.headers,
               body: request.body,
+              http_version: request.http_version,
               assertions: request.assertions,
             })),
             keep_running: input.keep_running,
