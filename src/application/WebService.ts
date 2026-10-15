@@ -2,8 +2,13 @@ import { Buffer } from "node:buffer";
 
 import { cancelledFailure, UvpFailure } from "../domain/errors.js";
 import { newId, sha256 } from "../domain/identity.js";
-import { decodeBody, performRequest, transportFailureKind } from "./httpClient.js";
-import type { HttpExchange, HttpTiming } from "./httpClient.js";
+import {
+  decodeBody,
+  performRequest,
+  transportFailureKind,
+  TransportFailure,
+} from "./httpClient.js";
+import type { HttpExchange, HttpTiming, TlsVerification } from "./httpClient.js";
 import { evaluateAssertions, percentile } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
@@ -82,8 +87,8 @@ export interface ToolTlsReport {
   issuer?: string;
   valid_from?: string;
   valid_to?: string;
-  verified: boolean;
-  errors: string[];
+  verification: TlsVerification;
+  reason?: string;
 }
 
 const toTls = (exchange: HttpExchange): ToolTlsReport | undefined => {
@@ -96,8 +101,8 @@ const toTls = (exchange: HttpExchange): ToolTlsReport | undefined => {
     ...(tls.issuer === undefined ? {} : { issuer: tls.issuer }),
     ...(tls.validFrom === undefined ? {} : { valid_from: tls.validFrom }),
     ...(tls.validTo === undefined ? {} : { valid_to: tls.validTo }),
-    verified: tls.verified,
-    errors: [...tls.errors],
+    verification: tls.verification,
+    ...(tls.reason === undefined ? {} : { reason: tls.reason }),
   };
 };
 
@@ -580,6 +585,19 @@ export class WebService {
       // message here instead made the two disagree the moment either changed.
       const kind = transportFailureKind(cause);
       const timedOut = kind === "timeout";
+      // A certificate this client would not accept is the third thing that is
+      // not an unreachable endpoint, and the one whose message matters most.
+      // The service is listening, it completed a handshake, and it presented a
+      // certificate — telling the caller to check the host and port sends them
+      // to inspect the one part that worked, and `retryable: true` sends them
+      // back to do it again. Every one of these is already the reason string
+      // OpenSSL gave, so the answer to "why" is in hand and only has to be
+      // reported as itself.
+      const certificateRejected = kind === "tls";
+      // The stable name of what was wrong, which Node's message does not carry.
+      // `CERT_HAS_EXPIRED` and `ERR_TLS_CERT_ALTNAME_INVALID` want opposite
+      // actions and both arrive as prose.
+      const reasonCode = cause instanceof TransportFailure ? cause.code : undefined;
       // A version the caller *pinned* that the peer did not answer in is not an
       // unreachable endpoint. The service is listening — it replied something
       // this client could not parse as HTTP/2 — and telling the caller to check
@@ -587,24 +605,40 @@ export class WebService {
       // `auto` never lands here: it falls back rather than failing.
       const wrongProtocol = kind === "protocol" && input.http_version !== "auto";
       throw new UvpFailure({
-        code: timedOut ? "timeout" : wrongProtocol ? "unsupported_target" : "endpoint_unreachable",
-        message: wrongProtocol
-          ? `${input.method} ${input.url} reached a service that did not answer in HTTP/${input.http_version}: ${message}`
-          : `${input.method} ${input.url} did not complete: ${message}`,
+        code: timedOut
+          ? "timeout"
+          : certificateRejected
+            ? "target_unavailable"
+            : wrongProtocol
+              ? "unsupported_target"
+              : "endpoint_unreachable",
+        message: certificateRejected
+          ? `${input.method} ${input.url} presented a certificate this client would not accept` +
+            `${reasonCode === undefined ? "" : ` (${reasonCode})`}: ${message}`
+          : wrongProtocol
+            ? `${input.method} ${input.url} reached a service that did not answer in HTTP/${input.http_version}: ${message}`
+            : `${input.method} ${input.url} did not complete: ${message}`,
         remediation: {
           action: timedOut
             ? "Raise timeout_ms, or check whether the service is still starting up."
-            : wrongProtocol
-              ? `Ask over a version the service speaks, or make it speak this one. For a ` +
-                `generated service that means the http2 feature at creation time ` +
-                `(uvp init --features http2), which turns on cleartext h2 alongside HTTP/1.1.`
-              : "Check that the service is listening on that host and port, then retry.",
+            : certificateRejected
+              ? `Decide which of the two this is, because the remedies are opposite: if the service ` +
+                `is meant to be trusted, give this client its CA (NODE_EXTRA_CA_CERTS); if it is a ` +
+                `service generated for local use, its self-signed certificate is expected and ` +
+                `--no-tls (verify_tls: false) is the honest way to say you are not checking it.`
+              : wrongProtocol
+                ? `Ask over a version the service speaks, or make it speak this one. For a ` +
+                  `generated service that means the http2 feature at creation time ` +
+                  `(uvp init --features http2), which turns on cleartext h2 alongside HTTP/1.1.`
+                : "Check that the service is listening on that host and port, then retry.",
         },
         details: {
           url: input.url,
           method: input.method,
           requested_http_version: input.http_version,
           elapsed_ms: Date.now() - started,
+          ...(reasonCode === undefined ? {} : { reason_code: reasonCode }),
+          ...(certificateRejected ? { verify_tls: input.verify_tls } : {}),
         },
       });
     });
@@ -646,7 +680,12 @@ export class WebService {
         redirects: exchange.redirects.length,
       },
       derived: {
-        tls_verified: tls?.verified ?? false,
+        // Absent for a cleartext exchange rather than `false`. There is no TLS
+        // to have verified and no certificate to have rejected, and a `false`
+        // here is read by every consumer as a verification that failed — the
+        // record claimed, about a plaintext request, the one thing that could
+        // not be true of it.
+        ...(tls === undefined ? {} : { tls_verification: tls.verification }),
         truncated: truncated || exchange.bodyTruncated,
       },
       coverage: coverageComplete("HTTP exchange"),

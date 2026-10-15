@@ -302,7 +302,13 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
           http_version: spec.http_version,
           follow_redirects: false,
           max_redirects: 0,
-          verify_tls: false,
+          // The contract's own default, rather than the literal `false` this
+          // used to pass. The base URL below is `http://`, so nothing here is
+          // verified today and the two are indistinguishable — but the tool
+          // whose whole job is verification is the last place that should carry
+          // a hardcoded "do not check the certificate", and it stops being
+          // inert the moment a workspace is served over TLS.
+          verify_tls: true,
           timeout_ms: 30_000,
           max_body_bytes: 1_048_576,
         },

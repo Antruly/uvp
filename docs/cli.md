@@ -358,6 +358,33 @@ measurement. `--max-samples` (default 10000) bounds how many are kept and
 distribution is computed from exactly the samples returned, so a run that dropped
 some is a `partial` scope rather than a quiet approximation.
 
+### Certificates
+
+`uvp http`, `uvp ws`, `uvp load`, and `uvp capture replay` all check the peer's
+certificate; `--no-tls` turns that check off for the call. `uvp http` is the one
+that reports what it saw, under `tls`: the negotiated protocol, the cipher, the
+subject and issuer, the validity window, and `verification`, which is four states
+rather than a boolean. `verified` means the check ran and the chain validated.
+`not_checked` means the caller turned the check off — the chain was still
+validated and `reason` still says what OpenSSL found, which is what turning the
+check off is for. `undetermined` means the check was required and its answer could
+not be read, kept distinct from the fourth state, `failed`, for the same reason a
+probe that cannot run is kept distinct from an absent feature. `failed` is
+modelled and not produced today: an unaccepted chain ends the exchange, so it
+arrives as the failure below rather than as a result carrying a field. `reason`
+is OpenSSL's own spelling — `DEPTH_ZERO_SELF_SIGNED_CERT`, `CERT_HAS_EXPIRED`,
+`ERR_TLS_CERT_ALTNAME_INVALID` — because the messages for those three are prose
+that names none of them, and they want three different things done about them.
+
+A certificate this client will not accept exits `2` with `target_unavailable`,
+and not `endpoint_unreachable`: the service is listening, the handshake
+completed, and the certificate is what failed, so the remedy is not to go and
+check the host and port. It is not `retryable` either — a target does not become
+acceptable by being asked again. The remedy names both directions, because uvp
+cannot tell a private CA the caller meant to trust from a development certificate
+nobody means to: hand this client the CA (`NODE_EXTRA_CA_CERTS`), or say
+`--no-tls`.
+
 `uvp capture read` truncates bodies above the recording limit and says so: the
 limit is returned as `body_limit_bytes`, each exchange carries
 `request_body_truncated` and `response_body_truncated`, and a read that cut a body

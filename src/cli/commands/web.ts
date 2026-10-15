@@ -128,6 +128,7 @@ export const httpCommand: CommandSpec = {
       ...optional("http_version", asString(parsed, "http-version")),
       ...optional("follow_redirects", asBoolean(parsed, "follow")),
       ...optional("max_redirects", asNumber(parsed, "max-redirects")),
+      ...optional("verify_tls", asBoolean(parsed, "tls")),
       ...optional("timeout_ms", asNumber(parsed, "timeout")),
       ...optional("max_body_bytes", asNumber(parsed, "max-bytes")),
     };

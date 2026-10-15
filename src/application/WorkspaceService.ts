@@ -129,6 +129,12 @@ const waitForReadiness = async (
         httpVersion: "auto",
         followRedirects: false,
         maxRedirects: 0,
+        // Unchecked, because readiness is a liveness question and not a trust
+        // question. Whether the service's certificate is one this client accepts
+        // is asked by the caller's own request and answered there, with
+        // OpenSSL's reason. A probe that refused to call a service up because
+        // its development certificate is self-signed would hide the service
+        // behind a question nobody put to it.
         verifyTls: false,
         timeoutMs: Math.min(2_000, Math.max(200, deadline - Date.now())),
       });

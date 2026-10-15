@@ -68,6 +68,21 @@ describe("UvpFailure", () => {
     }
   });
 
+  it("never calls a target problem retryable, however temporary it sounds", () => {
+    // `target_unavailable` reads like `service_unavailable` and is the opposite
+    // kind of fact: the caller's environment is wrong in a way that no amount of
+    // asking again will change. It arrives as `unsupported_target` — the exit
+    // code that says the question could not be put — and a `true` beside it was
+    // the one thing in the contract a retry loop would act on.
+    const failure = new UvpFailure({
+      code: "target_unavailable",
+      message: "m",
+      remediation: { action: "a" },
+    });
+    expect(failure.detail.category).toBe("unsupported_target");
+    expect(failure.detail.retryable).toBe(false);
+  });
+
   it("omits `details` entirely when there are none, rather than writing an empty object", () => {
     const failure = new UvpFailure({
       code: "build_failed",

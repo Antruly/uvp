@@ -58,11 +58,24 @@ export type TransportFailureKind = "timeout" | "unreachable" | "protocol" | "tls
 
 export class TransportFailure extends Error {
   readonly kind: TransportFailureKind;
+  /**
+   * The errno or TLS reason code the failure carried, when it carried one.
+   *
+   * Kept because the message does not. Node raises `CERT_HAS_EXPIRED` with the
+   * message "certificate has expired" and `DEPTH_ZERO_SELF_SIGNED_CERT` with
+   * "self-signed certificate; if the root CA is installed locally, try running
+   * Node.js with --use-system-ca" — four certificate failures, four different
+   * things for a caller to do, and no stable name for any of them in the text.
+   * A consumer that wanted to tell them apart would have to match prose, which
+   * is the mistake this module's `kind` exists to end.
+   */
+  readonly code: string | undefined;
 
-  constructor(kind: TransportFailureKind, message: string) {
+  constructor(kind: TransportFailureKind, message: string, code?: string) {
     super(message);
     this.name = "TransportFailure";
     this.kind = kind;
+    this.code = code;
   }
 }
 
@@ -78,15 +91,55 @@ const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
   "EPROTO",
 ]);
 
-/** Certificate failures, which are reported as themselves and not as a refusal. */
+/**
+ * Certificate failures, which are reported as themselves and not as a refusal.
+ *
+ * Every code below was produced by a real peer before it was written here: a
+ * self-signed certificate, a leaf whose issuing CA is not in the trust store, a
+ * certificate whose validity window has passed, and one that does not name the
+ * host it was reached at. Each of those is a different thing for a caller to do
+ * something about, and a client that collapsed them into "the connection failed"
+ * would send them to inspect a listener that is working — so they are classified
+ * together and named separately in the message, which is where OpenSSL's own
+ * spelling of the reason is carried.
+ */
 const TLS_CODES: ReadonlySet<string> = new Set([
   "DEPTH_ZERO_SELF_SIGNED_CERT",
   "SELF_SIGNED_CERT_IN_CHAIN",
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
   "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
   "ERR_TLS_CERT_ALTNAME_INVALID",
   "ERR_SSL_WRONG_VERSION_NUMBER",
 ]);
+
+/**
+ * TLS alerts that are the peer refusing the protocol, not its certificate.
+ *
+ * The alert namespace and the certificate namespace overlap: this code begins
+ * `ERR_SSL`, so the prefix rule below read it as a certificate failure. It means
+ * the opposite — the handshake completed and the peer declined every protocol
+ * this client offered, which is the mismatch the HTTP/2 fallback exists for.
+ * Measured against an HTTPS peer that does not put `h2` in its ALPN list.
+ */
+const PROTOCOL_ALERT_CODES: ReadonlySet<string> = new Set([
+  "ERR_SSL_TLSV1_ALERT_NO_APPLICATION_PROTOCOL",
+]);
+
+/**
+ * Codes that say the operation was abandoned and never say why.
+ *
+ * Node attaches the reason as the error's `cause`, and classifying the wrapper
+ * instead of the cause reported the wrong thing: an HTTP/2 stream against a
+ * self-signed peer fails with `ERR_HTTP2_STREAM_CANCEL` on the stream while the
+ * session's own error is `DEPTH_ZERO_SELF_SIGNED_CERT`. Both are real, the
+ * stream's fires first, and the first one to reach `fail` was what the caller
+ * got — a certificate failure reported as a protocol mismatch, with a remedy
+ * naming the protocol.
+ */
+const OPAQUE_CODES: ReadonlySet<string> = new Set(["ERR_HTTP2_STREAM_CANCEL"]);
 
 /**
  * The kind of a failure Node raised, from the errno it attached.
@@ -99,6 +152,7 @@ const TLS_CODES: ReadonlySet<string> = new Set([
 const kindOfNodeError = (error: NodeJS.ErrnoException): TransportFailureKind => {
   const code = error.code ?? "";
   if (code === "ETIMEDOUT") return "timeout";
+  if (PROTOCOL_ALERT_CODES.has(code)) return "protocol";
   if (TLS_CODES.has(code) || code.startsWith("ERR_TLS") || code.startsWith("ERR_SSL")) return "tls";
   // `HPE_*` is Node's HTTP parser refusing bytes; `ERR_HTTP2*` is the h2 stack
   // doing the same. Both mean the peer is speaking something else.
@@ -107,10 +161,28 @@ const kindOfNodeError = (error: NodeJS.ErrnoException): TransportFailureKind => 
   return "unreachable";
 };
 
+/**
+ * The error in a `cause` chain that carries a reason rather than a summary.
+ *
+ * Bounded, because a chain a peer can influence is not a chain to walk forever.
+ * When nothing better is found the original is classified, so an opaque code
+ * with no cause behind it keeps whatever kind its own name implies.
+ */
+const describedError = (error: unknown): NodeJS.ErrnoException => {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!(current instanceof Error)) break;
+    const candidate = current as NodeJS.ErrnoException;
+    if (!OPAQUE_CODES.has(candidate.code ?? "")) return candidate;
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return error as NodeJS.ErrnoException;
+};
+
 /** The kind of anything a caller caught, including a value that is not an `Error`. */
 export const transportFailureKind = (cause: unknown): TransportFailureKind => {
   if (cause instanceof TransportFailure) return cause.kind;
-  if (cause instanceof Error) return kindOfNodeError(cause as NodeJS.ErrnoException);
+  if (cause instanceof Error) return kindOfNodeError(describedError(cause));
   return "unreachable";
 };
 
@@ -122,6 +194,20 @@ export interface HttpTiming {
   readonly totalMs: number;
 }
 
+/**
+ * What uvp concluded about the certificate the peer presented.
+ *
+ * Four states, and the two in the middle are why this is not a boolean. A
+ * boolean must answer `false` both for "uvp checked and this chain does not
+ * validate" and for "uvp was told not to check", which are different answers to
+ * the question a caller is asking: one is a service that is not who it claims to
+ * be, the other is a caller who chose not to ask. This field was a boolean,
+ * written as a literal `false` at its only construction site, so every TLS
+ * exchange uvp reported claimed a verification that had never been performed —
+ * and the check that would have contradicted it was never read.
+ */
+export type TlsVerification = "verified" | "failed" | "not_checked" | "undetermined";
+
 export interface TlsInfo {
   readonly protocol: string | undefined;
   readonly cipher: string | undefined;
@@ -129,9 +215,103 @@ export interface TlsInfo {
   readonly issuer: string | undefined;
   readonly validFrom: string | undefined;
   readonly validTo: string | undefined;
-  readonly verified: boolean;
-  readonly errors: readonly string[];
+  readonly verification: TlsVerification;
+  /**
+   * What OpenSSL said was wrong with the chain, in its own spelling.
+   *
+   * Present whenever OpenSSL recorded a reason, which is not only when
+   * `verification` is `"failed"`. Node validates the chain whether or not the
+   * caller asked it to enforce the result, so a caller who passed
+   * `verify_tls: false` can still read the reason the handshake would have
+   * failed on — which is the whole point of turning verification off to look.
+   */
+  readonly reason: string | undefined;
 }
+
+/** The parts of a TLS socket this module reads, and no more. */
+interface TlsSocketView {
+  readonly authorized?: boolean;
+  readonly authorizationError?: unknown;
+  getPeerCertificate?: (detailed: boolean) => unknown;
+  getProtocol?: () => string | null;
+  getCipher?: () => { name: string } | null;
+}
+
+/**
+ * The TLS facts a completed exchange carries, read from the socket it happened on.
+ *
+ * `enforced` is the caller's own `verify_tls`, which the socket cannot report:
+ * Node runs the same validation either way and sets `authorized: false` for a
+ * rejected chain whether it went on to refuse the connection or to allow it. The
+ * decision to act on the answer is only known where it was made, so it is passed
+ * in rather than inferred from the answer.
+ */
+const peerCertificateInfo = (
+  socket: TlsSocketView | null | undefined,
+  enforced: boolean,
+): TlsInfo => {
+  const absent: TlsInfo = {
+    protocol: undefined,
+    cipher: undefined,
+    subject: undefined,
+    issuer: undefined,
+    validFrom: undefined,
+    validTo: undefined,
+    verification: "undetermined",
+    reason: undefined,
+  };
+  // A socket this module cannot read is not a socket without a certificate. The
+  // exchange was over TLS and something about its certificate is unknown, which
+  // is `undetermined` — the same third state a header probe returns when it
+  // cannot look, and for the same reason: reporting it as `failed` would invent
+  // a rejection and reporting it as `verified` would invent an acceptance.
+  if (socket === null || socket === undefined) return absent;
+  if (typeof socket.getPeerCertificate !== "function") return absent;
+
+  const certificate = socket.getPeerCertificate(true) as
+    | {
+        subject?: Record<string, string>;
+        issuer?: Record<string, string>;
+        valid_from?: string;
+        valid_to?: string;
+      }
+    | undefined;
+  const protocol = typeof socket.getProtocol === "function" ? socket.getProtocol() : null;
+  const cipher = typeof socket.getCipher === "function" ? socket.getCipher() : undefined;
+  const authorizationError = socket.authorizationError;
+  const reason =
+    typeof authorizationError === "string" && authorizationError !== ""
+      ? authorizationError
+      : authorizationError instanceof Error
+        ? authorizationError.message
+        : undefined;
+  // Read from the socket, which is the only place it exists. `authorized` is
+  // absent — not `false` — on a socket that never ran a verification, so the
+  // two are told apart rather than collapsed by a `=== true` that answers the
+  // same way for "rejected" and "never asked".
+  const authorized = socket.authorized;
+  const verification: TlsVerification =
+    typeof authorized !== "boolean"
+      ? "undetermined"
+      : enforced
+        ? authorized
+          ? "verified"
+          : "failed"
+        : "not_checked";
+
+  const describe = (name: Record<string, string> | undefined): string | undefined =>
+    name === undefined ? undefined : (name["CN"] ?? name["O"] ?? Object.values(name)[0]);
+  return {
+    protocol: protocol ?? undefined,
+    cipher: cipher?.name ?? undefined,
+    subject: certificate === undefined ? undefined : describe(certificate.subject),
+    issuer: certificate === undefined ? undefined : describe(certificate.issuer),
+    validFrom: certificate?.valid_from,
+    validTo: certificate?.valid_to,
+    verification,
+    reason,
+  };
+};
 
 export interface HttpExchange {
   readonly url: string;
@@ -157,39 +337,6 @@ const normaliseHeaders = (raw: NodeJS.Dict<string | string[]>): Record<string, s
     out[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : value;
   }
   return out;
-};
-
-const peerCertificateInfo = (socket: {
-  getPeerCertificate?: (detailed: boolean) => unknown;
-  getProtocol?: () => string | null;
-  getCipher?: () => { name: string };
-}): TlsInfo | undefined => {
-  if (typeof socket.getPeerCertificate !== "function") return undefined;
-  const certificate = socket.getPeerCertificate(true) as
-    | {
-        subject?: Record<string, string>;
-        issuer?: Record<string, string>;
-        valid_from?: string;
-        valid_to?: string;
-      }
-    | undefined;
-  const protocol = typeof socket.getProtocol === "function" ? socket.getProtocol() : null;
-  const cipher = typeof socket.getCipher === "function" ? socket.getCipher() : undefined;
-  if (certificate === undefined) return undefined;
-  const describe = (name: Record<string, string> | undefined): string | undefined =>
-    name === undefined ? undefined : (name["CN"] ?? name["O"] ?? Object.values(name)[0]);
-  return {
-    protocol: protocol ?? undefined,
-    cipher: cipher?.name,
-    subject: describe(certificate.subject),
-    issuer: describe(certificate.issuer),
-    validFrom: certificate.valid_from,
-    validTo: certificate.valid_to,
-    // Authorisation failure is recorded rather than thrown: the exchange still
-    // happened and its bytes are still evidence.
-    verified: false,
-    errors: [],
-  };
 };
 
 interface SingleShotResult {
@@ -241,14 +388,32 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (error instanceof TransportFailure) {
+        reject(error);
+        return;
+      }
+      // Classified from the error that carries the reason, which is not always
+      // the one that reached this handler.
+      const described = describedError(error);
       reject(
-        error instanceof TransportFailure
-          ? error
-          : new TransportFailure(kindOfNodeError(error as NodeJS.ErrnoException), error.message),
+        new TransportFailure(
+          kindOfNodeError(described),
+          error.message,
+          (described as NodeJS.ErrnoException).code,
+        ),
       );
     };
 
     const req = requestFn(options, (res) => {
+      // Read here and not later, because here is the only place it is readable.
+      // Node detaches the socket from the response once the body has been read,
+      // so `res.socket` inside the `end` handler below is `null` — which is
+      // where this used to be read, and why every TLS exchange that got as far
+      // as a response died with a `TypeError` inside the client instead of
+      // reporting the certificate it had just accepted or rejected. The failure
+      // surfaced as the caller's catch-all, so a working HTTPS service was
+      // reported as an unreachable endpoint.
+      const socket = res.socket as unknown as TlsSocketView | null;
       const chunks: Buffer[] = [];
       let bytes = 0;
       let truncated = false;
@@ -263,7 +428,6 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        const socket = res.socket as unknown as Parameters<typeof peerCertificateInfo>[0];
         resolve({
           status: res.statusCode ?? 0,
           statusText: res.statusMessage ?? "",
@@ -278,7 +442,7 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
             ttfbMs: (firstByteAt ?? Date.now()) - started,
             totalMs: Date.now() - started,
           },
-          tls: secure ? peerCertificateInfo(socket) : undefined,
+          tls: secure ? peerCertificateInfo(socket, spec.verifyTls) : undefined,
         });
       });
       res.on("error", fail);
@@ -323,10 +487,21 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       settled = true;
       clearTimeout(timer);
       client.close();
+      if (error instanceof TransportFailure) {
+        reject(error);
+        return;
+      }
+      // The same rule as the HTTP/1.1 path, and this is the path that needed it
+      // most: an h2 stream reports `ERR_HTTP2_STREAM_CANCEL` when the session
+      // dies, and the session's own error — a rejected certificate, in the case
+      // measured — is its `cause`.
+      const described = describedError(error);
       reject(
-        error instanceof TransportFailure
-          ? error
-          : new TransportFailure(kindOfNodeError(error as NodeJS.ErrnoException), error.message),
+        new TransportFailure(
+          kindOfNodeError(described),
+          error.message,
+          (described as NodeJS.ErrnoException).code,
+        ),
       );
     };
 
@@ -392,7 +567,11 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
         return;
       }
       settled = true;
-      const socket = client.socket as unknown as Parameters<typeof peerCertificateInfo>[0];
+      // Read before `close()`, which is the only ordering that keeps the socket
+      // attached. An h2 session does not null it the way a response does, but it
+      // does drop it on close, and a session with no socket is reported as an
+      // undetermined certificate rather than as no certificate at all.
+      const socket = client.socket as unknown as TlsSocketView | undefined;
       client.close();
       resolve({
         status,
@@ -408,7 +587,7 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
           ttfbMs: (firstByteAt ?? Date.now()) - started,
           totalMs: Date.now() - started,
         },
-        tls: secure ? peerCertificateInfo(socket) : undefined,
+        tls: secure ? peerCertificateInfo(socket, spec.verifyTls) : undefined,
       });
     });
 

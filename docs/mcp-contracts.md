@@ -99,6 +99,20 @@ does not answer in is `unsupported_target` rather than `endpoint_unreachable`,
 because the service replied and the caller should not be sent to check whether it
 is listening. `3` is refused: uvp has no HTTP/3 client.
 
+Over TLS the result carries what the connection's certificate was, under `tls`:
+protocol, cipher, subject, issuer, validity window, and `verification` — one of
+`verified`, `not_checked`, `undetermined`, or `failed`, with `reason` naming
+OpenSSL's own finding. It is an enum rather than a boolean because the boolean had
+one value it could honestly take: `verified: false` with `errors: []` was written
+for a plaintext request, for an exchange where the caller had turned checking off,
+and for one whose certificate was rejected — three different facts, one record.
+`not_checked` says the caller set `verify_tls: false`, and `reason` still reports
+what OpenSSL found, because turning the check off is how a caller looks at a
+certificate without accepting it. A certificate this client will not accept is
+`target_unavailable` with `retryable: false` and the reason code in
+`details.reason_code`, not `endpoint_unreachable`: the service answered, and its
+certificate is the whole of what went wrong.
+
 **`uvp_websocket_probe`** — Probe a WebSocket endpoint.
 Performs the upgrade handshake, optionally sends frames, and returns the
 handshake response and any frames received. A successful probe is a `101`, which

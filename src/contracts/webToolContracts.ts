@@ -97,9 +97,25 @@ export const httpRequestContract = defineTool({
         issuer: z.string().optional(),
         valid_from: z.string().optional(),
         valid_to: z.string().optional(),
-        /** Verification outcome. `false` means the exchange happened anyway. */
-        verified: z.boolean(),
-        errors: z.array(z.string()),
+        /**
+         * What happened to the certificate, in four states rather than two.
+         *
+         * `verified` — this client required a chain and the peer had one.
+         * `failed` — it required one and the peer's did not validate. A
+         *   completed exchange does not normally carry this, because a rejected
+         *   chain stops the exchange and arrives as a failure instead; it is
+         *   modelled because the two are different claims and only one of them
+         *   can be made here.
+         * `not_checked` — `verify_tls` was false for this request, so nothing
+         *   was enforced. The chain was still validated; `reason` says what
+         *   OpenSSL found, which is what turning verification off lets you see.
+         * `undetermined` — this client required a chain and could not read the
+         *   result. Distinct from `failed` for the same reason a probe that
+         *   cannot run is distinct from an absent feature.
+         */
+        verification: z.enum(["verified", "failed", "not_checked", "undetermined"]),
+        /** OpenSSL's own spelling of what was wrong with the chain, when it said. */
+        reason: z.string().optional(),
       })
       .optional(),
   }),

@@ -2126,19 +2126,21 @@
               "valid_to": {
                 "type": "string"
               },
-              "verified": {
-                "type": "boolean"
+              "verification": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "failed",
+                  "not_checked",
+                  "undetermined"
+                ]
               },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
+              "reason": {
+                "type": "string"
               }
             },
             "required": [
-              "verified",
-              "errors"
+              "verification"
             ],
             "additionalProperties": false
           }

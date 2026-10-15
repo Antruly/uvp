@@ -112,12 +112,23 @@ const CATEGORY_BY_CODE: Record<UvpErrorCode, UvpErrorCategory> = {
   cleanup_incomplete: "execution_failure",
 };
 
-/** Whether the same call could plausibly succeed on a retry with no changes. */
+/**
+ * Whether the same call could plausibly succeed on a retry with no changes.
+ *
+ * The set is exactly the codes whose category says the environment might be
+ * different next time — `unavailable`, `timeout`, `resource_constraint`. Nothing
+ * in `unsupported_target` is here, and `target_unavailable` was the exception
+ * that proved the rule: the target does not stop being the wrong target by being
+ * asked again. Every one of the ways that code is raised — a certificate this
+ * client will not accept, a service that answers in a version the caller pinned
+ * away from — is something the caller has to change (hand over the CA, ask over
+ * the version the service speaks), and a `retryable: true` beside that remedy
+ * invites exactly the loop the remedy exists to end.
+ */
 const RETRYABLE_BY_CODE: ReadonlySet<UvpErrorCode> = new Set<UvpErrorCode>([
   "service_unavailable",
   "endpoint_unreachable",
   "timeout",
-  "target_unavailable",
   "resource_constraint",
 ]);
 

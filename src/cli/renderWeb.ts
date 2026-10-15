@@ -44,14 +44,19 @@ export const renderHttp = (output: Record<string, unknown>): string[] => {
 
   const tls = output["tls"];
   if (tls !== undefined && tls !== null) {
-    const verified = bool(at(tls, "verified"));
+    // The four states are spelled out rather than folded into a yes/no. A
+    // terminal that prints "verified: no" for a request the caller made with
+    // --no-tls is telling them their service failed a check they had turned off,
+    // which is the reading the boolean this replaced produced.
+    const verification = str(at(tls, "verification"), "undetermined");
     lines.push(
       row(
         "tls",
-        `${str(at(tls, "protocol"), "?")} ${str(at(tls, "cipher"), "")}  verified: ${yesNo(verified)}`,
+        `${str(at(tls, "protocol"), "?")} ${str(at(tls, "cipher"), "")}  certificate: ${verification}`,
       ),
     );
-    for (const error of strings(at(tls, "errors"))) lines.push(row("", error));
+    const reason = str(at(tls, "reason"));
+    if (reason !== "") lines.push(row("", reason));
   }
 
   lines.push(
