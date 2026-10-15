@@ -135,6 +135,29 @@ export const runProcess = async (options: RunProcessOptions): Promise<ProcessOut
   const outCapture = createCapture(maxOutputBytes);
   const errCapture = createCapture(maxOutputBytes);
 
+  // A signal that was already aborted is honoured *before* the spawn, because
+  // the listener below cannot fire for an abort that has already happened. Left
+  // to the listener alone, a caller who withdrew before the call would still
+  // get a process started on their behalf and awaited to completion, and the
+  // outcome would say a build happened — the one thing the caller had just
+  // decided not to wait for.
+  if (options.signal?.aborted === true) {
+    return {
+      command: renderCommand(options),
+      exitCode: null,
+      signal: null,
+      timedOut: false,
+      aborted: true,
+      durationMs: Date.now() - started,
+      stdout: "",
+      stderr: "",
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    };
+  }
+
   const child = spawn(options.command, [...options.args], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.env === undefined
@@ -255,6 +278,29 @@ export interface StopOutcome {
   readonly signal?: string;
   readonly killed: boolean;
 }
+
+/**
+ * One clause for how a stopped process ended, from `stop`'s three outcomes.
+ *
+ * Here rather than in a caller because the three are one judgement made in one
+ * place already: `stop` decided which of them happened, and every caller that
+ * puts it into words — the CLI's interrupt line, a cancellation that ends a run
+ * early — must say the same thing about the same outcome. In particular
+ * `unresponsive` is not `exited`: "it did not exit and may still be listening" is
+ * the difference between a cleanup that worked and a port still held, and nothing
+ * else in the result carries it.
+ */
+export const describeStop = (outcome: {
+  readonly outcome: StopOutcome["outcome"];
+  readonly code?: number | undefined;
+  readonly signal?: string | undefined;
+}): string => {
+  if (outcome.outcome === "already_gone") return "had already exited";
+  if (outcome.outcome === "unresponsive") return "did not exit and may still be listening";
+  return outcome.signal === undefined
+    ? `exit code ${String(outcome.code)}`
+    : `killed by ${outcome.signal}`;
+};
 
 export interface StartSupervisedOptions {
   readonly command: string;

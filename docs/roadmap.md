@@ -111,6 +111,15 @@ implicit.
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                      |
 | ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                          |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                      |
+| ⬜  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                      |
+
+The supervision row is the one place the dependency direction is inverted today.
+`WorkspaceService` calls `startSupervised` from `toolchains/local/processRunner`,
+and `sessionStore` imports that module's `SupervisedProcess` type, which the
+[layer rule](architecture.md#the-rule-enforced) says cannot happen. Nothing fails
+when it spreads, because `.oxlintrc.json` enforces that rule for `domain` and
+`contracts` only — so the row is not just the refactor, it is the lint rule that
+would have caught it.
 
 ## Not planned
 

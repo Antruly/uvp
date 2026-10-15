@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,7 +25,8 @@ import { runProcess } from "../../../src/toolchains/local/processRunner.js";
  *   killer and a compiler that returned 1 are different problems.
  * - **a timeout is reported as a timeout**, and the process is actually gone.
  * - **an abort is distinguished from a timeout**, because one was the caller's
- *   decision and the other was the machine's.
+ *   decision and the other was the machine's — and an abort that arrived *before*
+ *   the call means nothing is started at all.
  * - **truncated output says so.** A 4 MiB build log that silently keeps the first
  *   4 MiB is a report about a prefix presented as the whole thing.
  * - **the working directory and the environment are the child's**, because a build
@@ -127,6 +128,40 @@ describe("how the process ended", () => {
     expect(outcome.aborted).toBe(true);
     expect(outcome.timedOut).toBe(false);
     expect(outcome.signal).toBe("SIGKILL");
+  });
+
+  it("starts nothing at all when the signal was already aborted before the call", async () => {
+    // The listener that kills a child is registered after the spawn, so it can
+    // never fire for an abort that has already happened. Left to the listener, a
+    // caller who withdrew before the call still got a process started on their
+    // behalf and waited for it to finish — and an outcome that describes a
+    // finished process is the one thing they had just decided not to wait for.
+    const marker = join(SCRATCH, "already-aborted.marker");
+    const env = { UVP_MARKER: marker };
+    const writes = "require('node:fs').writeFileSync(process.env.UVP_MARKER, 'ran');";
+
+    // The control first. This child does write the marker when nothing stops it,
+    // which is what makes its absence below a fact about the abort rather than
+    // about the program.
+    rmSync(marker, { force: true });
+    await nodeProgram(writes, { env });
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+
+    const controller = new AbortController();
+    controller.abort();
+    const outcome = await nodeProgram(writes, { env, signal: controller.signal });
+
+    expect(existsSync(marker)).toBe(false);
+    // The command is still the one that was asked for, because that is the line a
+    // caller re-runs to read a failure in full; `aborted` is what says it did not
+    // run, and an empty string would say the same thing by saying nothing.
+    expect(outcome.command).toContain(process.execPath);
+    expect(outcome.aborted).toBe(true);
+    // Nothing was started, so there is no exit to report and no signal that ended
+    // it. A `-1` here would be an exit code for a process that never existed.
+    expect(outcome.exitCode).toBeNull();
+    expect(outcome.signal).toBeNull();
   });
 });
 

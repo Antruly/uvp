@@ -12,6 +12,7 @@ import { createUvpServices } from "./composition/uvpServices.js";
 import type { UvpServices } from "./composition/uvpServices.js";
 import { UvpFailure, toUvpError } from "./domain/errors.js";
 import type { StopResult } from "./application/WorkspaceService.js";
+import { describeStop } from "./toolchains/local/processRunner.js";
 
 /**
  * The CLI entry point.
@@ -207,13 +208,15 @@ const INTERRUPT_CODES: readonly (readonly [NodeJS.Signals, number])[] = [
 const stoppedLine = (runId: string, stopped: StopResult["stopped"]): string => {
   const entry = stopped.find((candidate) => candidate.runId === runId);
   if (entry === undefined) return `${runId} is not in this session's run registry`;
-  if (entry.outcome === "already_gone") return `${runId} had already exited`;
-  if (entry.outcome === "unresponsive") return `${runId} did not exit and may still be listening`;
-  const how =
-    entry.signal === undefined
-      ? `exit code ${String(entry.exitCode)}`
-      : `killed by ${entry.signal}`;
-  return `stopped ${runId} (${how})`;
+  // The wording of the three outcomes comes from `describeStop`, so an interrupt
+  // that ended a run early and a `uvp stop` that reported the same outcome cannot
+  // disagree about it.
+  const how = describeStop({
+    outcome: entry.outcome,
+    code: entry.exitCode,
+    signal: entry.signal,
+  });
+  return entry.outcome === "exited" ? `stopped ${runId} (${how})` : `${runId} ${how}`;
 };
 
 /**

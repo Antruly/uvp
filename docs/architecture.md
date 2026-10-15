@@ -138,6 +138,20 @@ return carrying diagnostics. Only the inability to run the toolchain at all is a
 error, and that is a `UvpFailure`. Collapsing the two makes an agent's
 fix-and-retry loop indistinguishable from a broken installation.
 
+**A cancellation is not a finding.** Every method that can take time takes the
+caller's `AbortSignal`, and a provider that sees it aborted rejects with
+`cancelled` — it does not return what it had collected so far. The distinction is
+not pedantic: the answers this port returns are the shapes that mean "this host
+has no compiler" (an empty `compilers` list), "there is no libuvcpp here"
+(`found: false`), and "this workspace does not build" (a non-zero exit). Each of
+those makes a caller go and install something or rewrite something, and none of
+them is what an interrupted run observed. The signal is checked before the work
+starts as well as during it, so a call that arrives already cancelled starts no
+process at all. The rule does not stop at this port: a workflow that waits on a
+deadline — `uvp_run`'s readiness poll — honours the same signal, and stops the
+service it had already started rather than leaving a listener on a port the caller
+has stopped waiting for.
+
 ## Where libuvcpp facts live
 
 Feature-to-switch mappings live in `application/ToolchainProvider.ts` as

@@ -150,6 +150,11 @@ export const runCommand: CommandSpec = {
     "With --no-detach the call stays in the foreground for as long as the service runs, and an",
     "interrupt stops that service before returning — the port is free when the call ends, and the",
     "exit code is 130 for SIGINT or 143 for SIGTERM.",
+    "An interrupt before the readiness probe answers is a cancellation rather than a timeout: the",
+    "call stops the service it just started instead of waiting out the timeout, and fails with",
+    "`cancelled` rather than reporting `ready: false` about a service nobody was waiting for. That",
+    "path exits 1 like every other `cancelled` failure — the signal numbers above belong to the",
+    "foreground hold, which is this process staying alive on purpose.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp run ./svc --port 8080");

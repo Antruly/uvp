@@ -79,6 +79,38 @@ const callWith = async (
 };
 
 /**
+ * Call a tool with a signal that was aborted before the call, as a Ctrl-C that
+ * arrived while the caller was still typing the request would be.
+ *
+ * The whole path below the adapter reads this signal, so this is how a cancelled
+ * call is reproduced without timing a real interrupt against a real run.
+ */
+const callAborted = async (name: string, input: unknown): Promise<Record<string, unknown>> => {
+  const controller = new AbortController();
+  controller.abort();
+  return await handlerFor(createToolHandlers(harness.services), name)(input, {
+    signal: controller.signal,
+  });
+};
+
+/** The same, with the interruption arriving `delayMs` into the call. */
+const callAbortingAfter = async (
+  delayMs: number,
+  name: string,
+  input: unknown,
+): Promise<Record<string, unknown>> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), delayMs);
+  try {
+    return await handlerFor(createToolHandlers(harness.services), name)(input, {
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
  * Assert a result against its contract, naming the field that failed.
  *
  * The message is assembled by hand rather than left to a `toEqual` diff, because
@@ -613,6 +645,67 @@ describe("the websocket probe", () => {
       // both halves of the reason are the actionable part of the report.
       expect(output["closed_cleanly"]).toBe(true);
       expect(output["close"]).toEqual({ code: 1001, reason: "going away" });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reports a stopped call as cancelled, not as an endpoint that could not be reached",
+    async () => {
+      // The target is the fixture this whole file runs against, and it is
+      // listening: every other test in this block proves that. So "could not be
+      // reached" here is not a reading of the evidence but the absence of one. The
+      // client ends an aborted probe with a transport error and no handshake, and
+      // that is the same shape a refused connection produces — which is how an
+      // interrupted probe came to tell the caller to go and check that their
+      // service was up.
+      const failure = await callAborted("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws`,
+        idle_timeout_ms: 2_000,
+      }).then(
+        () => undefined,
+        (cause: unknown) => toUvpError(cause),
+      );
+
+      expect(failure, "the probe answered after its call had been cancelled").toBeDefined();
+      expect(failure?.code).toBe("cancelled");
+      expect(failure?.message).not.toMatch(/could not be reached/u);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps the frames a stopped probe collected, and says why it stopped",
+    async () => {
+      // A probe that got as far as the upgrade and was stopped before the peer was
+      // done has evidence, and throwing it away would be its own kind of lie. What
+      // it must not do is let the rest of the report read as the peer's behaviour:
+      // `closed_cleanly: false` here means the log ends where the caller ended it,
+      // and the unknown below is what says so.
+      const output = await callAbortingAfter(250, "uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws`,
+        // Something to send, because a probe given nothing to send closes as soon
+        // as it has the handshake — it would end on its own before the abort.
+        send: [{ payload: "hello" }],
+        // Room for more frames than the fixture will send, for the same reason:
+        // the default cap is small enough that the probe would end by itself and
+        // this test would establish nothing about a stop.
+        max_frames: 50,
+        // Longer than the abort, so the idle deadline cannot be what ended the run.
+        idle_timeout_ms: 10_000,
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      expect(output["upgraded"]).toBe(true);
+      const frames = output["frames"] as { text?: string }[];
+      expect(frames.some((frame) => (frame.text ?? "").includes("greeting"))).toBe(true);
+      expect(output["transport_error"]).toMatch(/cancelled/u);
+
+      const unknowns = output["unknowns"] as { reason: string; question: string }[];
+      const health = unknowns.find((entry) => entry.question.includes("stay healthy"));
+      expect(health?.reason, "the connection-health question was given a bound's reason").toBe(
+        "cancelled",
+      );
     },
     TIMEOUT,
   );
@@ -1725,6 +1818,45 @@ describe("the verification workflow", () => {
       const unknowns = output["unknowns"] as { reason: string; blocked_by?: string }[];
       expect(unknowns.length).toBeGreaterThan(0);
       expect(unknowns.map((entry) => entry.blocked_by).join(" ")).toContain("build failed");
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * A pass that was stopped, kept out of the workflow's own describe because the
+ * subject here is not what a verdict means but who owns the wait.
+ *
+ * `uvp_verify` reaches the readiness wait through `workspace.run`, the same
+ * method the `uvp_run` handler calls, and a signal that survives one path and not
+ * the other is a signal that was never really threaded.
+ */
+describe("a verification pass the caller stopped", () => {
+  it(
+    "treats an interrupt during the readiness wait as a cancellation, not as a service that never came up",
+    async () => {
+      // The service listens on one port and the pass is told to probe another, so
+      // the readiness wait really does run to its deadline — 20 s of it, which is
+      // what makes the abort at 600 ms the thing that ended this call rather than
+      // a deadline that happened to arrive.
+      const listening = await freePort();
+      const probed = await freePort();
+      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(listening));
+
+      const failure = await callAbortingAfter(600, "uvp_verify", {
+        path: harness.workspace,
+        run: { port: probed, ready_path: "/healthz", timeout_ms: 20_000 },
+        // The contract requires one, and it is never reached: the pass throws on
+        // the readiness wait before any request is issued.
+        requests: [{ name: "never", path: "/hello" }],
+      }).then(
+        () => undefined,
+        (cause: unknown) => toUvpError(cause),
+      );
+
+      expect(failure, "uvp_verify answered after its call had been cancelled").toBeDefined();
+      expect(failure?.code).toBe("cancelled");
+      expect(failure?.message).not.toMatch(/did not answer within/u);
     },
     TIMEOUT,
   );

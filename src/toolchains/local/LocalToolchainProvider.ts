@@ -16,9 +16,24 @@ import type {
   ToolchainIdentity,
   ToolchainProvider,
 } from "../../application/ToolchainProvider.js";
+import { cancelledFailure } from "../../domain/errors.js";
 import { sha256 } from "../../domain/identity.js";
 import { parseDiagnostics } from "./diagnostics.js";
 import { runProcess } from "./processRunner.js";
+
+/**
+ * What a cancelled inspection, discovery, or build reports.
+ *
+ * Module constants rather than strings at each site: the same cancellation is
+ * noticed in two loops of one function, and two spellings of one finding is how
+ * a caller ends up matching on messages that only sometimes agree.
+ */
+const INSPECTION_CANCELLED =
+  "The toolchain inspection was cancelled before it finished, so what this host has is unknown.";
+const DISCOVERY_CANCELLED =
+  "The libuvcpp search was cancelled before it finished, so whether one is installed is unknown.";
+const BUILD_CANCELLED =
+  "The build was cancelled before it finished, so it says nothing about whether this workspace compiles.";
 
 const isWindows = process.platform === "win32";
 const EXE = isWindows ? ".exe" : "";
@@ -268,7 +283,12 @@ export class LocalToolchainProvider implements ToolchainProvider {
     const missing: { id: string; requiredFor: string }[] = [];
 
     for (const candidate of COMPILER_CANDIDATES) {
-      if (signal.aborted) break;
+      // A cancelled inspection says so rather than returning what it had
+      // collected: a partial compiler list is an empty one when the loop is
+      // interrupted at the first candidate, and an empty list is what makes
+      // `available` false — so the caller would be told this host has no C++
+      // compiler because they pressed Ctrl-C.
+      if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
       for (const command of candidate.commands) {
         const path = await whichOnPath(command);
         if (path === undefined) continue;
@@ -287,7 +307,7 @@ export class LocalToolchainProvider implements ToolchainProvider {
 
     const buildSystems: BuildSystemDescriptor[] = [];
     for (const candidate of BUILD_SYSTEM_CANDIDATES) {
-      if (signal.aborted) break;
+      if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
       for (const command of candidate.commands) {
         const path = await whichOnPath(command);
         if (path === undefined) continue;
@@ -364,7 +384,12 @@ const findLibuvcpp = async (
   signal: AbortSignal,
 ): Promise<LibuvcppBuild> => {
   for (const root of libuvcppSearchRoots(workspacePath)) {
-    if (signal.aborted) return { found: false, modules: [], note: "cancelled" };
+    // Not `found: false`. Every root below could hold an install, and stopping
+    // the search at the first one turns "I stopped looking" into "there is
+    // nothing here" — with a note in `limitations` that the caller reading
+    // `found` has no reason to open. `doctor` renders that as a missing
+    // toolchain and tells the user to install a library they may already have.
+    if (signal.aborted) throw cancelledFailure(DISCOVERY_CANCELLED);
     try {
       const info = await stat(root);
       if (!info.isDirectory()) continue;
@@ -433,6 +458,12 @@ class LocalToolchainClient implements ToolchainClient {
     });
     const configureDurationMs = Date.now() - configureStart;
 
+    // Before the exit code is read. A configure the caller killed exits
+    // non-zero on this host for the ordinary reason — the signal — and an
+    // outcome built from that says the workspace does not configure, which is a
+    // claim about the code that nothing here observed.
+    if (configure.aborted) throw cancelledFailure(BUILD_CANCELLED);
+
     const commands = [configure.command];
     const diagnostics: BuildDiagnostic[] = [
       ...parseDiagnostics(configure.stdout, configure.stderr, "configure"),
@@ -465,6 +496,7 @@ class LocalToolchainClient implements ToolchainClient {
       signal: request.signal,
     });
     const compileDurationMs = Date.now() - compileStart;
+    if (compile.aborted) throw cancelledFailure(BUILD_CANCELLED);
     commands.push(compile.command);
     diagnostics.push(...parseDiagnostics(compile.stdout, compile.stderr, "compile"));
 

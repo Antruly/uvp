@@ -274,7 +274,7 @@ export const createToolHandlers = (
       };
     }),
 
-    [runContract.name]: handler(runContract.inputSchema, async (input, recorder) => {
+    [runContract.name]: handler(runContract.inputSchema, async (input, recorder, context) => {
       const run = await services.workspace.run({
         path: input.path,
         buildDir: input.build_dir,
@@ -293,6 +293,11 @@ export const createToolHandlers = (
                 timeoutMs: input.ready.timeout_ms,
               },
         detach: input.detach,
+        // Without this the readiness wait ignored a Ctrl-C entirely: the CLI
+        // aborted its controller, nothing below read it, and the call sat out the
+        // full timeout before reporting `ready: false` — a bound the caller had
+        // stopped waiting for, presented as the answer.
+        signal: context.signal,
       });
 
       record(recorder, {

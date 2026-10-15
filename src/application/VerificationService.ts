@@ -209,6 +209,11 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       timeoutMs: input.run.timeout_ms,
     },
     detach: true,
+    // The pass takes the caller's signal as a whole, not only while it is
+    // building: a Ctrl-C during the readiness wait is the same withdrawal, and
+    // without this the wait ignored it and reported its own deadline as the
+    // reason the service was never reached.
+    signal: context.signal,
   });
 
   record(recorder, {

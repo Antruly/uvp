@@ -75,6 +75,17 @@ export interface WebSocketProbeResult {
   readonly elapsedMs: number;
   /** A transport failure is reported here, never as a thrown exception. */
   readonly transportError: string | undefined;
+  /**
+   * True when the caller's signal is what ended this probe.
+   *
+   * A flag rather than a reading of the signal by whoever receives the result:
+   * a probe that finished on its own and a signal that aborts a moment later are
+   * two different runs, and only the client knows which one this was. It is also
+   * not the same fact as `transportError` being set — a peer that answered a
+   * rejected upgrade and a peer that never answered at all are told apart by
+   * everything else here, not by this.
+   */
+  readonly cancelled: boolean;
 }
 
 const OPCODE_BY_CODE: Record<number, WebSocketOpcode> = {
@@ -103,6 +114,16 @@ const CODE_BY_OPCODE: Record<"text" | "binary" | "close" | "ping" | "pong", numb
  * protocol.
  */
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+/**
+ * Why a probe the caller stopped reading ended, in the words the record uses.
+ *
+ * A sentence, because this string is what `transport_error` carries and what a
+ * capture stores as its `error`: a reader who meets the bare word "cancelled"
+ * there cannot tell whether the peer cancelled, the client did, or the caller
+ * did — and only the last of those means the run established nothing.
+ */
+const CANCELLED_TRANSPORT = "the call was cancelled, so the probe stopped reading";
 
 const acceptFor = (key: string): string =>
   createHash("sha1").update(`${key}${WEBSOCKET_GUID}`).digest("base64");
@@ -233,6 +254,7 @@ export const probeWebSocket = async (
     let closeInfo: { code: number | undefined; reason: string | undefined } | undefined;
     let closedCleanly = false;
     let transportError: string | undefined;
+    let cancelled = false;
     let receivedFrames = 0;
     let sentIndex = 0;
 
@@ -254,6 +276,7 @@ export const probeWebSocket = async (
         closedCleanly,
         elapsedMs: Date.now() - started,
         transportError,
+        cancelled,
       });
     };
 
@@ -500,15 +523,23 @@ export const probeWebSocket = async (
     });
 
     if (options.signal !== undefined) {
+      // A signal that was already aborted ends this before the request is sent:
+      // the listener below cannot fire for an abort that has happened, so a
+      // caller who withdrew first would otherwise have a connection opened on
+      // their behalf and waited on.
       if (options.signal.aborted) {
-        transportError = "cancelled";
+        cancelled = true;
+        transportError = CANCELLED_TRANSPORT;
+        // Nothing is opened: `http.request` allocates a socket on `end()`, and
+        // this path returns before `end()` is reached.
         finish();
         return;
       }
       options.signal.addEventListener(
         "abort",
         () => {
-          transportError = "cancelled";
+          cancelled = true;
+          transportError = CANCELLED_TRANSPORT;
           finish();
         },
         { once: true },

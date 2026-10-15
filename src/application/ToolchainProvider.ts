@@ -141,6 +141,24 @@ export interface ToolchainClient {
   build(request: BuildRequest): Promise<BuildOutcome>;
 }
 
+/**
+ * What a provider must do when the call it was asked for is cancelled.
+ *
+ * Every method that can take time takes the caller's `AbortSignal`, and what a
+ * provider does with it is part of the port rather than up to the provider:
+ *
+ * **A cancellation is not a finding.** An interrupted call has established
+ * nothing about its subject, and the shapes below this port can all express one
+ * as an answer instead — an empty compiler list reads as "this host has no
+ * compiler", `found: false` reads as "there is no libuvcpp here", and an outcome
+ * built from a killed compile reads as "this workspace does not build". A caller
+ * cannot tell any of those from a run stopped one step earlier, and the
+ * difference decides whether they go and install something. So a provider
+ * rejects with the `cancelled` failure (`cancelledFailure` in `domain/errors.ts`)
+ * rather than returning what it had collected, and it checks the signal *before*
+ * it starts the work as well as during — a signal already aborted at entry means
+ * nothing is started.
+ */
 export interface ToolchainProvider {
   identity(): ToolchainIdentity;
   inspectAvailability(signal: AbortSignal): Promise<ToolchainAvailability>;

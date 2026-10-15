@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { UvpFailure } from "../domain/errors.js";
+import { cancelledFailure, UvpFailure } from "../domain/errors.js";
 import { newId, sha256 } from "../domain/identity.js";
 import { decodeBody, performRequest, transportFailureKind } from "./httpClient.js";
 import type { HttpExchange, HttpTiming } from "./httpClient.js";
@@ -217,6 +217,15 @@ interface ProbeResult {
   readonly framesWithheld: number;
   readonly notObservable: readonly string[] | undefined;
   readonly abandoned: boolean | undefined;
+  /**
+   * True when the caller's signal ended the probe rather than the peer did.
+   *
+   * The two stacks record this differently — the node client sets a flag on its
+   * result, the native probe reports an outcome kind — and this is the one place
+   * both are read, so that "the caller stopped it" is one fact here rather than
+   * two.
+   */
+  readonly cancelled: boolean;
 }
 
 const fromNodeFrame = (frame: WebSocketFrame): ProbeFrame => ({
@@ -412,12 +421,9 @@ const nativeProbeFailure = (
         details: { url, stack: "libuvcpp" },
       });
     case "cancelled":
-      return new UvpFailure({
-        code: "cancelled",
-        message:
-          "The native WebSocket probe was cancelled; it was killed and observed nothing more.",
-        remediation: { action: "Re-run the probe without cancelling it." },
-      });
+      return cancelledFailure(
+        "The native WebSocket probe was cancelled; it was killed and observed nothing more.",
+      );
     case "probe-failed":
       return new UvpFailure({
         code: "execution_failure",
@@ -586,11 +592,7 @@ export class WebService {
     });
 
     if (signal.aborted) {
-      throw new UvpFailure({
-        code: "cancelled",
-        message: "The request was cancelled after it completed.",
-        remediation: { action: "Re-run the call." },
-      });
+      throw cancelledFailure("The request was cancelled after it completed.");
     }
 
     const stored = remember(this.options.store, this.now, {
@@ -704,6 +706,21 @@ export class WebService {
 
     const result = probe.result;
 
+    // Before the unreachable branch, because that branch was where a stopped call
+    // used to come out: the node client ends an aborted probe with
+    // `transportError: "cancelled"` and no handshake, which is exactly the shape of
+    // an endpoint that refused a connection — so `uvp websocket-probe`, interrupted,
+    // reported that the address could not be reached and told the caller to check
+    // that the service was listening. A status of 0 is the part that makes this a
+    // claim about nothing: a peer that answered, even to reject the upgrade,
+    // answered.
+    if (result.cancelled && result.handshake?.status === 0) {
+      throw cancelledFailure(
+        "The WebSocket probe was cancelled before the endpoint answered, so nothing was observed " +
+          "about the endpoint.",
+      );
+    }
+
     if (!result.upgraded && result.handshake?.status === 0) {
       throw new UvpFailure({
         code: "endpoint_unreachable",
@@ -729,7 +746,19 @@ export class WebService {
       captureId: undefined,
     });
 
-    if (result.transportError !== undefined && result.upgraded) {
+    if (result.cancelled) {
+      // The probe got far enough to observe something and was stopped before the
+      // peer was done. That is a gap in the log, not a finding about the peer, and
+      // `cancelled` is the reason the vocabulary has for it — `resource_limit`,
+      // which this used to say through the transport error, describes a bound the
+      // probe imposed on itself.
+      recordUnknown(
+        recorder,
+        "Did the WebSocket connection stay healthy for the whole probe?",
+        "cancelled",
+        { blockedBy: "the call was cancelled, so the probe stopped before the peer did" },
+      );
+    } else if (result.transportError !== undefined && result.upgraded) {
       recordUnknown(
         recorder,
         "Did the WebSocket connection stay healthy for the whole probe?",
@@ -868,6 +897,7 @@ export class WebService {
         framesWithheld: 0,
         notObservable: undefined,
         abandoned: undefined,
+        cancelled: result.cancelled,
       },
       limitations: [],
     };
@@ -970,6 +1000,11 @@ export class WebService {
         framesWithheld: report.framesWithheld,
         notObservable: report.notObservable,
         abandoned: report.abandoned,
+        // The native stack never reaches here cancelled: its runner reports a
+        // cancelled run as an outcome kind, and the branch above turns that into
+        // a `cancelled` failure rather than a result. Saying so here is what keeps
+        // the two stacks comparable at the place they are compared.
+        cancelled: false,
       },
       limitations,
     };
@@ -1063,11 +1098,7 @@ export class WebService {
       // caller withdrew did not fail to reach the service, and reporting it as
       // `transport_error` would assert that the far end stayed silent — a claim
       // about the far end that a run this one abandoned cannot support.
-      throw new UvpFailure({
-        code: "cancelled",
-        message: "The SOAP call was cancelled before its result was read.",
-        remediation: { action: "Re-run the call." },
-      });
+      throw cancelledFailure("The SOAP call was cancelled before its result was read.");
     }
 
     if (exchange === undefined) {

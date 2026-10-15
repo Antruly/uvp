@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { toUvpError, type UvpError } from "../../domain/errors.js";
 import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
 
 /**
@@ -220,5 +221,89 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(outcome.commands).toHaveLength(2);
     expect(outcome.commands[1]).toBe(`cmake --build ${buildDir}`);
     expect(outcome.succeeded).toBe(true);
+  });
+});
+
+/**
+ * A call the caller withdrew from.
+ *
+ * The defect this pins: cancellation was laundered into a finding. An interrupted
+ * inspection returned the compiler list it had collected so far, and an empty
+ * list is precisely what makes `available` false — so `uvp doctor`, stopped with
+ * Ctrl-C, told a person to install a C++ compiler. An interrupted search returned
+ * `found: false` with a note the reader of `found` has no reason to open, and an
+ * interrupted configure came back as a build that failed. Each is a claim about
+ * the machine drawn from a run that observed nothing, and each sends the caller
+ * off to fix something that may not be broken.
+ *
+ * The contract already has a code for this, so what is checked here is that every
+ * layer spells it rather than answering: the caller gets `cancelled`, and the
+ * message says the run was interrupted instead of saying what the host has.
+ */
+
+/** A signal that was already aborted when the call was made. */
+const withdrawn = (): AbortSignal => {
+  const controller = new AbortController();
+  controller.abort();
+  return controller.signal;
+};
+
+/** Make a call, and hand back the failure in the shape a caller receives it. */
+const failureOf = async (call: () => Promise<unknown>): Promise<UvpError> => {
+  try {
+    await call();
+  } catch (cause) {
+    return toUvpError(cause);
+  }
+  throw new Error("This call was expected to report a cancellation, and answered instead.");
+};
+
+describe("a call whose signal was already aborted", () => {
+  it("names a cancelled inspection, rather than a host with no compiler", async () => {
+    // Whether a person goes and installs a compiler turns on this one answer.
+    const failure = await failureOf(() => provider.inspectAvailability(withdrawn()));
+
+    expect(failure.code).toBe("cancelled");
+    expect(failure.category).toBe("cancelled");
+    // Not retryable: nothing about the host was learned, and the caller is the one
+    // who decided to stop. Re-running is their call to make, not a loop's.
+    expect(failure.retryable).toBe(false);
+    expect(failure.message).toContain("cancelled");
+  });
+
+  it("names a cancelled search, rather than a machine with no libuvcpp", async () => {
+    // `UVCPP_ROOT` points at the install this file built, so a search that had
+    // run would have found one. Nothing about this answer can be read as "there
+    // is none here".
+    const failure = await failureOf(() => provider.findLibuvcpp(workspacePath, withdrawn()));
+    expect(failure.code).toBe("cancelled");
+    expect(failure.message).toContain("cancelled");
+  });
+
+  it("names a cancelled build, rather than a workspace that does not compile", async () => {
+    // The control: this workspace has no `CMakeLists.txt`, and `cmake` here is
+    // `/bin/true`, so the same build with a live signal reports success. A
+    // `succeeded: false` reached by aborting would therefore be a claim about code
+    // that nothing compiled, and the control is what rules out a second reason for
+    // it to fail.
+    expect((await buildWithoutPrefix()).succeeded).toBe(true);
+
+    const failure = await failureOf(() =>
+      provider.createClient().build({
+        workspacePath,
+        buildDir,
+        buildType: "Debug",
+        clean: false,
+        timeoutMs: 60_000,
+        configureOnly: false,
+        // A prefix is named so the build reaches the process it would have run:
+        // without one it stops in the search instead, which is the test above.
+        libuvcppPrefix: otherPrefix,
+        signal: withdrawn(),
+      }),
+    );
+
+    expect(failure.code).toBe("cancelled");
+    expect(failure.message).toContain("cancelled");
   });
 });

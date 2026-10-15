@@ -135,6 +135,14 @@ and the startup output. It does not return until the service is listening or the
 startup timeout expires — a service that is about to fail does not get reported
 as running.
 
+An interrupt during that wait is a cancellation rather than a timeout. The call
+stops the service it had already started and fails with `cancelled` instead of
+waiting out the timeout and reporting `ready: false` — a bound the caller had
+stopped waiting for is not a finding about the service. A call that arrives
+already cancelled starts nothing at all. This path exits 1, the code every
+`cancelled` failure earns; the 130 and 143 below belong to the foreground hold,
+where the process is staying alive on purpose.
+
 `detach: true` — the default — leaves the service running and returns. With
 `--no-detach` the call stays in the foreground for as long as the service runs,
 holding it under supervision, so an interrupt stops it rather than abandoning it.

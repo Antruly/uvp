@@ -144,6 +144,31 @@ export class UvpFailure extends Error {
 export const isUvpFailure = (value: unknown): value is UvpFailure => value instanceof UvpFailure;
 
 /**
+ * A cancellation, as a failure rather than as a finding.
+ *
+ * An aborted call has established nothing about its subject, and every shape
+ * below the tool boundary can express one as an answer instead: an empty
+ * compiler list reads as "this host has no compiler", a `found: false` reads as
+ * "there is no libuvcpp here", a build with no diagnostics reads as "this code
+ * does not compile". A caller cannot tell any of those from a run that was
+ * interrupted one line earlier, and the difference decides whether they go and
+ * install something.
+ *
+ * `cancelled` is already in the contract for exactly this reason, so every layer
+ * that notices a signal spells it here rather than assembling the failure again
+ * — that way the code, the category, and the remedy cannot drift between the
+ * layer that saw the abort and the layer that reports it.
+ */
+export const cancelledFailure = (message: string): UvpFailure =>
+  new UvpFailure({
+    code: "cancelled",
+    message,
+    remediation: {
+      action: "Re-run the call; the interruption established nothing about its subject.",
+    },
+  });
+
+/**
  * Project any thrown value into the error contract.
  *
  * An unrecognised throw becomes `execution_failure` and keeps its message: we

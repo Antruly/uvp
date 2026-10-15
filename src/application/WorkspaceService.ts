@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Buffer } from "node:buffer";
 
-import { UvpFailure } from "../domain/errors.js";
+import { UvpFailure, cancelledFailure } from "../domain/errors.js";
 import type {
   BuildArtifact,
   BuildDiagnostic,
@@ -14,7 +14,7 @@ import type { SupervisedRun } from "./sessionStore.js";
 import { SessionStore } from "./sessionStore.js";
 import { renderTemplate, type TemplateId } from "./templates.js";
 import type { UvpFeature } from "../domain/features.js";
-import { startSupervised } from "../toolchains/local/processRunner.js";
+import { describeStop, startSupervised } from "../toolchains/local/processRunner.js";
 import { performRequest } from "./httpClient.js";
 
 export interface CreatedFile {
@@ -73,6 +73,15 @@ export interface StopResult {
   readonly cleanupComplete: boolean;
 }
 
+/**
+ * The grace a cancelled run gives the service it had just started.
+ *
+ * The same three seconds `uvp stop` defaults to, and then force: the caller
+ * withdrew, so a service that ignores the signal must not be the reason this call
+ * stays alive.
+ */
+const CANCELLED_RUN_GRACE_MS = 3_000;
+
 const workspaceIdOf = (path: string): string => {
   // Derived, not random: re-opening the same directory must yield the same id,
   // so an evidence record from an earlier call still refers to this workspace.
@@ -88,13 +97,28 @@ const directoryEntries = async (path: string): Promise<readonly string[]> => {
   }
 };
 
+/**
+ * Poll an endpoint until it answers, the deadline passes, or the caller stops us.
+ *
+ * Three outcomes rather than two, because a deadline and a withdrawal are
+ * different facts about the same non-answer: the first is the machine's bound and
+ * the second is the caller's decision. Returning `ready: false` for both is how
+ * an interrupt became "the probe did not answer within 8000 ms" — a finding about
+ * a service nobody was waiting for any more. The signal is read between attempts
+ * rather than during one, so the abort lands within a single poll request; those
+ * are capped at two seconds each for exactly this kind of reason.
+ */
 const waitForReadiness = async (
   endpoint: string,
   timeoutMs: number,
-): Promise<{ ready: boolean; elapsedMs: number }> => {
+  signal: AbortSignal | undefined,
+): Promise<{ ready: boolean; elapsedMs: number; cancelled: boolean }> => {
   const started = Date.now();
   const deadline = started + timeoutMs;
   while (Date.now() < deadline) {
+    if (signal?.aborted === true) {
+      return { ready: false, elapsedMs: Date.now() - started, cancelled: true };
+    }
     try {
       const exchange = await performRequest({
         url: endpoint,
@@ -109,13 +133,14 @@ const waitForReadiness = async (
       });
       // Any HTTP status means the service is accepting and answering. A 404 on
       // the readiness path is still readiness; only a transport failure is not.
-      if (exchange.status > 0) return { ready: true, elapsedMs: Date.now() - started };
+      if (exchange.status > 0)
+        return { ready: true, elapsedMs: Date.now() - started, cancelled: false };
     } catch {
       // Not up yet.
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  return { ready: false, elapsedMs: Date.now() - started };
+  return { ready: false, elapsedMs: Date.now() - started, cancelled: false };
 };
 
 /**
@@ -229,12 +254,26 @@ export class WorkspaceService {
     env: Readonly<Record<string, string>>;
     ready?: { port: number; path: string; timeoutMs: number } | undefined;
     detach: boolean;
+    signal?: AbortSignal | undefined;
   }): Promise<RunResult> {
     const root = resolve(input.path);
     const manifest = await this.#readManifest(root);
     const buildDir = resolve(input.buildDir ?? join(root, "build"));
     const binaryName = input.binary ?? manifest.binary ?? manifest.name;
     const binaryPath = join(buildDir, binaryName);
+
+    // Nothing is started for a call that was already cancelled. The same rule the
+    // provider port states for a build, and for the same reason: a run that
+    // starts its service anyway has done something the caller had just decided
+    // not to wait for, and every field of its result — the pid, the readiness
+    // answer — would then be a claim about a process this call created by
+    // ignoring them.
+    if (input.signal?.aborted === true) {
+      throw cancelledFailure(
+        `The run was cancelled before ${binaryPath} was started, so nothing was launched and nothing ` +
+          `was observed about the workspace.`,
+      );
+    }
 
     const endpoint =
       input.ready === undefined
@@ -269,7 +308,21 @@ export class WorkspaceService {
     let ready = false;
     let startupMs: number | undefined;
     if (endpoint !== undefined && input.ready !== undefined) {
-      const probe = await waitForReadiness(endpoint, input.ready.timeoutMs);
+      const probe = await waitForReadiness(endpoint, input.ready.timeoutMs, input.signal);
+      if (probe.cancelled) {
+        // The service is running and nothing else knows about it yet: it reaches
+        // the run registry only once this call has a result to return, so a
+        // cancellation here has exactly one owner, and it is this frame. Two
+        // alternatives are worse. Reporting `ready: false` would answer a
+        // withdrawal with a bound the caller never waited for, and returning the
+        // run as stoppable would leave a listener on a port nobody is waiting on.
+        const stopped = await process_.stop(CANCELLED_RUN_GRACE_MS, true);
+        throw cancelledFailure(
+          `The run was cancelled while waiting for ${endpoint} to answer, so nothing was observed ` +
+            `about the service. The process this call started (pid ${String(process_.pid)}): ` +
+            `${describeStop(stopped)}.`,
+        );
+      }
       ready = probe.ready;
       startupMs = probe.elapsedMs;
     }
