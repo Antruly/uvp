@@ -147,7 +147,7 @@ jobs:
         uses: ./.github/actions/npm-cache
       - run: npm ci
       - name: Run source tests without waiting for a build
-        run: npm run test:fast -- --reporter=default --reporter=blob
+        run: npm run test:fast -- --reporter=default --reporter=blob --reporter=./scripts/lib/vitest-skipped-reporter.mjs
         env:
           VITEST_BLOB_LABEL: source
       - name: Upload source test reports
@@ -185,7 +185,7 @@ jobs:
           name: uvp-test-runtime
           path: .
       - name: Run the built and boundary lanes
-        run: npm run test:built -- --reporter=default --reporter=blob --shard=${{ matrix.shard }}
+        run: npm run test:built -- --reporter=default --reporter=blob --shard=${{ matrix.shard }} --reporter=./scripts/lib/vitest-skipped-reporter.mjs
         env:
           VITEST_BLOB_LABEL: built
       - name: Upload shard reports
@@ -234,6 +234,7 @@ jobs:
             --coverage.reporter=lcov \
             --reporter=default \
             --reporter=junit \
+            --reporter=./scripts/lib/vitest-skipped-reporter.mjs \
             --outputFile.junit=test-results.xml
       - name: Require every selected test job to have passed
         if: ${{ !cancelled() }}

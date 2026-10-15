@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { defineConfig } from "vitest/config";
 
+import SkippedTestsReporter from "./scripts/lib/vitest-skipped-reporter.mjs";
 import { BUILT_TEST_PROJECTS, SOURCE_TEST_PROJECTS } from "./scripts/lib/test-projects.mjs";
 
 /**
@@ -127,7 +128,11 @@ export default defineConfig({
     maxWorkers: MAX_TEST_WORKERS,
     projects,
     retry: 0,
-    reporters: ["default"],
+    // The second reporter names every skipped test and the reason it carries.
+    // A summary that says `7 skipped` and nothing else is the shape
+    // `docs/testing.md` forbids, and the CI steps pass their own `--reporter`
+    // flags, so this file is the owner of the local run and they add it too.
+    reporters: ["default", new SkippedTestsReporter()],
     // A real CMake configure plus compile is slow on a cold cache and fast on a
     // warm one. The deadline is set for the cold case; the lane that actually
     // builds is serial and few.

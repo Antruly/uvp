@@ -264,6 +264,15 @@ afternoon before.
 **A skipped test says why.** `describe.skipIf(!libuvcpp)` with the reason in the
 describe name. A silent skip and a passing test look identical in a summary.
 
+The summary is where that has to hold, and Vitest's default reporter does not
+hold it: it folds skips into a count and prints none of their names. So
+`scripts/lib/vitest-skipped-reporter.mjs` runs beside it and lists every skipped
+test under the suite it was skipped by, which is where the reason sits for a
+whole-suite skip. It is registered in `vitest.config.ts` for a local run and
+named in the CI test steps, whose explicit `--reporter` flags would otherwise
+replace the config — a lane that prints a count and no reason is a lane that
+cannot be read.
+
 ### A build that fails
 
 `tests/toolchain/buildFailure.test.ts` is the other half of the same claim. A
