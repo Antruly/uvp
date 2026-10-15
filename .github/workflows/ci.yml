@@ -263,7 +263,11 @@ jobs:
     needs: [changes, static]
     if: needs.changes.outputs.toolchain == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A cold run builds OpenSSL, libuvcpp with every module, and six template
+    # workspaces. libuvcpp gives its own QUIC legs 90 minutes for the same reason;
+    # this lane also compiles uvp and the probe, and 75 covers the cold run with
+    # room to spare. Every run after the first reads the caches instead.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -275,13 +279,96 @@ jobs:
       - name: Install the C++ toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y cmake ninja-build g++ pkg-config
+          # libsqlite3-dev is the db module's SQLite backend: the headers to
+          # compile against and the .so the generated service links against.
+          # Without it that backend is skipped with a warning and the database
+          # lane below would run against a libuvcpp that has no store in it.
+          #
+          # libuv1-dev is libuv itself. libuvcpp prefers a system libuv and
+          # otherwise fetches v1.51.0 into its own build tree, and this runner
+          # image ships neither libuv1 nor its headers — its package list has no
+          # libuv entry at all. The fetched build is linked as a shared library,
+          # so the install would carry a `libuv.so.1` dependency that lives in a
+          # build directory nothing puts on the loader path, and the failure
+          # would land on the first generated service that starts.
+          sudo apt-get install --no-install-recommends -y \
+            cmake ninja-build g++ pkg-config libsqlite3-dev libuv1-dev
+      - name: Cache OpenSSL 3.5 with the QUIC API
+        id: openssl-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/openssl-quic
+          key: openssl-3.5.0-${{ runner.os }}-${{ runner.arch }}-quic
+      - name: Build OpenSSL 3.5.0 from source, for its QUIC API
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          # HTTP/3 runs on QUIC, QUIC runs on TLS 1.3, and libuvcpp's QUIC precheck
+          # wants an OpenSSL at or above 3.2 with `SSL_set_quic_tls_cbs`. This
+          # runner's 3.0.13 is not one: libuvcpp would force QUIC off, then HTTP/3
+          # with it, and the h3 template and the probe's h3 half would have nothing
+          # to build against. Its own `quic` and `http3` CI legs build OpenSSL from
+          # source for this reason; this is that step.
+          cd "$RUNNER_TEMP"
+          curl -sSL --retry 3 --retry-delay 5 -o openssl.tar.gz \
+            https://codeload.github.com/openssl/openssl/tar.gz/refs/tags/openssl-3.5.0
+          mkdir -p openssl-src
+          tar xzf openssl.tar.gz -C openssl-src --strip-components=1
+          cd openssl-src
+          # `no-tests` skips upstream's own suite, which has nothing to do with the
+          # QUIC API and is most of the build time.
+          ./Configure --prefix="$HOME/openssl-quic" --libdir=lib shared no-tests
+          make -j"$(nproc)"
+          make install_sw
+          # The binary the build just installed has no RUNPATH, so it needs the
+          # prefix on the loader path — and that is also true of anything that links
+          # this OpenSSL later, which is why the next step exports it job-wide.
+          LD_LIBRARY_PATH="$HOME/openssl-quic/lib" "$HOME/openssl-quic/bin/openssl" version
+          # Check the API rather than the version string: a patched 3.0 tree also
+          # reports a 3.x version, and it is the configure step's own precheck that
+          # would have silently turned QUIC off instead. Match without anchoring the
+          # end — the symbol carries a version suffix (`@@OPENSSL_3.5.0`) — and
+          # require a defined symbol: `nm -D` prints an undefined reference as
+          # `U SSL_set_quic_tls_cbs`, so a name-only match would accept a libssl
+          # that only refers to it.
+          nm -D "$HOME/openssl-quic/lib/libssl.so" | grep -qE ' [TW] SSL_set_quic_tls_cbs($|@)' || {
+            echo "::error title=quic-openssl::the libssl just built has no SSL_set_quic_tls_cbs — this OpenSSL is the wrong one, and every h3 lane behind it would be a silent no-op"
+            exit 1
+          }
+      - name: Put both prefixes on the loader path
+        # Two entries, for two different reasons.
+        #
+        # OpenSSL: everything built below links a libuvcpp that links this OpenSSL,
+        # and its soname is `libssl.so.3` — the same soname the runner's own 3.0.13
+        # has. A generated service would otherwise resolve the dependency out of
+        # `/usr/lib` and the loader would refuse it by version, with
+        # `libssl.so.3: version 'OPENSSL_3.5.0' not found (required by
+        # .../libuvcpp.so)` — a refusal to start, which reads as a service that
+        # will not start rather than as two libraries with one name.
+        #
+        # libuvcpp: the prebuilt archive's `libuvcpp.so` is self-contained (libc,
+        # libstdc++, libm, libgcc), but a source install links libuv, libllhttp,
+        # libssl, libcrypto and libsqlite3 dynamically and gives the library no
+        # RUNPATH of its own. A binary's RUNPATH is not consulted for its
+        # dependencies' dependencies, so the probe's RUNPATH on this prefix finds
+        # `libuvcpp.so` and then fails on `libllhttp.so.9.2` — observed locally
+        # against exactly this install. The generated services link the same
+        # library and need the same entry.
+        #
+        # `$GITHUB_ENV` rather than a step-level `env:`, which cannot expand
+        # `$HOME` — the runner's home is not a constant worth hardcoding.
+        run: |
+          echo "LD_LIBRARY_PATH=$HOME/openssl-quic/lib:/tmp/uvcpp-prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            >> "$GITHUB_ENV"
       - name: Cache the libuvcpp build
         id: libuvcpp-cache
         uses: actions/cache@v4
         with:
           path: /tmp/uvcpp-prefix
-          key: libuvcpp-1.7.0-${{ runner.os }}-${{ runner.arch }}-gcc
+          # The key names the flag set as well as the version: a change to the
+          # configure line below must not be served the previous install, and
+          # the install is what the configure line produced.
+          key: libuvcpp-1.7.0-${{ runner.os }}-${{ runner.arch }}-gcc-full
       - name: Build and install libuvcpp 1.7.0
         if: steps.libuvcpp-cache.outputs.cache-hit != 'true'
         run: |
@@ -291,22 +378,77 @@ jobs:
           # what the claim covers.
           git clone --depth 1 --branch v1.7.0 \
             https://github.com/Antruly/libuvcpp.git /tmp/libuvcpp
+          # Every module a template or the probe needs, because each one that is
+          # missing turns a lane into a skip rather than into coverage:
+          #
+          #   - WEB and WEBAPP are what all six templates link against.
+          #   - CAPI is the C ABI `uvcpp-probe` reaches libuvcpp through, and it
+          #     compiles its h3 translation unit unconditionally, so an install
+          #     without HTTP3/QUIC cannot build the probe at all.
+          #   - DB defaults to OFF, and without it nothing in CI would ever
+          #     exercise the generated service that keeps anything.
+          #   - OPENSSL/QUIC/HTTP3 are behind `http3-service` and the probe's QUIC
+          #     client. QUIC takes its TLS from the prefix built above.
           cmake -S /tmp/libuvcpp -B /tmp/libuvcpp/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/uvcpp-prefix \
             -DUVCPP_BUILD_WEB=ON \
             -DUVCPP_BUILD_WEBAPP=ON \
-            -DUVCPP_ENABLE_CAPI=ON
+            -DUVCPP_ENABLE_CAPI=ON \
+            -DUVCPP_ENABLE_DB=ON \
+            -DUVCPP_ENABLE_OPENSSL=ON \
+            -DOPENSSL_ROOT_DIR="$HOME/openssl-quic" \
+            -DUVCPP_ENABLE_QUIC=ON \
+            -DUVCPP_ENABLE_HTTP3=ON
           cmake --build /tmp/libuvcpp/build --parallel
           cmake --install /tmp/libuvcpp/build
       - name: Record what the install actually provides
         run: |
           set -euo pipefail
           # The lane's premise is that a feature claim must come from the build.
-          # Print the evidence rather than assuming the configure flags took.
-          test -f /tmp/uvcpp-prefix/include/uvcpp/uvcpp_config.h
-          grep -E '^#define UVCPP_\w+_ENABLE' /tmp/uvcpp-prefix/include/uvcpp/uvcpp_config.h || true
-          PKG_CONFIG_PATH=/tmp/uvcpp-prefix/lib/pkgconfig pkg-config --modversion uvcpp
+          # Print the evidence rather than assuming the configure flags took, and
+          # fail when it is empty: a step that recorded nothing has established
+          # nothing.
+          header=/tmp/uvcpp-prefix/include/uvcpp/uvcpp_config.h
+          test -f "$header"
+          # The header indents its defines (`#  define UVCPP_NET_ENABLE 1`), so an
+          # anchored `^#define` matches none of them and prints nothing — which
+          # reads exactly like a build with no modules enabled.
+          grep -E '^#[[:space:]]*define[[:space:]]+UVCPP_[A-Z0-9_]+_ENABLE' "$header"
+          # The modules this lane's configure line asks for. A configure line whose
+          # flag was overridden by a precheck — QUIC against an OpenSSL without the
+          # QUIC API, which is exactly what this runner's own 3.0.13 would do if the
+          # build above had not happened — leaves its `-D` in `CMakeCache.txt` and
+          # shows up here and nowhere else, as a skip that looks like a host fact.
+          for symbol in \
+            UVCPP_WEB_ENABLE UVCPP_WEBAPP_ENABLE UVCPP_CAPI_ENABLE UVCPP_DB_ENABLE \
+            UVCPP_OPENSSL_ENABLE UVCPP_QUIC_ENABLE UVCPP_HTTP3_ENABLE; do
+            grep -qE "^#[[:space:]]*define[[:space:]]+${symbol}[[:space:]]+1\b" "$header" ||
+              {
+                echo "the configure flags did not take: $symbol is not 1 in $header" >&2
+                exit 1
+              }
+          done
+          # Which ways into this install are on disk. The two ways libuvcpp ships
+          # are not the same set of files — `cmake --install` writes a CMake
+          # package and no uvcpp.pc, the prebuilt release archives are the other
+          # way round — so requiring one particular route here would fail this
+          # lane over an install the generated project handles. Which route the
+          # generated project *took* is not decided here: it is printed by the
+          # generated CMakeLists' own `uvp: libuvcpp via ...` line, in the log of
+          # the steps that configure the workspaces.
+          found=0
+          for route in /tmp/uvcpp-prefix/lib/cmake/uvcpp/uvcppConfig.cmake \
+            /tmp/uvcpp-prefix/lib/pkgconfig/uvcpp.pc; do
+            if [ -f "$route" ]; then
+              echo "installed: $route"
+              found=1
+            fi
+          done
+          if [ "$found" = 0 ]; then
+            echo "the install carries neither a CMake package nor uvcpp.pc" >&2
+            exit 1
+          fi
       - run: npm ci
       - run: npm run compile
       - name: Build the native probe against that libuvcpp
@@ -357,7 +499,11 @@ jobs:
           name: uvp-test-runtime
           path: .
       - name: Pack the exact archive that would be published
-        run: npm pack --pack-destination .cache
+        run: |
+          # npm pack writes the tarball but does not create its destination, and
+          # .cache/ is gitignored: in a fresh checkout it does not exist yet.
+          mkdir -p .cache
+          npm pack --pack-destination .cache
       - name: Install it into an empty prefix, with lifecycle scripts disabled
         run: |
           set -euo pipefail
