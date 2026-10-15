@@ -893,27 +893,36 @@ because a grouped major is a major nobody read the changelog for. The
 title, and Dependabot's default ("Bump x from a to b") would fail the gate before
 anyone read it.
 
-**What the bot did when the file landed.** The `github_actions` update runs
-started four seconds after the push, and by `2026-10-15T21:41Z` six pull requests
-were open, one per action: `#1` upload-artifact 4.6.2→7.0.2, `#2` checkout
-4.4.0→7.0.1, `#3` setup-node 4.4.0→7.1.0, `#4` cache 4.3.0→6.1.0, `#5`
-download-artifact 4.3.0→8.0.2, `#6` github-script 7.1.0→9.0.0. Three things in
-that list are the configuration read back rather than assumed. Every title is
-`chore(deps): bump …`, so the prefix that had to be set for `pr-title.yml` is the
-prefix Dependabot emits. Every title names the release — `from 4.4.0 to 7.0.1` —
-which means the `# vX.Y.Z` comment was read; a bare SHA would have made the same
-pull request read "from `11d5960a` to `…`". And no grouped minor/patch pull
-request appeared, because nothing non-major is pending: an empty group is the
-configuration working, not the group failing.
+**What the bot did when the file landed.** Both ecosystems were read, by four
+update runs that started within four seconds of the push and interleaved. The
+`github_actions` half had six pull requests open by `21:41:58Z`, one per action:
+`#1` upload-artifact 4.6.2→7.0.2, `#2` checkout 4.4.0→7.0.1, `#3` setup-node
+4.4.0→7.1.0, `#4` cache 4.3.0→6.1.0, `#5` download-artifact 4.3.0→8.0.2, `#6`
+github-script 7.1.0→9.0.0. The npm half followed within the minute with two more:
+`#7` "bump the npm-minor group with 6 updates" and `#8` canonicalize 3.0.0→5.1.0.
+Four things in that list are the configuration read back rather than assumed.
+Every title is `chore(deps): bump …`, so the prefix that had to be set for
+`pr-title.yml` is the prefix Dependabot emits. Every action title names the
+release — `from 4.4.0 to 7.0.1` — which means the `# vX.Y.Z` comment was read; a
+bare SHA would have made the same pull request read "from `11d5960a` to `…`". The
+grouping behaves in both directions: `#7` carries six minor/patch updates in one
+pull request, and `#8`, a major, arrives alone and named against a single
+dependency rather than inside a group nobody read the order of. And the two
+ecosystems took different paths to the same shape — `github-actions` had nothing
+non-major pending, so its group is empty and no pull request exists, which is the
+group working rather than the group failing.
 
-**Every one of the six is a major, which is the pin earning its keep.** The pins
-hold the major that was already in use, because a change that pins references must
-not also change which code they run — so all six are one major behind, and
-Dependabot says so in six reviewable pull requests instead of a tag moving
-silently. Two of those bodies name Node.js 24 in their release notes (`checkout`
-and `upload-artifact`); the other four say nothing either way, and a release
-note's silence is not evidence, so whether a given major clears the Node.js 20
-deprecation warnings stays with the row above rather than being claimed here.
+**Every one of the six action bumps is a major, which is the pin earning its
+keep.** The pins hold the major that was already in use, because a change that
+pins references must not also change which code they run — so all six are one
+major behind, and Dependabot says so in six reviewable pull requests instead of a
+tag moving silently. Two of those bodies name Node.js 24 in their release notes
+(`checkout` and `upload-artifact`); the other four say nothing either way, and a
+release note's silence is not evidence, so whether a given major clears the
+Node.js 20 deprecation warnings stays with the row above rather than being claimed
+here. Those six are for a human to decide on: an action major changes what code
+runs in CI with this repository's token, and a pin is exactly the thing that made
+the choice visible instead of making it silently on someone's next push.
 
 **Three decisions in the check itself.**
 
@@ -959,11 +968,13 @@ without the mechanism under test proves nothing about the mechanism.
 other change, and what each action's code does with the permissions a workflow
 grants is not something a pin changes. A pin fixes _which_ commit runs, not what
 it is allowed to do. The Dependabot half is no longer in that position: GitHub
-read the file and opened six pull requests, which is the answer to whether it
-accepts the configuration, and it arrived from the first scheduled run exactly as
-this section said it would before that run existed. What is still open is the npm
-half — both of its update runs were still going when this was written and no npm
-pull request had appeared, so `npm_and_yarn` is unobserved rather than working.
+read the file and opened eight pull requests across both ecosystems, which is the
+answer to whether it accepts the configuration, and it arrived from the update
+runs this section said it would arrive from before those runs existed. What is
+still not observed is the schedule: those runs were triggered by the file
+appearing, not by the weekly timer, so "Mondays at 05:17 and 05:37 UTC" is a
+statement about the configuration rather than a thing anyone has watched happen.
+The first Monday that passes with the file in place is where that gets settled.
 
 ## Not planned
 
