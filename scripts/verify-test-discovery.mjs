@@ -2,6 +2,7 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { globToRegExp } from "./lib/globs.mjs";
 import { ALL_TEST_PROJECTS } from "./lib/test-projects.mjs";
 import { REPO_ROOT } from "./lib/paths.mjs";
 
@@ -21,49 +22,6 @@ import { REPO_ROOT } from "./lib/paths.mjs";
 const SEARCH_ROOTS = ["src", "tests"];
 const SKIP_DIRECTORIES = new Set(["node_modules", "dist", "fixtures", ".vitepress", "coverage"]);
 const TEST_FILE = /\.test\.ts$/u;
-
-/**
- * Translate the small glob dialect used by `scripts/lib/test-projects.mjs`.
- *
- * Supporting `**`, `*`, and `{a,b}` is enough for the patterns that exist, and a
- * hand-written matcher is preferable to a dependency that has to agree with
- * Vitest's own — if the two disagreed, this script would report a discovery
- * problem that does not exist.
- */
-const globToRegExp = (glob) => {
-  let pattern = "";
-  for (let index = 0; index < glob.length; index += 1) {
-    const char = glob[index];
-    if (char === "*") {
-      if (glob[index + 1] === "*") {
-        // `**/` matches zero or more directories; a bare `**` matches anything.
-        if (glob[index + 2] === "/") {
-          pattern += "(?:[^/]+/)*";
-          index += 2;
-        } else {
-          pattern += ".*";
-          index += 1;
-        }
-      } else {
-        pattern += "[^/]*";
-      }
-      continue;
-    }
-    if (char === "{") {
-      const end = glob.indexOf("}", index);
-      if (end === -1) throw new Error(`Unbalanced brace in glob: ${glob}`);
-      const alternatives = glob
-        .slice(index + 1, end)
-        .split(",")
-        .map((part) => part.replaceAll(/[.+^${}()|[\]\\]/gu, "\\$&"));
-      pattern += `(?:${alternatives.join("|")})`;
-      index = end;
-      continue;
-    }
-    pattern += char.replaceAll(/[.+^${}()|[\]\\]/gu, "\\$&");
-  }
-  return new RegExp(`^${pattern}$`, "u");
-};
 
 const collect = async (directory, found = []) => {
   let entries;

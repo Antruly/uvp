@@ -660,6 +660,19 @@ workflow says about itself and cannot see any of this: no single job's condition
 is wrong, so nothing is wrong until two of them are read together. See
 [the roadmap](roadmap.md#artifact-guards) for the run that made it necessary.
 
+**Docs interpolation.** `npm run verify:docs-interpolation` fails when a markdown
+page under `docs/` holds an unescaped <span v-pre>`{{`</span> that Vue will read as an interpolation,
+because the docs are VitePress pages and their braces are code. What a reader gets
+depends on the expression: <span v-pre>`{{ name }}`</span> renders as nothing and takes its own
+text with it, <span v-pre>`{{ name() }}`</span> fails the page's whole render — which VitePress
+logs and then **exits 0** on, publishing an empty page. This paragraph has to
+escape its own examples for that reason. A fence or a `<span v-pre>` is where a
+brace renders literally; an indented block is not, which is the form that looks
+like a fence and is not one. Which files are pages is asked of
+`docs/.vitepress/config.ts`'s `srcExclude` rather than restated, so the Chinese
+README, a GitHub page that no Vue renders, is out of the scan. See
+[the roadmap](roadmap.md#docs-interpolation) for the page that shipped empty.
+
 **Pack reproducibility.** `npm run verify:pack-reproducible` packs three more
 times — twice more from the tree, once from the first tarball's own contents
 unpacked at a different absolute path — and fails if the bytes differ. It is the

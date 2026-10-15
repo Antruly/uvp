@@ -407,6 +407,7 @@ implicit.
 | ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ✅  | The packaged tarball is a fact about its contents: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — and fails if any digest differs. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ✅  | A published docs page was an empty shell: `docs/roadmap.md` quoted a GitHub workflow expression in an inline code span, Vue read its braces as an interpolation, the render threw, and VitePress logged the error and **exited 0** — so CI stayed green while the roadmap page shipped with no content in it, 16 KB against 73 KB for `testing.html`. The expression is escaped now, and `npm run verify:docs-interpolation` fails the next one, asking `docs/.vitepress/config.ts` which files are pages rather than restating its `srcExclude`. See [below](#docs-interpolation)                                                                                                                                                                                                                                                                                                                        |
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                             |
 | ⬜  | A link failure has no diagnostic format here. `FAILED: hello`, `ld: cannot find -luvcpp`, `collect2: error: ld returned 1 exit status` are all dropped by the build-output parser, and no test in this repository has ever captured a real link failure to write a format from — the drive-letter fix beside it is exactly why the gap is left open rather than closed from a plausible-looking log, since a pattern invented that way is how a parser starts inventing diagnostics. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -1283,6 +1284,101 @@ host. So the honest reading of a green run is "packaging is a function of the
 contents on this toolchain", not "anyone can reproduce this digest". Nothing else
 in the release path is pinned either — no SBOM, and no lane that installs the
 tarball on a second platform; both remain rows above.
+
+### A published page Vue rendered empty {#docs-interpolation}
+
+The docs are VitePress pages, so a markdown file under `docs/` is compiled to a Vue
+render function and its braces are code rather than prose. `docs/roadmap.md`
+documented the artifact-guards fix of `b6aac39` and quoted the workflow expression
+it had found the bug in — <span v-pre>`${{ !cancelled() }}`</span> — in an inline
+code span. VitePress's server render threw `TypeError: _ctx.cancelled is not a
+function`, printed it, and **exited 0**. Every job in CI stayed green, and the
+published roadmap page was a shell with no content in it: 16 KB against 73 KB for
+`testing.html`, the only page affected. A reader following the link from the row
+above it got a blank page.
+
+**It was found by weighing the pages, not by reading the source.** The docs build
+was run for the pack-reproducibility check below, and listing each built page's
+size made one of them stand out as the size of the home page. Nothing in the source
+looks wrong: the line is valid markdown, valid text, and a correct quotation of a
+workflow file. Only the output says otherwise.
+
+**What each form does, measured rather than read.** One page per case, built with
+`vitepress` 1.6.4 on 2026-10-16:
+
+- <span v-pre>`` `{{ name }}` ``</span> in inline code renders as `Inline code: .` —
+  the braces **and the text between them** are gone, silently, with no error at
+  all. This is the worse of the two silent failures, because a page that has lost
+  a sentence still looks like a page.
+- <span v-pre>`` `${{ name }}` ``</span> renders as `Inline code: $ .` — the same,
+  minus the literal `$`.
+- <span v-pre>`` `${{ name() }}` ``</span> throws, which fails the whole page's
+  render and leaves the shell above.
+- Inside a fenced block it is the literal text: VitePress wraps fences in `v-pre`
+  for you.
+- Inside `<span v-pre>` … `</span>` it is literal too, which is the fix here.
+- Inside a four-space **indented** block it is gone, silently. An indented block is
+  not a fence and gets no `v-pre`, which is why this belongs in a check rather than
+  in a style note: the form that most looks like a code block is one of the ways to
+  lose the text.
+- A lone closing brace is left alone, in code and in prose, so the check looks for
+  the opening pair and says nothing about the closing one. Flagging both would have
+  been the obvious guess and a false positive.
+- An unclosed opening brace is a build **error** — `Interpolation end sign was not
+  found`, exit 1 — so every silent case is one with a matched pair.
+
+**The check.** `npm run verify:docs-interpolation` scans every markdown page under
+`docs/` and fails one holding an unescaped opening brace outside a fence and
+outside a `v-pre` element, naming the file, the line, and the three ways out
+(wrap it, fence it, or say it without braces). Which files are pages is asked of
+`docs/.vitepress/config.ts`'s `srcExclude` rather than restated, so
+`docs/readme/README_zh.md` — the Chinese README, a GitHub page that no Vue
+renders — is out of the scan. A config that cannot be imported, or a `srcExclude`
+pattern this matcher cannot read, exits 2: without them the check cannot tell a
+page from a file VitePress never builds, and would be reporting coverage it does
+not have. The glob matcher moved to `scripts/lib/globs.mjs` in the same change,
+because two checks now need the same answer and a second copy is a second thing to
+drift.
+
+**The check had the same hole as the page, and writing this section found it.** The
+first version read each line as raw text: a `<span v-pre>` anywhere on it was taken
+to protect the braces after it. Authoring the row above produced the shape that
+mistake protects and the compiler does not, because the tag's own angle brackets
+land inside a code span:
+
+```
+own `<span v-pre>`${{ !cancelled() }}`</span>` here
+```
+
+markdown-it escapes a tag written that way, so Vue sees no element, compiles the
+interpolation, and the page throws again — while the scanner had passed the file.
+It now reads inline code spans as CommonMark does, a run of N backticks to a run of
+exactly N, and honours a `v-pre` tag only when it is outside one; a brace **inside**
+a code span is still a violation, because that is measured to render as nothing. The
+fixture for the shape is in the list below so it cannot come back, and the mutation
+that proves it is the row above, restored to what went wrong.
+
+**The rule's own controls run first**, fifteen fixtures taken from the measurements
+above, and the suite fails with exit 2 if any of them stops behaving as measured.
+The ones that pass without a mechanism — a fence, a tilde fence, a `v-pre` span that
+ends before the rest of the line, a lone closing brace — are in the list beside the
+failing ones, because a scanner that reported nothing at all would otherwise satisfy
+the failing half.
+
+**Verified by six mutations, each reverted.** The original defect, put back into
+`docs/roadmap.md`, fails naming its line; the trap above — a `v-pre` tag inside a
+code span, which the first version passed and the build rejects — fails too; braces
+inside a real fence in `docs/testing.md` pass; braces added to the excluded Chinese
+README pass, which is the control for the exclusion being read rather than the file
+happening to be clean; a missing config exits 2; an unparseable `srcExclude` pattern
+exits 2.
+
+**What it does not check.** A Vue render error from any other cause — a component
+reference, a bad `v-if` — is not covered here and is not covered anywhere else
+either: the build logs it and still exits 0. And a fence is taken to be one whose
+delimiter starts within three spaces of the line start, per CommonMark, so a fence
+indented further inside a list item would read as prose and fail as a false
+positive. This checks the one cause that has been observed.
 
 ## Not planned
 

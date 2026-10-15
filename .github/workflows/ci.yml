@@ -106,6 +106,14 @@ jobs:
       - name: Verify that no lane reads an artifact its change may not build
         if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
         run: npm run verify:artifact-guards
+      # Guarded on `docs` rather than on `workflows`, because the rule is about
+      # `docs/` and not about this file — but on `code` as well, because the
+      # checker lives under `scripts/`. Both halves matter here: a docs-only
+      # change runs no gate at all otherwise (only the format check below), and
+      # that is the change that would publish an empty page.
+      - name: Verify that no docs page holds an unescaped Vue interpolation
+        if: needs.changes.outputs.code == 'true' || needs.changes.outputs.docs == 'true'
+        run: npm run verify:docs-interpolation
       - name: Check formatting when no code changed
         if: needs.changes.outputs.code != 'true'
         run: npm run format:check
