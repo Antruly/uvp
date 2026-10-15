@@ -600,11 +600,27 @@ npm run test:built        # built projects
 npm test                  # everything
 npm run test:toolchain    # only the real-libuvcpp project
 npm run test:mutation     # Stryker
-npm run check:ci          # lint, format check, knip, jscpd, typecheck, docs
+npm run check:ci          # lint, format check, knip, jscpd, typecheck, docs, lane plan
+npm run verify:lane-plan  # the CI lane table alone, without classifying a diff
 ```
 
 `test:fast` is what you run while working. `test:built` is what CI shards three
 ways.
+
+`check:ci` is also where the CI lane plan is checked. `scripts/ci/plan.mjs`
+decides which lanes a change selects, and it carries a table of paths whose lanes
+it must keep selecting — a rule that reads correctly but never fires is invisible
+in a plan's own output, because the lanes it did select look deliberate. The
+script enforces that table on every invocation, and `verify:lane-plan` invokes it
+for the table alone so the check is in the local gate rather than only in the run
+it configures.
+
+One rule is worth knowing when reading it. A change under `.github/workflows/`
+selects **every** lane, because the workflow file is what defines the lanes —
+which apt packages, which OpenSSL, which library path. A commit that repaired the
+real-libuvcpp lane was classified as a workflow-only change and skipped that lane,
+so the repair could not be validated by the change that made it. Editing CI is
+rare and the long build is the cheaper of the two mistakes.
 
 ## Dead code, duplication, and formatting
 

@@ -74,6 +74,15 @@
       ],
       "outputs": []
     },
+    "verify:lane-plan": {
+      "inputs": [
+        "package.json",
+        "package-lock.json",
+        "scripts/ci/plan.mjs",
+        ".github/workflows/**"
+      ],
+      "outputs": []
+    },
     "knip": {
       "dependsOn": ["compile"],
       "inputs": [

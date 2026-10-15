@@ -98,6 +98,37 @@ const LANE_RULES = [
   { lanes: ["docs"], test: (path) => path.startsWith("docs/") },
   { lanes: ["docs"], test: (path) => path.startsWith("README") },
   { lanes: ["docs"], test: (path) => path.startsWith(".agents/skills/") },
+  {
+    // The workflow file is not an input to any lane's subject; it is the thing
+    // that defines every lane, down to what each step runs and which switches
+    // the C++ build is configured with. So a change to it can break any lane,
+    // and the only lanes that can show that are the ones it changed.
+    //
+    // This rule exists because the alternative was observed. A commit that
+    // repaired the real-libuvcpp lane — its apt packages, its OpenSSL, its
+    // library path — touched only the workflow, so the plan said
+    // `toolchain=false` and the run skipped the lane the commit was about. The
+    // repair could not be validated by the same change that made it, and the
+    // lane's own defect was found only on the next run that happened to touch
+    // something else. Selecting every lane here costs a long build on the rare
+    // commit that edits CI, which is the cheaper of the two mistakes.
+    //
+    // Scoped to `ci.yml` and not to `.github/`, to `.github/workflows/`, or even
+    // to the actions it uses:
+    //
+    //   - An issue template, a PR template, or CODEOWNERS cannot build a
+    //     library. Those keep the rule below.
+    //   - `pages.yml`, `mutation.yml`, `pr-readiness.yml` and `pr-title.yml` are
+    //     separate workflows that define none of the lanes this planner selects,
+    //     so editing one cannot invalidate a lane's verdict.
+    //   - `.github/actions/npm-cache` is used *by* the lanes rather than defining
+    //     them, and the failure modes differ in the way that matters here: a cache
+    //     step that breaks fails the lane that used it, loudly, in that lane's own
+    //     report. A lane that was never selected reports nothing at all, which is
+    //     the failure this rule exists for.
+    lanes: ["code", "docs", "package", "toolchain", "workflows"],
+    test: (path) => path === ".github/workflows/ci.yml",
+  },
   { lanes: ["workflows"], test: (path) => path.startsWith(".github/") },
 ];
 
@@ -156,7 +187,16 @@ const EXPECTED_LANES = [
   ["src/application/WebService.ts", ["code"]],
   ["docs/testing.md", ["docs"]],
   ["README.md", ["docs"]],
-  [".github/workflows/ci.yml", ["workflows"]],
+  // Every lane, because `ci.yml` defines every lane. The three lines below it
+  // are the distinctions that keep this from being a directory-wide rule: a
+  // workflow that defines no lane of its own, a file that only lives under
+  // `.github/`, and the shared action the lanes use rather than define. Each one
+  // is a claim about selection, and the last is the narrowest — if any of them
+  // ever starts selecting `toolchain`, the plan says which path changed its mind.
+  [".github/workflows/ci.yml", ["code", "docs", "package", "toolchain", "workflows"]],
+  [".github/workflows/pages.yml", ["workflows"]],
+  [".github/ISSUE_TEMPLATE/bug_report.yml", ["workflows"]],
+  [".github/actions/npm-cache/action.yml", ["workflows"]],
   ["LICENSE", ["code"]],
 ];
 
@@ -178,6 +218,18 @@ const checkTable = () => {
 
 const main = () => {
   checkTable();
+
+  // The table alone, without classifying anything: what the local gate runs.
+  // CI always has a diff to classify, so it takes the path below; a developer
+  // has no `BASE_SHA`, and without this the check would print "no usable base
+  // revision; every lane selected" on every run, which reads like a warning.
+  if (process.argv.includes("--table-only")) {
+    process.stdout.write(
+      "lane plan: the table selects what this file says it does, for every listed path\n",
+    );
+    return;
+  }
+
   const base = process.env["BASE_SHA"] ?? "";
   const head = process.env["HEAD_SHA"] ?? "HEAD";
   const forced = process.env["CI_FULL"] === "true";

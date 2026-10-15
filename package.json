@@ -76,6 +76,7 @@
     "test:coverage": "vitest run --coverage.enabled --coverage.provider=v8",
     "test:mutation": "stryker run",
     "verify:test-discovery": "node scripts/verify-test-discovery.mjs",
+    "verify:lane-plan": "node scripts/ci/plan.mjs --table-only",
     "artifacts:tool-catalog": "node scripts/generate-mcp-tool-catalog.mjs",
     "artifacts:skills": "node scripts/generate-skill-metadata.mjs",
     "artifacts:error-schema": "node scripts/generate-error-schema.mjs",
@@ -88,7 +89,7 @@
     "docs:preview": "vitepress preview docs",
     "check": "turbo run typecheck lint format:check metadata:check knip",
     "check:fast": "turbo run typecheck lint",
-    "check:ci": "turbo run typecheck lint format:check metadata:check knip jscpd docs:check docs:build",
+    "check:ci": "turbo run typecheck lint format:check metadata:check verify:lane-plan knip jscpd docs:check docs:build",
     "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run test:run",
     "prepare": "husky"
   },
