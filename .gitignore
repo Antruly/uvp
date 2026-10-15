@@ -41,5 +41,10 @@ out/
 .DS_Store
 Thumbs.db
 
+# Local state for the assistant's own tooling. Nothing here is part of the
+# repository, and it is per-machine: a committed copy would be one person's
+# scheduler lock handed to everybody else.
+.claude/
+
 # Local requirements notes; not part of the repository.
 dev.md
