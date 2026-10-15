@@ -1145,7 +1145,7 @@ selects this step and skips build
 **Removing each guard in turn is what found the check's own bug.** It caught the
 first download and passed the second, and the reason was not the download: the
 artifact that step reads is uploaded by a step whose own `if:` is
-`${{ !cancelled() }}`, inside a job gated on `code`. The first version of
+<span v-pre>`${{ !cancelled() }}`</span>, inside a job gated on `code`. The first version of
 `effectiveCondition` read a step's `if:` as _replacing_ its job's, so that artifact
 looked unconditional — and an artifact that looks unconditional can never be too
 narrow for the step that reads it, which is every violation there is. A step's
