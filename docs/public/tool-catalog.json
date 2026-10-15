@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "b1dec59d48e15fd3e578ef4f1db4b3f6a8572979756744ddb08d1afa29f7a00e",
+  "digest": "42037f65b62c621bc7d3a414c3f5f5cf1a961ad861bcd61c68512de9e2717266",
   "tool_count": 13,
   "tools": [
     {
@@ -2194,7 +2194,7 @@
     {
       "name": "uvp_websocket_probe",
       "title": "Probe a WebSocket endpoint",
-      "description": "Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent.",
+      "description": "Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent. Each expected frame is answered as matched or not, because a caller comparing strings against the frame log is a second implementation of the same question.",
       "kind": "web",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2249,6 +2249,14 @@
               "required": [
                 "payload"
               ]
+            }
+          },
+          "expect": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "max_frames": {
@@ -2525,6 +2533,36 @@
               "additionalProperties": false
             }
           },
+          "expectations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "matched": {
+                  "type": "boolean"
+                },
+                "matched_frame_index": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "text",
+                "matched"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "expectations_met": {
+            "type": "boolean"
+          },
+          "transport_error": {
+            "type": "string"
+          },
           "close": {
             "type": "object",
             "properties": {
@@ -2553,6 +2591,8 @@
           "upgraded",
           "handshake",
           "frames",
+          "expectations",
+          "expectations_met",
           "closed_cleanly"
         ],
         "additionalProperties": false
@@ -2580,6 +2620,9 @@
               {
                 "payload": "ping"
               }
+            ],
+            "expect": [
+              "pong"
             ],
             "max_frames": 1
           }

@@ -29,6 +29,15 @@ export interface WebSocketFrame {
   readonly opcode: WebSocketOpcode;
   readonly bytes: number;
   readonly payload: Buffer;
+  /**
+   * Milliseconds from the start of the probe to this frame.
+   *
+   * Stamped here, where the frame is, because it is the only place that knows.
+   * The probe's total duration is not this: reporting it for every frame made a
+   * greeting that arrived at 1 ms and a reply that arrived at 900 ms look
+   * simultaneous, which is the opposite of what a frame log is for.
+   */
+  readonly atMs: number;
   /** True when the frame stopped being a message and became an error. */
   readonly protocolError: boolean;
 }
@@ -212,8 +221,8 @@ export const probeWebSocket = async (
   const key = randomBytes(16).toString("base64");
 
   const frames: WebSocketFrame[] = [];
-  const push = (frame: WebSocketFrame): void => {
-    frames.push(frame);
+  const push = (frame: Omit<WebSocketFrame, "atMs">): void => {
+    frames.push({ ...frame, atMs: Date.now() - started });
   };
 
   return await new Promise<WebSocketProbeResult>((resolve) => {

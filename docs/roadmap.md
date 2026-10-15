@@ -43,7 +43,7 @@ A test and debug surface for web services — not only the ones uvp generates.
 | --- | ------------------------------------------------------------------------ |
 | ✅  | Contracts for request, WebSocket probe, SOAP call, load, capture, assert |
 | ✅  | HTTP with redirect policy, timeouts, and byte-accurate timing            |
-| ⬜  | WebSocket frames: send, receive, expect, close codes                     |
+| ✅  | WebSocket frames: send, receive, expect, close codes                     |
 | ✅  | SOAP envelopes with the raw body preserved alongside the parsed one      |
 | ✅  | Load testing with per-sample timings retained behind the percentiles     |
 | ✅  | Capture with an explicit, reported size limit                            |

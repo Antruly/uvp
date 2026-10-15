@@ -53,13 +53,15 @@ export interface ToolCommand extends CommandShape {
     | ((output: Record<string, unknown>, parsed: ParsedArgv) => number | undefined)
     | undefined;
   /**
-   * A check the CLI performs on the result, after the tool has returned.
+   * The message a failed check is worth, read off the result after the tool
+   * returned.
    *
-   * This exists for `uvp ws --expect-frame`, which is an assertion about the
-   * frames that came back rather than an input to the probe. It returns a message
-   * when the check failed; the result is printed either way, because hiding the
-   * observed frames behind a failed expectation would leave the caller with a
-   * verdict and no evidence.
+   * `verdict` gives a code and nothing else, and "exit 1" on its own does not say
+   * *what* did not hold. This exists for `uvp ws --expect-frame`, which reports
+   * which expectation no received frame answered. It returns a message when the
+   * check failed; the result is printed either way, because hiding the observed
+   * frames behind a failed expectation would leave the caller with a verdict and
+   * no evidence.
    */
   readonly inspect?:
     | ((output: Record<string, unknown>, parsed: ParsedArgv) => string | undefined)

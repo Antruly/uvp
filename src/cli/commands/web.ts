@@ -10,7 +10,7 @@ import {
   requirePositional,
 } from "../args.js";
 import type { ParsedArgv } from "../args.js";
-import type { CommandSpec } from "../commandSpec.js";
+import type { CommandSpec, ToolCommand } from "../commandSpec.js";
 import { EXIT_NO, EXIT_WRONG } from "../exitCodes.js";
 import { parseAssertionList } from "../assertionSyntax.js";
 import { at, bool, list, num, obj, str } from "../readOutput.js";
@@ -212,7 +212,31 @@ export const assertCommand: CommandSpec = {
   verdict: (output) => ((num(output["failed"]) ?? 0) > 0 ? EXIT_NO : undefined),
 };
 
-export const websocketCommand: CommandSpec = {
+/**
+ * Which `--expect-frame` values never arrived.
+ *
+ * Read off the probe's own verdict rather than re-matched here. The match has one
+ * owner: it knows that only received frames count — a frame this CLI sent is not
+ * evidence that the far end said anything, and on an echo server the two are
+ * identical strings — and a second implementation of that rule in the CLI is a
+ * second thing to keep true.
+ */
+const missingFrames = (output: Record<string, unknown>): string | undefined => {
+  const missing = list(output["expectations"])
+    .map((entry) => obj(entry))
+    .filter((entry) => entry["matched"] !== true)
+    .map((entry) => str(entry["text"]));
+  return missing.length === 0
+    ? undefined
+    : `no received frame contained ${missing.map((text) => JSON.stringify(text)).join(", ")}`;
+};
+
+/**
+ * Typed as a tool command rather than as the registry's union: the check below
+ * is the half of `uvp ws` that reads the probe's verdict, and it only exists on
+ * commands that call a tool.
+ */
+export const websocketCommand: ToolCommand = {
   path: ["ws"],
   tool: "uvp_websocket_probe",
   summary: "Open a WebSocket, send frames, and report the handshake and frame log.",
@@ -262,8 +286,9 @@ export const websocketCommand: CommandSpec = {
     "A rejected upgrade exits 1: the probe ran, and `upgraded: false` with the handshake response is",
     "its answer.",
     "",
-    "--expect-frame is checked here rather than by the tool, and the frame log is printed either",
-    "way — a failed expectation still leaves you the evidence.",
+    "--expect-frame is sent to the probe, which matches it against received frames only and reports",
+    "which expectation failed. It exits 1 when one did, and the frame log is printed either way — a",
+    "failed expectation still leaves you the evidence.",
   ],
   input: (parsed) => {
     const url = requirePositional(parsed, 0, "a WebSocket URL", "uvp ws ws://127.0.0.1:8080/echo");
@@ -277,32 +302,11 @@ export const websocketCommand: CommandSpec = {
       ...optional("max_frames", asNumber(parsed, "max-frames")),
       ...optional("idle_timeout_ms", asNumber(parsed, "idle-timeout")),
       ...optional("verify_tls", asBoolean(parsed, "tls")),
+      ...optional("expect", asList(parsed, "expect-frame")),
     };
   },
   verdict: (output) => (bool(output["upgraded"]) === true ? undefined : EXIT_NO),
-  inspect: (output, parsed) => missingFrames(output, asList(parsed, "expect-frame")),
-};
-
-/**
- * Which `--expect-frame` values never arrived.
- *
- * Matched against received frames only. A frame this CLI sent is not evidence
- * that the far end said anything, and on an echo server the two are identical
- * strings — which is exactly the confusion the direction filter prevents.
- */
-const missingFrames = (
-  output: Record<string, unknown>,
-  expected: readonly string[],
-): string | undefined => {
-  if (expected.length === 0) return undefined;
-  const received = list(output["frames"])
-    .map((frame) => obj(frame))
-    .filter((frame) => frame["direction"] === "received")
-    .map((frame) => str(frame["text"]));
-  const missing = expected.filter((needle) => !received.some((text) => text.includes(needle)));
-  return missing.length === 0
-    ? undefined
-    : `no received frame contained ${missing.map((text) => JSON.stringify(text)).join(", ")}`;
+  inspect: missingFrames,
 };
 
 export const soapCommand: CommandSpec = {

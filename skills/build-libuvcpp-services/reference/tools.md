@@ -1,7 +1,7 @@
 # uvp tool reference
 
 Generated from the tool contracts. 13 tools; catalog digest
-`b1dec59d48e15fd3e578ef4f1db4b3f6a8572979756744ddb08d1afa29f7a00e`.
+`42037f65b62c621bc7d3a414c3f5f5cf1a961ad861bcd61c68512de9e2717266`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -128,7 +128,7 @@ Example:
 
 ## `uvp_websocket_probe` — Probe a WebSocket endpoint
 
-Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent.
+Open a WebSocket, optionally send messages, collect frames until a stop condition is met, then close. Returns the upgrade handshake separately from the frame log, so a rejected upgrade is distinguishable from a connection that opened and then stayed silent. Each expected frame is answered as matched or not, because a caller comparing strings against the frame log is a second implementation of the same question.
 
 - **Kind:** web
 - **Effects:** network
@@ -143,6 +143,9 @@ Example:
     {
       "payload": "ping"
     }
+  ],
+  "expect": [
+    "pong"
   ],
   "max_frames": 1
 }

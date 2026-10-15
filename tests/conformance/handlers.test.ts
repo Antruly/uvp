@@ -498,6 +498,139 @@ describe("the web primitives", () => {
   );
 });
 
+describe("the websocket probe", () => {
+  it(
+    "stamps each frame where it happened rather than at the end of the probe",
+    async () => {
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?echo_delay_ms=200`,
+        send: [{ payload: "hello" }],
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      const frames = output["frames"] as { direction: string; text?: string; at_ms: number }[];
+      const greeting = frames.findIndex((frame) => frame.text === "fixture: greeting");
+      const echo = frames.findIndex((frame) => frame.text === "fixture: hello");
+      expect(greeting, "the fixture greeting is missing from the frame log").toBeGreaterThanOrEqual(
+        0,
+      );
+      expect(echo, "the delayed echo is missing from the frame log").toBeGreaterThan(greeting);
+
+      // The property the field exists for. The greeting arrived at the start and
+      // the echo after the delay the fixture was told to wait, so the two must not
+      // read as simultaneous: reporting the probe's total duration for every frame,
+      // which is what this did, makes a 1 ms greeting and a 900 ms reply identical.
+      expect(frames[echo]?.at_ms ?? 0).toBeGreaterThanOrEqual((frames[greeting]?.at_ms ?? 0) + 150);
+      for (let index = 1; index < frames.length; index += 1) {
+        expect(frames[index]?.at_ms ?? 0).toBeGreaterThanOrEqual(frames[index - 1]?.at_ms ?? 0);
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "answers an expectation from received frames and names the one that failed",
+    async () => {
+      const met = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws`,
+        send: [{ payload: "hello" }],
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+        expect: ["greeting"],
+      });
+      expectConforms("uvp_websocket_probe", met);
+      expect(met["expectations_met"]).toBe(true);
+
+      // The index is into the frame log the caller was handed, and it names the
+      // frame that answered the question — so a caller can go and read it.
+      const frames = met["frames"] as { direction: string; text?: string }[];
+      const answered = (met["expectations"] as { text: string; matched: boolean }[])[0];
+      expect(answered?.matched).toBe(true);
+      const answeredFrame =
+        frames[
+          (met["expectations"] as { matched_frame_index?: number }[])[0]?.matched_frame_index ?? -1
+        ];
+      expect(answeredFrame?.direction).toBe("received");
+      expect(answeredFrame?.text).toContain("greeting");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "does not count a frame uvp sent as the far end speaking",
+    async () => {
+      // The trap. The payload sent is byte-identical to the text expected — which is
+      // what an echo server makes of every expectation — and the echo that could
+      // have answered it is delayed past the point where the probe stops reading.
+      // A matcher that reads the whole log instead of the received frames passes
+      // this expectation against a server that never replied. The unmet
+      // expectation is a field and not an error: the frame log showing why is the
+      // point of the call.
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?echo_delay_ms=400`,
+        send: [{ payload: "fixture: hello" }],
+        max_frames: 1,
+        idle_timeout_ms: 2_000,
+        expect: ["fixture: hello", "never spoken"],
+      });
+      expectConforms("uvp_websocket_probe", output);
+      expect(output["expectations_met"]).toBe(false);
+
+      const frames = output["frames"] as { direction: string; text?: string }[];
+      expect(
+        frames.some((frame) => frame.direction === "sent" && frame.text === "fixture: hello"),
+      ).toBe(true);
+      expect(
+        frames.some(
+          (frame) =>
+            frame.direction === "received" && (frame.text ?? "").includes("fixture: hello"),
+        ),
+      ).toBe(false);
+      expect(
+        (output["expectations"] as { matched: boolean }[]).map((entry) => entry.matched),
+      ).toEqual([false, false]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reports the close code and reason the far end chose",
+    async () => {
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?close_code=1001&close_reason=going%20away`,
+        send: [{ payload: "hi" }],
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", output);
+      // A closing handshake the peer started is a clean end with a reason, and
+      // both halves of the reason are the actionable part of the report.
+      expect(output["closed_cleanly"]).toBe(true);
+      expect(output["close"]).toEqual({ code: 1001, reason: "going away" });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reports a far end that left without a closing handshake as an observation",
+    async () => {
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?hangup=1`,
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", output);
+      expect(output["upgraded"]).toBe(true);
+      // No close frame arrived, so there is no code to report and the connection
+      // did not end cleanly. A `closed_cleanly: true` here — or a manufactured
+      // 1000 — would turn "the peer vanished" into "the peer said goodbye".
+      expect(output["closed_cleanly"]).toBe(false);
+      expect("close" in output).toBe(false);
+    },
+    TIMEOUT,
+  );
+});
+
 describe("the load test", () => {
   it(
     "reports the distribution rather than a single number, and it is monotonic",

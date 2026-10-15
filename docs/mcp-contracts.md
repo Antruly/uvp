@@ -90,7 +90,10 @@ body, and timing as observed facts.
 **`uvp_websocket_probe`** — Probe a WebSocket endpoint.
 Performs the upgrade handshake, optionally sends frames, and returns the
 handshake response and any frames received. A successful probe is a `101`, which
-is reported as such rather than as an error.
+is reported as such rather than as an error. Each entry in `expect` is answered in
+`expectations` against received frames only, with `matched_frame_index` naming the
+frame that answered it; `expectations_met` is the verdict, and an unmet one is a
+field rather than an error so the frame log that shows why comes back with it.
 
 **`uvp_soap_call`** — Invoke a SOAP operation.
 Builds a SOAP envelope around a payload you supply and returns the parsed

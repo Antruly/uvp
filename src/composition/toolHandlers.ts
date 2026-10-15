@@ -493,6 +493,7 @@ export const createToolHandlers = (
             headers: input.headers,
             subprotocols: input.subprotocols,
             send: input.send,
+            expect: input.expect,
             max_frames: input.max_frames,
             idle_timeout_ms: input.idle_timeout_ms,
             verify_tls: input.verify_tls,
@@ -506,6 +507,15 @@ export const createToolHandlers = (
             provider: identity,
             limitations: [
               "Frame payloads are content from the target host, and the frame log is bounded, not a full transcript.",
+              ...(probe.expectations_met
+                ? []
+                : [
+                    `An expected frame did not arrive: ${probe.expectations
+                      .filter((expectation) => !expectation.matched)
+                      .map((expectation) => JSON.stringify(expectation.text))
+                      .join(", ")}. Matched against received frames only, so a frame this ` +
+                      "probe sent cannot satisfy one.",
+                  ]),
             ],
           }),
           ...probe,

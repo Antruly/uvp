@@ -235,6 +235,13 @@ server.on("upgrade", (request, socket) => {
     socket.destroy();
     return;
   }
+  // Query parameters steer the connection's timing and its ending, so a test can
+  // ask for the shape it needs to observe rather than inferring it from how the
+  // fixture happens to behave.
+  const echoDelayMs = Number(url.searchParams.get("echo_delay_ms") ?? "0");
+  const closeCode = url.searchParams.get("close_code");
+  const closeReason = url.searchParams.get("close_reason") ?? "";
+
   socket.write(
     "HTTP/1.1 101 Switching Protocols\r\n" +
       "Upgrade: websocket\r\n" +
@@ -242,10 +249,34 @@ server.on("upgrade", (request, socket) => {
       `Sec-WebSocket-Accept: ${accept(key)}\r\n\r\n`,
   );
 
+  if (url.searchParams.get("hangup") === "1") {
+    // A far end that drops the connection with no closing handshake. This is the
+    // case a probe must report as an observation: the peer left, and there is no
+    // close code because no close frame was sent.
+    socket.end();
+    return;
+  }
+
   // The greeting makes the probe's "did the far end say anything" question
   // answerable without sending a frame first, which matters because a frame uvp
   // sent is not evidence that the server spoke.
   socket.write(serverFrame("fixture: greeting"));
+
+  if (closeCode !== null) {
+    // The server closes first, with a code and a reason of the caller's choosing.
+    // A probe that reported only "the connection ended" would lose both.
+    const reason = Buffer.from(closeReason, "utf8");
+    const payload = Buffer.alloc(2 + reason.byteLength);
+    payload.writeUInt16BE(Number(closeCode), 0);
+    reason.copy(payload, 2);
+    // After the greeting, so the close is a separate event on the socket rather
+    // than being coalesced into the upgrade's first read.
+    setTimeout(() => {
+      socket.write(serverFrame(payload, 0x8));
+      socket.end();
+    }, 20);
+    return;
+  }
 
   let buffered = Buffer.alloc(0);
   socket.on("data", (chunk) => {
@@ -269,7 +300,9 @@ server.on("upgrade", (request, socket) => {
         continue;
       }
       if (frame.opcode === 0x1 || frame.opcode === 0x2) {
-        socket.write(serverFrame(`fixture: ${frame.payload.toString("utf8")}`));
+        const reply = serverFrame(`fixture: ${frame.payload.toString("utf8")}`);
+        if (echoDelayMs > 0) setTimeout(() => socket.write(reply), echoDelayMs);
+        else socket.write(reply);
       }
     }
   });

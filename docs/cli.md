@@ -266,7 +266,22 @@ request is still forwarded whole, and one too large to forward whole is refused
 with `413` and recorded as refused rather than sent upstream short.
 
 `uvp ws` with no `--send` performs the handshake and stops. A `101` is a success
-and is reported as one.
+and is reported as one, separately from the frame log, so "the upgrade was
+rejected" and "it opened and then said nothing" are different results.
+
+Every frame carries `at_ms`, stamped when that frame crossed the socket rather
+than at the end of the probe — otherwise a greeting that arrived at 1 ms and a
+reply that arrived at 900 ms would both read as the probe's total duration.
+`--expect-frame` is an input to the probe, which matches it against received
+frames only and returns one `expectations` entry per value, naming the frame that
+answered it (`matched_frame_index`). The CLI reads that verdict rather than
+re-matching the frame log, and exits 1 when an expectation went unmet. A frame
+uvp sent is never the answer: on an echo server the sent and expected strings are
+identical, which is exactly the case that would otherwise pass against a server
+that never replied. A closing handshake the peer started is reported as
+`close.code` and `close.reason` with `closed_cleanly`; a peer that hung up with no
+close frame reports `closed_cleanly: false` and no `close`, which is an
+observation and not an error.
 
 ## `uvp mcp` and `uvp setup`
 

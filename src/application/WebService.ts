@@ -7,7 +7,13 @@ import type { HttpExchange, HttpTiming } from "./httpClient.js";
 import { evaluateAssertions, percentile } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
-import { coverageComplete, endpointSource, record, recordUnknown } from "./evidenceHelpers.js";
+import {
+  coverageComplete,
+  coveragePartial,
+  endpointSource,
+  record,
+  recordUnknown,
+} from "./evidenceHelpers.js";
 import { framePayload, probeWebSocket } from "./websocketClient.js";
 import type { SessionStore, ExchangeRecord } from "./sessionStore.js";
 
@@ -338,6 +344,7 @@ export class WebService {
         readonly encoding: "utf8" | "base64";
         readonly wait_ms: number;
       }[];
+      readonly expect: readonly string[];
       readonly max_frames: number;
       readonly idle_timeout_ms: number;
       readonly verify_tls: boolean;
@@ -361,6 +368,13 @@ export class WebService {
       at_ms: number;
       truncated: boolean;
     }[];
+    expectations: {
+      text: string;
+      matched: boolean;
+      matched_frame_index?: number;
+    }[];
+    expectations_met: boolean;
+    transport_error?: string;
     close?: { code?: number; reason?: string };
     closed_cleanly: boolean;
   }> {
@@ -390,7 +404,7 @@ export class WebService {
       });
     }
 
-    const record = remember(this.options.store, this.now, {
+    const stored = remember(this.options.store, this.now, {
       method: "GET",
       url: input.url,
       requestHeaders: input.headers,
@@ -424,13 +438,61 @@ export class WebService {
           bytes: frame.bytes,
           ...(payload.text === undefined ? {} : { text: payload.text }),
           ...(payload.base64 === undefined ? {} : { base64: payload.base64 }),
-          at_ms: result.elapsedMs,
+          at_ms: frame.atMs,
           truncated: payload.truncated,
         };
       });
 
+    // The expectation is answered here rather than left to each caller, because
+    // "did the far end say what I expected" is the question a probe is asked and
+    // a caller comparing strings against the frame log is a second implementation
+    // of it. Only received frames count: a frame uvp sent is not evidence that
+    // the peer spoke, and matching against it would make an expectation pass on a
+    // server that never answered.
+    const expectations = input.expect.map((text) => {
+      const index = frames.findIndex(
+        (frame) => frame.direction === "received" && (frame.text?.includes(text) ?? false),
+      );
+      return index < 0
+        ? { text, matched: false }
+        : { text, matched: true, matched_frame_index: index };
+    });
+
+    // The probe's own record. Without it a successful probe carries no evidence
+    // at all — only the exchange in the store — and an expectation that did not
+    // hold would be a field in the output rather than a claim in the record.
+    record(recorder, {
+      kind: "exchange",
+      subject: {
+        method: "GET",
+        url: input.url,
+        exchange_id: stored.exchangeId,
+        upgrade: result.upgraded ? "accepted" : "rejected",
+      },
+      observed: {
+        handshake_status: result.handshake.status,
+        frames_received: frames.filter((frame) => frame.direction === "received").length,
+        frames_sent: frames.filter((frame) => frame.direction === "sent").length,
+        expectations_checked: expectations.length,
+        expectations_met: expectations.filter((expectation) => expectation.matched).length,
+        closed_cleanly: result.closedCleanly,
+      },
+      coverage: result.upgraded
+        ? coverageComplete("WebSocket probe")
+        : coveragePartial(
+            "WebSocket probe",
+            "the upgrade was not accepted, so no frames were exchanged",
+            0,
+            1,
+          ),
+      sources: [endpointSource(input.url)],
+      limitations: [
+        "The frame log is bounded by max_frames and idle_timeout_ms, so it is the traffic observed and not a full transcript.",
+      ],
+    });
+
     return {
-      exchange_id: record.exchangeId,
+      exchange_id: stored.exchangeId,
       upgraded: result.upgraded,
       handshake: {
         status: result.handshake.status,
@@ -440,6 +502,9 @@ export class WebService {
           : { negotiated_subprotocol: result.handshake.negotiatedSubprotocol }),
       },
       frames,
+      expectations,
+      expectations_met: expectations.every((expectation) => expectation.matched),
+      ...(result.transportError === undefined ? {} : { transport_error: result.transportError }),
       ...(result.close === undefined
         ? {}
         : {

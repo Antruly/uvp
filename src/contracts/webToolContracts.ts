@@ -141,7 +141,9 @@ export const websocketProbeContract = defineTool({
   description:
     "Open a WebSocket, optionally send messages, collect frames until a stop condition is met, " +
     "then close. Returns the upgrade handshake separately from the frame log, so a rejected " +
-    "upgrade is distinguishable from a connection that opened and then stayed silent.",
+    "upgrade is distinguishable from a connection that opened and then stayed silent. Each " +
+    "expected frame is answered as matched or not, because a caller comparing strings against " +
+    "the frame log is a second implementation of the same question.",
   kind: "web",
   inputSchema: z.object({
     url: z.string().min(1).describe("ws:// or wss:// URL."),
@@ -157,6 +159,12 @@ export const websocketProbeContract = defineTool({
         }),
       )
       .default([]),
+    /**
+     * Text each of which must appear in a received frame. Matched against
+     * received frames only: a frame this probe sent is not evidence that the
+     * peer spoke.
+     */
+    expect: z.array(z.string().min(1)).default([]),
     /** Stop after receiving this many frames, or when the timeout expires. */
     max_frames: z.number().int().min(1).default(10),
     idle_timeout_ms: z.number().int().min(1).default(5_000),
@@ -178,10 +186,25 @@ export const websocketProbeContract = defineTool({
         bytes: z.number().int(),
         text: z.string().optional(),
         base64: z.string().optional(),
+        /** Milliseconds from the start of the probe to this frame. */
         at_ms: z.number().int(),
         truncated: z.boolean(),
       }),
     ),
+    /** One entry per expected frame, in the order the expectations were given. */
+    expectations: z.array(
+      z.object({
+        text: z.string(),
+        /** False when no received frame contained this text. */
+        matched: z.boolean(),
+        /** Index into `frames` of the received frame that satisfied it. */
+        matched_frame_index: z.number().int().optional(),
+      }),
+    ),
+    /** False when an expected frame never arrived. An empty `expect` is met. */
+    expectations_met: z.boolean(),
+    /** Why the connection did not stay healthy, when it did not. */
+    transport_error: z.string().optional(),
     close: z
       .object({ code: z.number().int().optional(), reason: z.string().optional() })
       .optional(),
@@ -201,6 +224,7 @@ export const websocketProbeContract = defineTool({
       input: {
         url: "ws://127.0.0.1:8080/echo",
         send: [{ payload: "ping" }],
+        expect: ["pong"],
         max_frames: 1,
       },
     },
