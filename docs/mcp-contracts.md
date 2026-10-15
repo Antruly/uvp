@@ -197,6 +197,17 @@ at all rather than a default. A queued request that fails is named in
 `unverified` with the client's own reason, so a transport refused by design is
 distinguishable from a connection that dropped.
 
+`verify_tls` defaults to `false`, the opposite of `uvp_http_request`, and the
+reason is the subject of the pass: a verification is about the service's
+behaviour, and the workspaces uvp generates for `--features tls` serve a
+development certificate, so a pass that enforced by default would fail against
+the workspace uvp had just generated. The certificate is reported either way —
+each exchange carries `tls_verification`, and `tls_reason` when OpenSSL recorded
+one — so the default is visible rather than silent. With `verify_tls: true` a
+rejected chain ends the exchange like any other request that could not complete:
+it lands in `unverified` with the reason code, the exchange reports no `status`,
+and the pass is `unknown` rather than `failed`, because nothing was evaluated.
+
 **`uvp_bundle_diff`** — Compare two verification reports.
 Takes two paths to reports `uvp_verify` wrote and says what moved between them:
 the status, each request's verdict and failures, the questions left unanswered.

@@ -22,6 +22,10 @@ export interface Exchange {
   readonly assertions_passed?: unknown;
   readonly assertions_failed?: unknown;
   readonly failures?: unknown;
+  /** What the certificate was, on an exchange that had one. Absent otherwise. */
+  readonly tls_verification?: unknown;
+  /** OpenSSL's spelling of what was wrong, when it recorded a reason. */
+  readonly tls_reason?: unknown;
 }
 
 export interface Observation {

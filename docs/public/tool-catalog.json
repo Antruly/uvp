@@ -5024,6 +5024,11 @@
           },
           "goal": {
             "type": "string"
+          },
+          "verify_tls": {
+            "default": false,
+            "description": "Require the certificate to verify. Off by default; the certificate is reported per exchange either way.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5276,6 +5281,18 @@
                   "maximum": 9007199254740991
                 },
                 "http_version": {
+                  "type": "string"
+                },
+                "tls_verification": {
+                  "type": "string",
+                  "enum": [
+                    "verified",
+                    "failed",
+                    "not_checked",
+                    "undetermined"
+                  ]
+                },
+                "tls_reason": {
                   "type": "string"
                 },
                 "elapsed_ms": {

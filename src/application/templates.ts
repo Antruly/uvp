@@ -156,16 +156,21 @@ endif()
  * `uvcpp::` at every use site would add noise to code that is meant to be read
  * as the shape of the service.
  */
-const webPreamble = (input: TemplateInput, extra: readonly string[] = []): string =>
-  `#include <webapp/uvcpp_web_app.h>
+const webPreamble = (input: TemplateInput, extra: readonly string[] = []): string => {
+  // `std::getenv`, for the TLS setup below. Included only when that setup is
+  // emitted, so a workspace without the tls module carries no include it cannot
+  // explain.
+  const featureIncludes = input.features.includes("tls") ? ["#include <cstdlib>"] : [];
+  return `#include <webapp/uvcpp_web_app.h>
 #include <webapp/uvcpp_web_request.h>
 #include <webapp/uvcpp_web_response.h>
-${extra.map((line) => `${line}\n`).join("")}
+${[...featureIncludes, ...extra].map((line) => `${line}\n`).join("")}
 #include <iostream>
 #include <string>
 ${featureGuard(input)}
 using namespace uvcpp;
 `;
+};
 
 /**
  * The start/join tail every HTTP template shares.
@@ -189,6 +194,77 @@ const webTail = (input: TemplateInput): string => `
 `;
 
 /**
+ * HTTPS, when the workspace declared the `tls` module.
+ *
+ * A workspace that asked for TLS must not come up serving cleartext. That is the
+ * failure this block is built around, and it is the one nobody can see from the
+ * outside: a caller who asked for HTTPS and got HTTP has traffic that looks
+ * protected from their side and is not. So the two ways to be misconfigured — a
+ * half-supplied certificate pair, and a certificate libuvcpp cannot read — both
+ * end in `return 1` before `start()`, with the reason naming the file.
+ *
+ * Where the certificate comes from is the environment's business, because a
+ * generated project cannot know where a deployment keeps one, and hardcoding a
+ * path into generated source is how a template ends up wrong in every
+ * environment but the one it was written in. `enable_self_signed` is the
+ * fallback rather than the rule: libuvcpp documents it as for tests and
+ * controlled intranets, and it is what makes a freshly generated workspace
+ * runnable — a certificate no client should accept without being told to, which
+ * uvp's own client refuses rather than trusts.
+ *
+ * `set_tls_handshake_timeout_ms` is set explicitly, at the framework's own
+ * default. It is emitted because the hole it fills is invisible: the framework
+ * hands a connection to the application only once the handshake is done, and the
+ * idle scan walks the connections it was handed — so a peer that opens a socket
+ * and dribbles bytes without ever finishing the handshake is not covered by
+ * `idle_timeout_ms` at all. A reader of this file should not have to open
+ * libuvcpp's header to learn that the bound exists.
+ */
+const tlsSetup = (input: TemplateInput): string => {
+  if (!input.features.includes("tls")) return "";
+  return `
+  // HTTPS, because this workspace declared the tls module.
+  //
+  //   UVP_TLS_CERT=/path/cert.pem UVP_TLS_KEY=/path/key.pem ./${input.name}
+  //
+  // With neither variable set, a self-signed certificate is generated for
+  // localhost. Clients that check certificates will refuse it, which is the
+  // point: it is a development certificate, not a deployment one.
+  const char* cert_file = std::getenv("UVP_TLS_CERT");
+  const char* key_file = std::getenv("UVP_TLS_KEY");
+  if ((cert_file == nullptr) != (key_file == nullptr)) {
+    // Half a pair is not a configuration to guess at. The missing half could be
+    // the other half of a real certificate or of the self-signed fallback, and
+    // only one of those is what the operator meant, so neither is assumed.
+    std::cerr << "UVP_TLS_CERT and UVP_TLS_KEY are set together or not at all; "
+              << (cert_file == nullptr ? "UVP_TLS_CERT" : "UVP_TLS_KEY")
+              << " is missing. Refusing to start rather than serve something else.\\n";
+    return 1;
+  }
+  if (cert_file != nullptr) {
+    app.enable_ssl(cert_file, key_file);
+    // enable_ssl reads and checks the pair where it is called, so a path that
+    // does not exist or a key that does not match is reported here, naming the
+    // file, rather than at the first handshake — where a client sees only a
+    // refused connection and the operator sees nothing. It also marks the
+    // service TLS-unavailable, so start() would return UV_EINVAL rather than
+    // serve cleartext; this check is the one that can say why.
+    if (!app.ssl_error().empty()) {
+      std::cerr << "TLS is unusable, so this service will not start: " << app.ssl_error() << "\\n";
+      return 1;
+    }
+    std::cout << "serving HTTPS with the certificate in " << cert_file << "\\n" << std::flush;
+  } else {
+    app.enable_self_signed("localhost");
+    std::cout << "serving HTTPS with a generated self-signed certificate for localhost; "
+                 "clients that verify will refuse it. Set UVP_TLS_CERT and UVP_TLS_KEY to "
+                 "serve a real one.\\n" << std::flush;
+  }
+  app.set_tls_handshake_timeout_ms(10000);
+`;
+};
+
+/**
  * The two lines every web template starts from: the port, and — when the
  * workspace asked for the `http2` module — cleartext HTTP/2.
  *
@@ -203,6 +279,10 @@ const webTail = (input: TemplateInput): string => `
  * `uvcpp_web_app` and needs no line here; h2c is off by default because
  * recognising an HTTP/2 connection preface on an unencrypted socket is a change
  * in protocol behaviour rather than a negotiation that falls back when it fails.
+ *
+ * TLS is the same kind of consequence, and it is also what makes WebSocket
+ * services in a `tls` workspace speak `wss://` — the TLS filter is in the
+ * transport, and WS runs on top of it.
  */
 const webAppSetup = (input: TemplateInput): string => {
   const h2c = input.features.includes("http2")
@@ -216,7 +296,7 @@ const webAppSetup = (input: TemplateInput): string => {
     : "";
 
   return `  uvcpp_web_app app;
-  app.set_port(${String(input.port)});${h2c}
+  app.set_port(${String(input.port)});${h2c}${tlsSetup(input)}
 `;
 };
 
@@ -385,6 +465,11 @@ const MAIN_BY_TEMPLATE: Record<TemplateId, (input: TemplateInput) => string> = {
  *
  * uvp reads this to learn the project's declared port and binary without
  * guessing at CMake. It is deliberately small and additive.
+ *
+ * There is no `scheme` field, and that is a decision rather than an omission:
+ * the transport is a consequence of the feature list directly below, so a second
+ * field stating it could state it differently. `readWorkspaceManifest` — the one
+ * owner of this file's meaning — reads the scheme out of `features`.
  */
 const manifest = (input: TemplateInput, template: TemplateId): string =>
   `${JSON.stringify(
@@ -400,6 +485,40 @@ const manifest = (input: TemplateInput, template: TemplateId): string =>
     null,
     2,
   )}\n`;
+
+/**
+ * The section a `tls` workspace's README needs and the others must not carry.
+ *
+ * It is here rather than only in the generated source because it is a deployment
+ * fact: a service that comes up on a self-signed certificate is something the
+ * person running it has to know before a client refuses it, and `uvp.json` says
+ * `tls` without saying which kind of certificate that implies.
+ */
+const tlsReadme = (input: TemplateInput): string => {
+  if (!input.features.includes("tls")) return "";
+  return `
+## TLS
+
+This service serves **HTTPS**, and refuses to start rather than fall back to
+cleartext. It takes its certificate from the environment:
+
+\`\`\`bash
+UVP_TLS_CERT=/etc/ssl/private/svc.crt UVP_TLS_KEY=/etc/ssl/private/svc.key ./build/${input.name}
+\`\`\`
+
+With neither variable set it generates a self-signed certificate for
+\`localhost\` and prints a line saying so. That is a development certificate:
+every client that checks certificates, uvp's own included, will refuse it.
+Setting only one of the two variables is an error and stops the service, because
+the missing half could belong to either arrangement.
+
+\`uvp verify\` does not check the certificate unless you pass \`--tls\`, so a
+freshly generated workspace verifies out of the box. Passing \`--tls\` makes the
+certificate part of the verdict, and a self-signed service then fails the pass
+with the reason OpenSSL gave — which is the honest result, and what
+\`NODE_EXTRA_CA_CERTS\` is the way out of.
+`;
+};
 
 const readme = (input: TemplateInput, template: TemplateId): string => `# ${input.name}
 
@@ -434,7 +553,7 @@ binary's location:
 The service listens on port ${String(input.port)}. If that port is busy, edit
 \`set_port\` in \`src/main.cpp\` — the port is also recorded in \`uvp.json\` so
 tooling can find it.
-
+${tlsReadme(input)}
 ## Verify
 
 \`\`\`bash

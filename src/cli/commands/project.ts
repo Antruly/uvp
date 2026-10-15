@@ -32,6 +32,25 @@ import { bool, str } from "../readOutput.js";
 const buildType = (parsed: ParsedArgv): string | undefined => asString(parsed, "build-type");
 const generator = (parsed: ParsedArgv): string | undefined => asString(parsed, "generator");
 
+/**
+ * `--tls` / `--no-tls` for a verification pass.
+ *
+ * Local to this file rather than shared with the web commands, because the two
+ * defaults are opposites and one description cannot honestly say both. There,
+ * checking is the default and `--no-tls` is the exception; here, the pass is
+ * about the service's behaviour and the workspaces uvp generates serve a
+ * development certificate, so not checking is the default and `--tls` is the
+ * exception. A shared flag saying "on by default" on a command where it is off
+ * is worse than a duplicated literal: it is a flag whose own help text is false
+ * about what the command will do.
+ */
+const verifyTlsFlag = {
+  name: "tls",
+  type: "boolean" as const,
+  description:
+    "Require the certificate to verify. Off by default; the certificate is reported either way.",
+};
+
 const sharedBuildFlags = [
   {
     name: "build-dir",
@@ -296,7 +315,7 @@ export const verifyCommand: CommandSpec = {
   usage:
     "uvp verify PATH --port PORT --request METHOD PATH [--assert ASSERTION]… [--json]\n" +
     "           [--build-type TYPE] [--generator NAME] [--ready-path PATH] [--timeout MS]\n" +
-    "           [--keep-running] [--goal TEXT]",
+    "           [--keep-running] [--goal TEXT] [--tls] [--no-tls]",
   positionals: [{ name: "PATH", description: "Workspace directory." }],
   flags: [
     ...sharedBuildFlags.slice(1),
@@ -362,6 +381,7 @@ export const verifyCommand: CommandSpec = {
       value: "TEXT",
       description: "What this pass is meant to establish.",
     },
+    verifyTlsFlag,
   ],
   notes: [
     "The status is one of verified, partial, failed, or unknown. `partial` means some assertions were",
@@ -370,6 +390,12 @@ export const verifyCommand: CommandSpec = {
     "",
     "Exit codes: 0 verified, 1 failed or partial, 2 unknown (nothing was evaluated, so uvp could not",
     "put the question to the service at all).",
+    "",
+    "",
+    "--tls makes a certificate that does not verify fail the exchange and so the pass. Without it the",
+    "certificate is still reported per exchange as tls_verification (and tls_reason, in OpenSSL's own",
+    "spelling), which is how a pass can say what it saw without making it a verdict. Pass",
+    "NODE_EXTRA_CA_CERTS=/path/to/ca.pem to trust the CA a workspace's certificate was issued by.",
     "",
     "Assertion syntax: status=200, status=2xx, json:$.path=value, header:name=value, body~=regex,",
     "latency<250ms, body_bytes<1024, header:name or json:$.path on their own to check that the field",
@@ -411,6 +437,7 @@ export const verifyCommand: CommandSpec = {
       })),
       ...optional("keep_running", asBoolean(parsed, "keep-running")),
       ...optional("goal", asString(parsed, "goal")),
+      ...optional("verify_tls", asBoolean(parsed, "tls")),
     };
   },
   verdict: (output) => {

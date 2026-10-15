@@ -88,6 +88,29 @@ The switches that would enable them are emitted as comments in the generated
 `CMakeLists.txt`, because a feature cannot be retrofitted into an installed
 library.
 
+Two features change the generated code rather than only the build. `http2` turns
+on cleartext HTTP/2 on the same port. `tls` makes the service serve **HTTPS and
+refuse to start rather than fall back to cleartext** — the one failure nobody can
+see from the outside, since a caller who asked for HTTPS and got HTTP has traffic
+that looks protected from their side and is not. Such a service takes its
+certificate from the environment:
+
+```bash
+UVP_TLS_CERT=/etc/ssl/private/svc.crt UVP_TLS_KEY=/etc/ssl/private/svc.key ./build/svc
+```
+
+With neither variable set it generates a self-signed certificate for `localhost`
+and prints a line saying so: a development certificate that every verifying
+client, uvp's own included, will refuse. With only one of the two set it stops and
+names the missing one, because the missing half could belong to either
+arrangement and only one of them is what the operator meant. A pair that does not
+go together — a key from somewhere else — is caught where libuvcpp reads it and
+stops the service with the reason, naming the file, rather than surfacing at the
+first handshake where the operator would see nothing. The generated `uvp.json`
+records `tls` in `features` and nothing else: the transport is a consequence of
+that list, so `uvp run` and the readiness probe read the scheme out of it instead
+of a field that could state it differently.
+
 `uvp init` refuses to write into a non-empty directory without `--force`.
 
 ## `uvp build`
@@ -201,6 +224,13 @@ reported as `unsupported_target` — non-retryable, with the remediation naming
 `uvp init --features http2` — rather than as an unreachable endpoint, because the
 service answered and the caller is being sent to inspect the one thing that
 works.
+
+`--tls` does the same for a certificate, and its default is the other way round:
+a pass reports what the certificate was on every exchange (`tls_verification`,
+and `tls_reason` when OpenSSL recorded one) without making it part of the verdict
+unless you ask. See [Certificates](#certificates) below, and the README of any
+workspace generated with `--features tls` for the certificate the service serves
+and the environment it takes it from.
 
 The whole closure in one supervised pass: configure, compile, launch, drive, assert,
 stop, report. Returns a bundle whose status is one of four:
@@ -361,8 +391,18 @@ some is a `partial` scope rather than a quiet approximation.
 ### Certificates
 
 `uvp http`, `uvp ws`, `uvp load`, and `uvp capture replay` all check the peer's
-certificate; `--no-tls` turns that check off for the call. `uvp http` is the one
-that reports what it saw, under `tls`: the negotiated protocol, the cipher, the
+certificate; `--no-tls` turns that check off for the call. `uvp verify` is the
+exception in both directions and says so in its own `--help`: it does **not**
+check the certificate unless you pass `--tls`. A verification pass is about the
+service's behaviour, and the workspaces uvp generates for `--features tls` serve a
+development certificate — a default that failed against the workspace uvp had just
+generated would make the tool's own output unusable. What the certificate was is
+reported either way: each exchange in the bundle carries `tls_verification` and
+`tls_reason`, so the default is visible rather than silent, and `--tls` is what
+makes a rejected chain land in `unverified` instead of in a note.
+
+`uvp http` is the one that reports what it saw, under `tls`: the negotiated
+protocol, the cipher, the
 subject and issuer, the validity window, and `verification`, which is four states
 rather than a boolean. `verified` means the check ran and the chain validated.
 `not_checked` means the caller turned the check off — the chain was still

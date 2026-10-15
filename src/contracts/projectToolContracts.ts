@@ -305,6 +305,23 @@ export const verificationBundleShape = {
        * both meanings is a field that cannot report it.
        */
       http_version: z.string().optional(),
+      /**
+       * What the certificate was, on an exchange that had one.
+       *
+       * Absent for a cleartext exchange, which has no certificate and so has no
+       * answer to give here — the same distinction `status` and `http_version`
+       * make by being absent rather than `0`.
+       */
+      tls_verification: z.enum(["verified", "failed", "not_checked", "undetermined"]).optional(),
+      /**
+       * What OpenSSL said was wrong with the chain, in its own spelling.
+       *
+       * Present whenever it recorded a reason, which is not only when a chain
+       * failed: `verify_tls: false` turns the verdict off, not the observation.
+       * A pass that reports `not_checked` without this would be saying a chain
+       * was not examined when it was examined and not acted on.
+       */
+      tls_reason: z.string().optional(),
       elapsed_ms: z.number().int().optional(),
       assertions_passed: z.number().int(),
       assertions_failed: z.number().int(),
@@ -396,6 +413,27 @@ export const verifyContract = defineTool({
     /** Keep the service running after the pass, for interactive follow-up. */
     keep_running: z.boolean().default(false),
     goal: z.string().optional(),
+    /**
+     * Whether a certificate has to verify for the exchange to count.
+     *
+     * Off by default, and that is the opposite of `uvp_http_request`'s default
+     * for a reason worth stating. The subject of a verification pass is the
+     * service's behaviour, not this client's trust store; and the workspaces uvp
+     * generates for `--features tls` serve a development certificate, so a pass
+     * that enforced by default would fail against the workspace uvp had just
+     * generated — a default that makes the tool's own output unusable is not a
+     * safe default, it is a broken one. What the certificate was is reported per
+     * exchange either way (`tls_verification`, `tls_reason`), so the default is
+     * visible rather than silent, and `verify_tls: true` is what makes a rejected
+     * chain part of the verdict instead of a note in it.
+     */
+    verify_tls: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Require the certificate to verify. Off by default; the certificate is reported " +
+          "per exchange either way.",
+      ),
   }),
   outputSchema: verificationBundleSchema,
   effects: {

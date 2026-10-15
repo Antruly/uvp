@@ -145,6 +145,37 @@ textbook h2c handshake is now the thing a service should not be sent. uvp's own
 client speaks prior knowledge for `--http-version 2`, which is what makes
 `uvp verify` able to establish that one port serves both rather than assuming it.
 
+### TLS in the web-app layer
+
+`enable_ssl(cert_file, key_file)` reads and validates the pair **where it is
+called**, logs the reason under `log_category::SSL`, and marks the app
+TLS-unavailable so `start()` then returns `UV_EINVAL`. The header is explicit
+about why it refuses rather than degrading: serving cleartext instead is the worst
+failure mode here, because nothing on the caller's side can tell. `ssl_error()`
+reports what went wrong and is empty when nothing did, which is what a generated
+service checks to print a reason instead of an `UV_EINVAL`.
+
+| Call                           | Default | What it does                                                  |
+| ------------------------------ | ------- | ------------------------------------------------------------- |
+| `enable_ssl`                   | —       | Reads and validates at the call site; refuses on failure      |
+| `enable_ssl_pem`               | —       | The same, from PEM text rather than from paths                |
+| `enable_self_signed`           | —       | Generates one for tests and controlled intranets, not for use |
+| `set_tls_handshake_timeout_ms` | `10000` | Bounds a handshake that never finishes                        |
+
+The handshake timeout is the one worth knowing about without being told. The
+framework hands a connection to the application only once the handshake is done,
+and the idle scan walks the connections it was handed — so a peer that opens a
+socket and dribbles bytes without ever completing the handshake is not covered by
+`idle_timeout_ms` at all. The default applies whether or not it is set, so the
+value is not the point; uvp's generated templates set it explicitly anyway, so a
+reader of the generated source does not have to open the header to learn that the
+bound exists. It must be called before `start()`, like the HTTP/2 switches.
+
+`enable_self_signed` is documented for tests and controlled intranets, which is
+what makes it the right _fallback_ for a freshly generated workspace and the wrong
+default for a deployment: it is a certificate no client should accept without
+being told to, and uvp's own client refuses it rather than trusting it.
+
 ### SOAP does not need WSDL
 
 `UVCPP_ENABLE_WSDL` generates and parses service descriptions. A SOAP call that

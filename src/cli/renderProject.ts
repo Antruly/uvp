@@ -261,6 +261,19 @@ export const renderVerify = (output: Record<string, unknown>): string[] => {
         lines.push(`  ${str(at(entry, "name"))}: ${failure}`);
       }
     }
+    // The certificate is printed under the table rather than as a fifth column,
+    // because most passes have no certificate at all and a column that is `-`
+    // for every row teaches a reader to skip it. It is printed at all because a
+    // pass that reports `not_checked` without the reason reads as a pass that
+    // did not look, when it looked and did not act.
+    for (const entry of exchanges) {
+      const verification = str(at(entry, "tls_verification"));
+      if (verification === "") continue;
+      const reason = str(at(entry, "tls_reason"));
+      lines.push(
+        `  ${str(at(entry, "name"))}: certificate ${verification}${reason === "" ? "" : ` (${reason})`}`,
+      );
+    }
   }
 
   const unverified = list(output["unverified"]);

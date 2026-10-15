@@ -395,18 +395,30 @@ const GRACE_MS = 5_000;
  * The working directory is the workspace root, because one template resolves its
  * document root against the process's cwd rather than the executable's location.
  */
-export const startService = async (workspace: Workspace): Promise<Service> => {
-  if (!(await refusesConnections(workspace.port, 1_000))) {
-    // A stranger on the port would answer the lane's requests and every
-    // assertion below would pass for the wrong reason.
-    throw new Error(
-      `port ${String(workspace.port)} already has a listener; this lane cannot attribute responses on it to the generated service`,
-    );
-  }
+interface Launched {
+  readonly child: ChildProcess;
+  /** The newest bytes written, bounded. */
+  readonly tail: () => string;
+  readonly exited: Promise<{ code: number | null }>;
+}
 
+/**
+ * Start the binary, with the environment the caller names on top of this process's.
+ *
+ * The environment is a parameter because a `tls` workspace has no other way to
+ * be configured: it takes its certificate from `UVP_TLS_CERT` and `UVP_TLS_KEY`,
+ * so a lane that could not set them could only ever observe the self-signed
+ * fallback and would have no way to ask what happens when it is handed a real
+ * certificate, or a broken one, or half of one.
+ */
+const launch = async (
+  workspace: Workspace,
+  env: Readonly<Record<string, string>>,
+): Promise<Launched> => {
   const child = spawn(workspace.binary, [], {
     cwd: workspace.root,
     stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, ...env },
   });
   started.add(child);
 
@@ -437,6 +449,22 @@ export const startService = async (workspace: Workspace): Promise<Service> => {
     );
   }
 
+  return { child, tail: () => tail, exited };
+};
+
+export const startService = async (
+  workspace: Workspace,
+  options: { readonly env?: Readonly<Record<string, string>> } = {},
+): Promise<Service> => {
+  if (!(await refusesConnections(workspace.port, 1_000))) {
+    // A stranger on the port would answer the lane's requests and every
+    // assertion below would pass for the wrong reason.
+    throw new Error(
+      `port ${String(workspace.port)} already has a listener; this lane cannot attribute responses on it to the generated service`,
+    );
+  }
+
+  const { child, tail, exited } = await launch(workspace, options.env ?? {});
   const ready = await waitForPort(workspace.port, 15_000);
   if (!ready) {
     child.kill("SIGKILL");
@@ -452,7 +480,7 @@ export const startService = async (workspace: Workspace): Promise<Service> => {
   return {
     workspace,
     pid,
-    output: () => tail,
+    output: tail,
     stop: async () => {
       child.kill("SIGTERM");
       const polite = await Promise.race([exited, sleep(GRACE_MS).then(() => undefined)]);
@@ -465,6 +493,48 @@ export const startService = async (workspace: Workspace): Promise<Service> => {
       return { escalated: true, code: forced.code };
     },
   };
+};
+
+export interface ServiceExit {
+  /** `null` when a signal ended it, which is a different fact from an exit code. */
+  readonly code: number | null;
+  /** Everything it wrote, bounded, stdout and stderr together. */
+  readonly output: string;
+}
+
+/**
+ * Run a service that is supposed to end by itself, and wait for it to.
+ *
+ * The refusal paths are the reason this exists, and they are the reason it is
+ * not `startService`: a service that refuses to start never listens, so a
+ * readiness probe would wait out its whole bound and then report "never accepted
+ * a connection" — which is exactly what a *successful* refusal looks like from
+ * the outside. The exit code and the message are the observation, so they are
+ * what is returned, and the caller asserts on both.
+ *
+ * A service that is still running when the deadline passes is killed and
+ * reported as a failure, because that is what it is: the case under test is a
+ * process that was supposed to stop, and one that is still listening after the
+ * deadline has failed to stop rather than taken a long time to.
+ */
+export const runToExit = async (
+  workspace: Workspace,
+  options: {
+    readonly env?: Readonly<Record<string, string>>;
+    readonly timeoutMs?: number;
+  } = {},
+): Promise<ServiceExit> => {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const { child, tail, exited } = await launch(workspace, options.env ?? {});
+  const outcome = await Promise.race([exited, sleep(timeoutMs).then(() => undefined)]);
+  if (outcome === undefined) {
+    child.kill("SIGKILL");
+    await exited;
+    throw new Error(
+      `${workspace.binary} was still running after ${String(timeoutMs)} ms; this lane expected it to exit\n${tail()}`,
+    );
+  }
+  return { code: outcome.code, output: tail() };
 };
 
 /** Whether the operating system still knows this pid. No signal is delivered. */

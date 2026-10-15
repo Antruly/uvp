@@ -515,6 +515,7 @@ export const createToolHandlers = (
             })),
             keep_running: input.keep_running,
             goal: input.goal,
+            verify_tls: input.verify_tls,
           },
           {
             workspace: services.workspace,

@@ -527,7 +527,18 @@ export class WebService {
       digest: string;
     };
     redirects: { status: number; location: string }[];
-    tls?: object;
+    /**
+     * The certificate the exchange happened under, when one did.
+     *
+     * Declared as `ToolTlsReport` rather than as `object`, which is what it was:
+     * a declared type of `object` reads as "some record" and compiles for every
+     * consumer that never touches it, while making every consumer that does a
+     * type error. The certificate was built correctly and handed out unreadably,
+     * so no caller could report what it said — the verification bundle could not
+     * name the reason a chain was rejected even though the reason was in this
+     * object the whole time.
+     */
+    tls?: ToolTlsReport;
   }> {
     if (input.http_version === "3") {
       throw new UvpFailure({

@@ -82,6 +82,89 @@ describe("the http2 feature reaches the generated service", () => {
   });
 });
 
+describe("the tls feature reaches the generated service", () => {
+  /** The generated README, which is where a deployment fact has to be written down. */
+  const readme = (template: TemplateId, features: readonly UvpFeature[]): string => {
+    const files = renderTemplate(template, { name: "svc", port: 8080, features });
+    const file = files.find((entry) => entry.path === "README.md");
+    if (file === undefined) throw new Error(`${template} produced no README.md`);
+    return file.content;
+  };
+
+  it.each(WEB_TEMPLATES)("%s serves TLS instead of cleartext", (template) => {
+    const source = render(template, ["tls"]);
+    expect(source).toContain("app.enable_ssl(cert_file, key_file);");
+    expect(source).toContain("app.set_tls_handshake_timeout_ms(10000);");
+    expect(source).toContain("#include <cstdlib>");
+    expect(manifest(template, ["tls"])["features"]).toEqual(["tls"]);
+  });
+
+  it.each(WEB_TEMPLATES)("%s writes no TLS code without the feature", (template) => {
+    // The negative control, and the reason it is not decoration: a template that
+    // emitted `enable_ssl` unconditionally would link against OpenSSL in every
+    // workspace and fail to build wherever libuvcpp was configured without it.
+    for (const features of [[], ["websocket"], ["http2"]] as const) {
+      expect(render(template, features)).not.toContain("enable_ssl");
+      expect(render(template, features)).not.toContain("#include <cstdlib>");
+    }
+  });
+
+  it.each(WEB_TEMPLATES)("%s refuses to start rather than serve cleartext", (template) => {
+    // The failure this whole block exists to prevent, and the only one nobody
+    // can see from outside: a caller who asked for HTTPS and got HTTP has
+    // traffic that looks protected from their side and is not. So both
+    // misconfigurations — half a certificate pair, and a pair libuvcpp cannot
+    // read — must return before `start()`, which is what makes them refusals
+    // rather than messages printed next to a running plaintext server.
+    const source = render(template, ["tls"]);
+    const started = source.indexOf("app.start()");
+    expect(started).toBeGreaterThan(-1);
+    // Read as a block, because `return 1;` appears elsewhere in these templates
+    // for reasons that have nothing to do with certificates — counting them in
+    // the whole file would be counting the wrong thing and passing by accident
+    // on whichever count happened to match.
+    const setup = source.slice(
+      source.indexOf('std::getenv("UVP_TLS_CERT")'),
+      source.indexOf("set_tls_handshake_timeout_ms"),
+    );
+    expect(setup).not.toBe("");
+    expect(setup.match(/return 1;/gu)).toHaveLength(2);
+    expect(source.indexOf("set_tls_handshake_timeout_ms")).toBeLessThan(started);
+    expect(source.indexOf("app.enable_ssl(cert_file, key_file);")).toBeLessThan(started);
+  });
+
+  it.each(WEB_TEMPLATES)("%s hands the pair over before it checks it", (template) => {
+    // `enable_ssl` is where libuvcpp reads and validates the pair, so a check
+    // placed before the call would be reading an empty `ssl_error()` and calling
+    // every certificate good.
+    const source = render(template, ["tls"]);
+    expect(source.indexOf("app.enable_ssl(")).toBeLessThan(source.indexOf("app.ssl_error()"));
+  });
+
+  it.each(WEB_TEMPLATES)("%s generates a certificate only when it was given none", (template) => {
+    // The self-signed fallback is the *else* branch. Reached in the wrong order
+    // it would silently replace a real certificate the operator supplied, and
+    // the service would come up on one no client accepts — with the operator
+    // holding a certificate file that nothing reads.
+    const source = render(template, ["tls"]);
+    expect(source.indexOf("if (cert_file != nullptr)")).toBeLessThan(
+      source.indexOf("app.enable_self_signed"),
+    );
+    expect(source).toContain('app.enable_self_signed("localhost");');
+  });
+
+  it.each(WEB_TEMPLATES)("%s says in its README what the certificate will be", (template) => {
+    const text = readme(template, ["tls"]);
+    expect(text).toContain("## TLS");
+    expect(text).toContain("UVP_TLS_CERT=/etc/ssl/private/svc.crt");
+    expect(text).toContain("self-signed");
+    expect(text).toContain("--tls");
+    // A workspace that did not ask for TLS must not describe a certificate it
+    // does not serve either.
+    expect(readme(template, ["http2"])).not.toContain("## TLS");
+  });
+});
+
 describe("requesting a feature no template can exercise", () => {
   it("records http3 in the manifest and writes no HTTP/3 code for it", () => {
     // Stated rather than left implicit, because the two are different facts and

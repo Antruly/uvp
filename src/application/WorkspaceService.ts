@@ -17,6 +17,7 @@ import type { UvpFeature } from "../domain/features.js";
 import { describeStop } from "./ProcessSupervisor.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
+import { readWorkspaceManifest } from "./workspaceManifest.js";
 
 export interface CreatedFile {
   readonly path: string;
@@ -279,9 +280,9 @@ export class WorkspaceService {
     signal?: AbortSignal | undefined;
   }): Promise<RunResult> {
     const root = resolve(input.path);
-    const manifest = await this.#readManifest(root);
+    const manifest = await readWorkspaceManifest(root);
     const buildDir = resolve(input.buildDir ?? join(root, "build"));
-    const binaryName = input.binary ?? manifest.binary ?? manifest.name;
+    const binaryName = input.binary ?? manifest?.binary ?? manifest?.name ?? "app";
     const binaryPath = join(buildDir, binaryName);
 
     // Nothing is started for a call that was already cancelled. The same rule the
@@ -297,10 +298,15 @@ export class WorkspaceService {
       );
     }
 
+    // The scheme comes from the workspace's own declaration rather than from a
+    // constant here. It was `http://` in this string, which is the same defect as
+    // a wrong port written in a comment: a workspace generated with the tls
+    // module serves HTTPS, and the endpoint this reports is what a caller hands
+    // to `uvp http` next.
     const endpoint =
       input.ready === undefined
         ? undefined
-        : `http://127.0.0.1:${String(input.ready.port)}${input.ready.path}`;
+        : `${manifest?.scheme ?? "http"}://127.0.0.1:${String(input.ready.port)}${input.ready.path}`;
 
     const process_ = this.supervisor({
       command: binaryPath,
@@ -433,22 +439,6 @@ export class WorkspaceService {
 
   diagnosticsOf(outcome: BuildOutcome): readonly BuildDiagnostic[] {
     return outcome.diagnostics;
-  }
-
-  async #readManifest(root: string): Promise<{ name: string; binary?: string; port?: number }> {
-    try {
-      const text = await readFile(join(root, "uvp.json"), "utf8");
-      const parsed = JSON.parse(text) as { name?: unknown; binary?: unknown; port?: unknown };
-      return {
-        name: typeof parsed.name === "string" ? parsed.name : "app",
-        ...(typeof parsed.binary === "string" ? { binary: parsed.binary } : {}),
-        ...(typeof parsed.port === "number" ? { port: parsed.port } : {}),
-      };
-    } catch {
-      // A workspace without a manifest still builds; it just cannot be run
-      // without an explicit binary name.
-      return { name: "app" };
-    }
   }
 
   async #requireWorkspace(root: string): Promise<void> {

@@ -179,7 +179,7 @@ five that need neither when they are not, and reachable from nothing.
 | --- | --------------------------------------------------------------------- |
 | ✅  | HTTP/2 end-to-end, template through probe                             |
 | ⬜  | HTTP/3, gated on the TLS row below                                    |
-| ⬜  | TLS with real certificates, including the failure paths               |
+| ✅  | TLS with real certificates, including the failure paths               |
 | ⬜  | Database-backed templates                                             |
 | ✅  | Replaying a capture as a regression suite                             |
 | ✅  | Comparing two evidence bundles by semantic digest to see what changed |
@@ -227,6 +227,48 @@ digest stops, the comparison says so instead of guessing. Its unit is a report
 semantic digest: a comparison built on anything else would answer a different
 question from the one the digest answers, and the two would eventually disagree
 in public.
+
+TLS is the row where the interesting work turned out to be on the failure side.
+The client half came first and is described in
+[MCP contracts](mcp-contracts.md): a certificate that is not accepted is
+`target_unavailable`, not `endpoint_unreachable`, with the reason code OpenSSL
+gave rather than prose, and `verification` is four states because the boolean it
+replaced conflated a plaintext request, an exchange whose check the caller had
+turned off, and one whose certificate was refused. Three of the defects it fixed
+were found by measurement rather than by reading — `res.socket` is `null` by the
+time `end` fires, so every completed HTTPS exchange had been reported as an
+unreachable endpoint; `ERR_SSL_TLSV1_ALERT_NO_APPLICATION_PROTOCOL` begins with
+`ERR_SSL`, so a protocol mismatch had been classified as a certificate failure;
+and `ERR_HTTP2_STREAM_CANCEL` arrives before the session's own certificate error,
+so the code had to be read out of the `cause` chain.
+
+The serving half is where the row's own words earn their place. A workspace
+generated with `--features tls` serves HTTPS and **refuses to start rather than
+fall back to cleartext**, because that is the one failure a caller cannot see from
+their side: a request that asked for HTTPS and got HTTP succeeds, returns the
+right body, and says nothing about the traffic being readable. libuvcpp marks such
+an app TLS-unavailable so `start()` returns `UV_EINVAL` — its header calls silent
+cleartext the worst failure mode here — and the generated `main.cpp` refuses
+before `start()` on both of the ways to be misconfigured, naming the file or the
+variable. `tests/acceptance/tls.test.ts` compiles a real workspace against a real
+libuvcpp, hands it a certificate minted by `openssl`, and asserts all of it: the
+certificate it serves is the one it was handed (with a client that was not told
+about the CA refusing it, so a service that served something Node already trusted
+cannot pass), the self-signed default and the banner saying so, and the two
+refusals — half a pair, and a key from a different certificate — each ending
+non-zero with **nothing listening** afterwards.
+
+One decision was made against the obvious symmetry. `uvp verify` does _not_ check
+the certificate unless asked, which is the opposite of every other command. The
+subject of a pass is the service's behaviour, and a workspace generated with
+`--features tls` serves a development certificate, so a default that enforced
+would fail against the workspace uvp had just generated — a default that makes the
+tool's own output unusable is not a safe default. The certificate is reported per
+exchange either way, so nothing is hidden, and `--tls` moves it from a note in the
+bundle to part of the verdict. The manifest went the other way for the same kind
+of reason: it states `features` and not the transport, and the one reader derives
+the scheme from that list, because a second field stating the same fact is a
+second field that can state it differently.
 
 Replay turned out not to be about replaying. Sending a recorded request again is
 a loop; the work is deciding what "the same request" means when only one side of

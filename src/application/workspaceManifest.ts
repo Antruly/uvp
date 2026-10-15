@@ -18,6 +18,19 @@ export interface WorkspaceManifest {
   readonly binary?: string;
   readonly port?: number;
   readonly template?: string;
+  /**
+   * The transport this workspace's service answers on.
+   *
+   * Derived from `features` rather than read from a field of its own, and that is
+   * the point: a manifest that stated the transport twice could state it
+   * differently, and the feature list is already the thing `uvp doctor
+   * --workspace` is answered from. `tls` is the one feature that changes how a
+   * caller reaches the service, and a generated workspace that declares it serves
+   * HTTPS or refuses to start — so a caller that reads `https` from here is not
+   * guessing about the port's traffic, it is reading the workspace's declaration
+   * of it.
+   */
+  readonly scheme: "http" | "https";
   /** Features the workspace declares it needs. Unknown names are dropped. */
   readonly features: readonly UvpFeature[];
   /** Feature names that were present but not recognised, kept so they can be reported. */
@@ -68,6 +81,11 @@ export const readWorkspaceManifest = async (
     ...(binary === undefined ? {} : { binary }),
     ...(typeof port === "number" && Number.isInteger(port) ? { port } : {}),
     ...(template === undefined ? {} : { template }),
+    // `https` only for a workspace that declares `tls`, and for no other reason.
+    // A workspace with no manifest at all is not read here — the caller gets
+    // `undefined` and applies its own default, so "no manifest" stays
+    // distinguishable from "a manifest that declares cleartext".
+    scheme: features.includes("tls") ? "https" : "http",
     features,
     unrecognisedFeatures: unrecognised,
     ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),

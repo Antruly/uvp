@@ -58,6 +58,32 @@ export interface TlsCertificateStore {
    * only way to observe a verified exchange is to give a *new* process the path.
    */
   readonly caPath: string;
+  /**
+   * The same shapes as paths, for a caller that can only pass a filename.
+   *
+   * A generated service takes its certificate from `UVP_TLS_CERT` and
+   * `UVP_TLS_KEY`, which are paths and not PEM text — so a lane that wants to
+   * observe what a real libuvcpp does with a real certificate, or with a pair
+   * that does not go together, has to name files. Reading the content from
+   * `untrustedCa.cert` and writing it to a path of the test's own would work and
+   * would be a second copy of a certificate that is already on disk.
+   */
+  readonly paths: {
+    /** The leaf signed by this CA, for the hostname `localhost`. */
+    readonly leaf: string;
+    /** The key `leaf` was minted with. A matching pair. */
+    readonly leafKey: string;
+    /**
+     * The key of a *different* certificate, for a pair that does not go together.
+     *
+     * A mismatch rather than a missing file, because the two are different
+     * failures: a path that does not exist is caught by the same read that would
+     * catch a typo, while a key that does not belong to the certificate is the
+     * one an operator produces by copying two files from different places — the
+     * case that silently serves the wrong certificate if nothing checks it.
+     */
+    readonly otherKey: string;
+  };
 }
 
 /**
@@ -246,6 +272,7 @@ const mint = async (): Promise<TlsCertificateStore> => {
     directory,
     ca: await readFile(at("ca.pem"), "utf8"),
     caPath: at("ca.pem"),
+    paths: { leaf: at("untrusted.pem"), leafKey: at("key.pem"), otherKey: at("wrong.key") },
     selfSigned: await read("selfsigned.pem", leafKey, "localhost"),
     untrustedCa: await read("untrusted.pem", leafKey, "localhost"),
     expired: await read("expired.pem", leafKey, "localhost"),

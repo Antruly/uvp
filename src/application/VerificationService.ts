@@ -13,10 +13,12 @@ import {
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import { evaluateAssertions } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
+import type { TlsVerification } from "./httpClient.js";
 import type { ToolchainIdentity } from "./ToolchainProvider.js";
-import type { WebService } from "./WebService.js";
+import type { ToolTlsReport, WebService } from "./WebService.js";
 import type { WorkspaceService } from "./WorkspaceService.js";
 import type { SessionStore } from "./sessionStore.js";
+import { readWorkspaceManifest } from "./workspaceManifest.js";
 
 /**
  * The verification workflow.
@@ -76,6 +78,14 @@ export interface VerifyInput {
   readonly requests: readonly VerifyRequest[];
   readonly keep_running: boolean;
   readonly goal: string | undefined;
+  /**
+   * Whether the certificate on an HTTPS exchange has to verify.
+   *
+   * Required rather than optional, unlike the tool inputs, because this is a
+   * workflow and the caller here is the tool handler holding the parsed default.
+   * A second default in this layer is a second place the two can disagree.
+   */
+  readonly verify_tls: boolean;
 }
 
 export interface VerifyContext {
@@ -107,6 +117,17 @@ export interface VerifyResult {
     assertions_passed: number;
     assertions_failed: number;
     failures: string[];
+    /**
+     * What the certificate was, on an exchange that had one.
+     *
+     * Absent for a cleartext exchange, which has no certificate and no answer to
+     * give — the same distinction `status` makes between `0` and absent. Reported
+     * per exchange rather than once per pass, because a pass may ask a service
+     * over two ports and only one of them be TLS.
+     */
+    tls_verification?: TlsVerification;
+    /** OpenSSL's spelling of what was wrong, when verification was off or failed. */
+    tls_reason?: string;
   }[];
   unverified: { question: string; reason: string }[];
 }
@@ -144,9 +165,40 @@ export const verificationStatus = (init: {
 const goalOf = (input: VerifyInput): { goal?: string } =>
   input.goal === undefined ? {} : { goal: input.goal };
 
+/**
+ * What an exchange's certificate was, as the bundle carries it.
+ *
+ * Spread rather than assigned, so a cleartext exchange carries no certificate
+ * fields at all — `verification: "undetermined"` on a plaintext port would be a
+ * claim about a certificate that does not exist, and it is the same distinction
+ * `status` makes between `0` and absent.
+ *
+ * Reported whether or not this pass was asked to *enforce* the certificate, and
+ * that is the point of the pair. A pass that reports `not_checked` with no reason
+ * reads as a pass that did not look; this client looks either way, because Node
+ * validates the chain whether or not the caller acts on the answer. So a bundle
+ * carries what OpenSSL said beside the fact that nothing was done about it.
+ */
+const certificateOf = (
+  tls: ToolTlsReport | undefined,
+): { tls_verification?: TlsVerification; tls_reason?: string } =>
+  tls === undefined
+    ? {}
+    : {
+        tls_verification: tls.verification,
+        ...(tls.reason === undefined ? {} : { tls_reason: tls.reason }),
+      };
+
 export const verify = async (input: VerifyInput, context: VerifyContext): Promise<VerifyResult> => {
   const recorder = createRecorder(context.now);
   const unverified: { question: string; reason: string }[] = [];
+  // The workspace's own declaration of how its service is reached. Read through
+  // the owner rather than derived from the feature list here, so a workspace that
+  // declares `tls` is asked over HTTPS by every part of uvp that builds a URL
+  // from one place. Absent for a directory with no manifest, which is a workspace
+  // that still builds — cleartext is then the only thing that could be on the
+  // port, and saying so is more honest than a scheme uvp invented.
+  const manifest = await readWorkspaceManifest(input.path);
 
   const buildResult = await context.workspace.build({
     path: input.path,
@@ -282,7 +334,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
     };
   }
 
-  const base = `http://127.0.0.1:${String(input.run.port)}`;
+  const base = `${manifest?.scheme ?? "http"}://127.0.0.1:${String(input.run.port)}`;
   const exchangeResults: VerifyResult["exchanges"][number][] = [];
   let evaluated = 0;
   let failed = 0;
@@ -302,13 +354,20 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
           http_version: spec.http_version,
           follow_redirects: false,
           max_redirects: 0,
-          // The contract's own default, rather than the literal `false` this
-          // used to pass. The base URL below is `http://`, so nothing here is
-          // verified today and the two are indistinguishable — but the tool
-          // whose whole job is verification is the last place that should carry
-          // a hardcoded "do not check the certificate", and it stops being
-          // inert the moment a workspace is served over TLS.
-          verify_tls: true,
+          // The caller's choice, defaulted to "do not enforce" in the contract.
+          //
+          // The instinct is the other way — a tool called `verify` should verify
+          // — and it is wrong here for a reason that is specific to what this
+          // pass is about. Its subject is what the service *does*; a certificate
+          // is a fact about the deployment, and uvp's own templates serve a
+          // development certificate that no client can verify. Enforcing by
+          // default would make `uvp verify` fail against the workspace uvp had
+          // just generated, which is a footgun rather than a check. So the
+          // default is declared in the contract, the flag is the caller's, and
+          // the certificate is reported either way: a chain this client would
+          // not accept is visible in the bundle as `not_checked` with the reason
+          // OpenSSL gave, and `--tls` is what turns it into part of the verdict.
+          verify_tls: input.verify_tls,
           timeout_ms: 30_000,
           max_body_bytes: 1_048_576,
         },
@@ -402,6 +461,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       assertions_passed: outcomes.length - failures.length,
       assertions_failed: failures.length,
       failures,
+      ...certificateOf(exchange.tls),
     });
   }
 
