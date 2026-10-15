@@ -102,6 +102,72 @@ const decodeFrames = (buffer) => {
   return { frames, rest: buffer.subarray(offset) };
 };
 
+/**
+ * A route whose status the caller chooses, because it is the one thing a replay
+ * cannot produce from a fixture whose answers are fixed: the same request to the
+ * same route has to answer differently the second time. The body is constant, so
+ * a caller can tell a status difference from a body one.
+ */
+const statusRoute = (request, response) => {
+  const asked = Number(request.headers["x-uvp-status"] ?? "200");
+  const status = Number.isInteger(asked) && asked >= 100 && asked <= 599 ? asked : 200;
+  json(response, status, { route: "/status" });
+};
+
+/**
+ * The SOAP routes, whose bodies are XML envelopes rather than JSON. Returns false
+ * for a route that is not one of them, so the caller can keep looking.
+ */
+const soapRoutes = (route, request, response) => {
+  if (route === "/soap") {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      const response_ = soapEnvelope(
+        `<AddResponse xmlns="http://uvp.test/calc"><result>42</result></AddResponse>`,
+      );
+      response.writeHead(200, {
+        "content-type": "text/xml; charset=utf-8",
+        "content-length": Buffer.byteLength(response_),
+      });
+      response.end(response_);
+      void body;
+    });
+    return true;
+  }
+  if (route === "/soap/echo") {
+    // Answers with an envelope carrying the request body back verbatim, in a
+    // CDATA section so no escaping stands between the bytes sent and the bytes
+    // read back. This is how a caller can tell that a hand-written envelope
+    // went out unaltered rather than being rebuilt from parameters.
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      const received = Buffer.concat(chunks).toString("utf8");
+      const body = soapEnvelope(`<Echo><![CDATA[${received}]]></Echo>`);
+      response.writeHead(200, {
+        "content-type": "text/xml; charset=utf-8",
+        "content-length": Buffer.byteLength(body),
+      });
+      response.end(body);
+    });
+    return true;
+  }
+  if (route === "/soap/fault") {
+    // A SOAP fault is an HTTP 500 carrying a fault document: the protocol
+    // outcome the tool must report as `fault`, not as a transport error.
+    const body = soapFault("soap:Server", "the calculator is unavailable");
+    response.writeHead(500, {
+      "content-type": "text/xml; charset=utf-8",
+      "content-length": Buffer.byteLength(body),
+    });
+    response.end(body);
+    return true;
+  }
+  return false;
+};
+
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(port)}`);
   const route = url.pathname;
@@ -123,6 +189,10 @@ const server = createServer((request, response) => {
       headers: request.headers,
       marker: request.headers["x-uvp-marker"] ?? null,
     });
+    return;
+  }
+  if (route === "/status") {
+    statusRoute(request, response);
     return;
   }
   if (route === "/echo") {
@@ -178,52 +248,7 @@ const server = createServer((request, response) => {
     response.end(body);
     return;
   }
-  if (route === "/soap") {
-    const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => {
-      const body = Buffer.concat(chunks).toString("utf8");
-      const response_ = soapEnvelope(
-        `<AddResponse xmlns="http://uvp.test/calc"><result>42</result></AddResponse>`,
-      );
-      response.writeHead(200, {
-        "content-type": "text/xml; charset=utf-8",
-        "content-length": Buffer.byteLength(response_),
-      });
-      response.end(response_);
-      void body;
-    });
-    return;
-  }
-  if (route === "/soap/echo") {
-    // Answers with an envelope carrying the request body back verbatim, in a
-    // CDATA section so no escaping stands between the bytes sent and the bytes
-    // read back. This is how a caller can tell that a hand-written envelope
-    // went out unaltered rather than being rebuilt from parameters.
-    const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => {
-      const received = Buffer.concat(chunks).toString("utf8");
-      const body = soapEnvelope(`<Echo><![CDATA[${received}]]></Echo>`);
-      response.writeHead(200, {
-        "content-type": "text/xml; charset=utf-8",
-        "content-length": Buffer.byteLength(body),
-      });
-      response.end(body);
-    });
-    return;
-  }
-  if (route === "/soap/fault") {
-    // A SOAP fault is an HTTP 500 carrying a fault document: the protocol
-    // outcome the tool must report as `fault`, not as a transport error.
-    const body = soapFault("soap:Server", "the calculator is unavailable");
-    response.writeHead(500, {
-      "content-type": "text/xml; charset=utf-8",
-      "content-length": Buffer.byteLength(body),
-    });
-    response.end(body);
-    return;
-  }
+  if (soapRoutes(route, request, response)) return;
 
   json(response, 404, { error: "no such route", route });
 });

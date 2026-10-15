@@ -254,6 +254,7 @@ uvp soap http://127.0.0.1:8080/ws --action Ping --body '<Ping/>'
 uvp load http://127.0.0.1:8080/items --requests 200 --concurrency 20
 uvp capture start http://127.0.0.1:8080
 uvp capture read --limit 20
+uvp capture replay --target http://127.0.0.1:8080
 uvp assert --exchange ex_… --assert status=200
 ```
 
@@ -284,6 +285,34 @@ exchanges are dropped — a capture is read to find out what just happened — a
 and the retention caps add up to it. A `since_id` the session no longer holds
 sets `since_id_unknown` and starts the page at the oldest exchange it does keep,
 rather than answering a dropped cursor with an implicit "from the beginning".
+
+`uvp capture replay` is the other direction: it reads the record back and asks
+the same requests again of a `--target` of your choosing, so a capture taken
+against one build can be replayed against the next. It is the one web command
+that does not probe the subject — it probes the record, and the target answers
+for it.
+
+Only `GET`, `HEAD`, and `OPTIONS` are ever sent. A capture that recorded a `POST`
+holds the bytes that were sent, and re-sending them would turn a regression suite
+into a second, quieter write; those exchanges come back `skipped` with the method
+named in `skipped_methods`. The same reasoning is why the contract declares no
+target mutation: the absence of the request is the guarantee, not a hope about
+what the request would have done.
+
+Each exchange is `matched`, `differs`, `skipped`, or `not_comparable`, and the
+run's `outcome` is `verified` only when every exchange it replayed was compared
+and matched. `partial` covers a run that compared fewer facts than the record
+holds — a skipped method, an exchange whose recorded body was cut by the
+recording limit — and `unknown` covers a run that compared nothing at all, which
+includes a target that never answered. Exit `1` is a difference; exit `2` is a
+run whose question could not be put, and `unknown` is `2` rather than `0` because
+"nothing was compared" is not a pass.
+
+Bodies are compared by digest and never returned. A side reports a digest only
+when that side's bytes are whole, because a digest of a truncated prefix printed
+beside a digest of a whole body invites exactly the wrong comparison; `compared`
+says which fields the exchange was judged on, and `reason` says why it was judged
+on fewer of them.
 
 `uvp ws` with no `--send` performs the handshake and stops. A `101` is a success
 and is reported as one, separately from the frame log, so "the upgrade was

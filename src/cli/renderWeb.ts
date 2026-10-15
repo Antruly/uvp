@@ -319,6 +319,86 @@ export const renderCaptureRead = (output: Record<string, unknown>): string[] => 
   return lines;
 };
 
+export const renderCaptureReplay = (output: Record<string, unknown>): string[] => {
+  const exchanges = list(output["exchanges"]);
+  const outcome = str(output["outcome"], "unknown");
+  const differed = num(output["differed"]) ?? 0;
+  const skipped = num(output["skipped"]) ?? 0;
+  const notComparable = num(output["not_comparable"]) ?? 0;
+  const skippedMethods = strings(output["skipped_methods"]);
+
+  // The verdict first, and the counts under it, because the one thing a caller
+  // must not do is read a green-looking table as a pass. `unknown` says so in the
+  // same place a `verified` would.
+  const lines = [
+    row("outcome", outcome),
+    row(
+      "replayed",
+      `${String(num(output["matched"]) ?? 0)} matched, ${String(differed)} differ` +
+        (skipped === 0 ? "" : `, ${String(skipped)} skipped`) +
+        (notComparable === 0 ? "" : `, ${String(notComparable)} not comparable`),
+    ),
+    row("target", str(output["target"])),
+    row("capture", `${str(output["capture_id"])}  running: ${yesNo(output["running"])}`),
+  ];
+
+  if (outcome === "unknown") {
+    lines.push(
+      row(
+        "note",
+        "nothing was compared, so this is not a pass — see the reasons below, or `uvp capture read`",
+      ),
+    );
+  }
+
+  if (exchanges.length === 0) return [...lines, row("exchanges", "none in the window")];
+
+  lines.push(
+    "",
+    table(
+      ["method", "outcome", "compared", "recorded", "observed", "url"],
+      exchanges.map((entry) => [
+        str(at(entry, "method")),
+        str(at(entry, "outcome")),
+        strings(at(entry, "compared")).join("+") || "-",
+        num(at(entry, "recorded_status")) === undefined
+          ? "-"
+          : String(num(at(entry, "recorded_status"))),
+        num(at(entry, "observed_status")) === undefined
+          ? "-"
+          : String(num(at(entry, "observed_status"))),
+        oneLine(str(at(entry, "replayed_url")), 72),
+      ]),
+    ),
+  );
+
+  // Every exchange that named a reason, including the ones that matched on the
+  // status alone: a `compared` column reading `status` is a shorter answer than a
+  // caller asked for, and the reason is why.
+  const reasoned = exchanges.filter((entry) => str(at(entry, "reason")) !== "");
+  if (reasoned.length > 0) {
+    lines.push("");
+    for (const entry of reasoned) {
+      lines.push(`  ${str(at(entry, "exchange_id"))}: ${str(at(entry, "reason"))}`);
+    }
+  }
+  if (skipped > 0) {
+    lines.push(
+      "",
+      `${String(skipped)} exchange(s) were not sent at all (${skippedMethods.join(", ")}): replaying a ` +
+        "method that writes would write a second time. Use `uvp http` to put that request deliberately.",
+    );
+  }
+  const withheld = num(output["withheld_by_limit"]) ?? 0;
+  if (withheld > 0) {
+    lines.push(
+      `${String(withheld)} recorded exchange(s) were held back by the limit — a larger one covers them, ` +
+        "because the window is taken oldest-first.",
+    );
+  }
+  return lines;
+};
+
 export const renderAssert = (output: Record<string, unknown>): string[] => {
   const results = list(output["results"]);
   const lines = [
@@ -360,5 +440,6 @@ export const webRenderers = {
   uvp_load_test: renderLoad,
   uvp_capture_start: renderCaptureStart,
   uvp_capture_read: renderCaptureRead,
+  uvp_capture_replay: renderCaptureReplay,
   uvp_assert_exchange: renderAssert,
 } as const;

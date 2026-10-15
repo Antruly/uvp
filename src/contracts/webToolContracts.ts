@@ -581,6 +581,158 @@ export const captureReadContract = defineTool({
 });
 
 /**
+ * Replaying a capture as a regression suite.
+ *
+ * The capture records what a client sent and what came back; this sends the same
+ * requests again — to the service that just restarted, the one built from the
+ * branch — and reports what still answers the same. There is no test file to
+ * write, because the traffic already exists.
+ *
+ * Two decisions are visible in the schema and worth stating here, because a
+ * caller reading `matched: 3` is relying on both:
+ *
+ * - **A method that writes is not sent.** Only `GET`, `HEAD`, and `OPTIONS` are
+ *   replayed; a recorded `POST` is counted, named in `skipped_methods`, and left
+ *   alone, because replaying it would write a second time and nothing here knows
+ *   whether the endpoint is idempotent. That is also why `mutatesTarget` is
+ *   false: it is not a hope about the target, it is the absence of any request
+ *   that could change it.
+ * - **A comparison with no ground is not a pass.** `outcome: "unknown"` means
+ *   nothing was comparable at all, and `compared` says per exchange which fields
+ *   were actually put side by side — so a status-only match is legible rather
+ *   than indistinguishable from a full one.
+ */
+export const captureReplayContract = defineTool({
+  name: "uvp_capture_replay",
+  title: "Replay a capture",
+  description:
+    "Send a capture session's recorded exchanges again, to the origin it was captured from or to " +
+    "another one, and report which answers are unchanged. Response bodies are compared by digest " +
+    "and never returned, so the result carries no content from the target. Only methods that are " +
+    "defined as safe are replayed; a recorded POST is reported as skipped rather than sent twice. " +
+    "A replay that could compare nothing reports `unknown`, not success.",
+  kind: "web",
+  inputSchema: z.object({
+    capture_id: captureIdSchema.optional().describe("Defaults to the most recent session."),
+    since_id: exchangeIdSchema
+      .optional()
+      .describe("Replay only exchanges recorded after this one."),
+    target: z
+      .string()
+      .optional()
+      .describe(
+        "Origin to replay against, such as http://127.0.0.1:8080. Defaults to the session's own " +
+          "upstream. Each recorded exchange keeps its own path and query; a target carrying a path " +
+          "is refused rather than resolved.",
+      ),
+    headers: headerMapSchema
+      .default({})
+      .describe(
+        "Added to every replayed request, overriding a recorded header of that name — how a caller " +
+          "asks a slightly different question of the same traffic.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(5000)
+      .default(200)
+      .describe(
+        "Replay at most this many exchanges, oldest first, so a larger limit is a superset.",
+      ),
+    timeout_ms: z
+      .number()
+      .int()
+      .min(1)
+      .default(30_000)
+      .describe("Deadline for each replayed exchange."),
+    verify_tls: z.boolean().default(true),
+  }),
+  outputSchema: z.object({
+    ...toolEnvelopeShape,
+    capture_id: captureIdSchema,
+    running: z.boolean(),
+    /** The origin every exchange was replayed against. */
+    target: z.string(),
+    /** Exchanges the replay actually sent, which excludes the skipped ones. */
+    replayed: z.number().int(),
+    matched: z.number().int(),
+    differed: z.number().int(),
+    skipped: z.number().int(),
+    not_comparable: z.number().int(),
+    /** The distinct methods that were not sent, so a count is never a puzzle. */
+    skipped_methods: z.array(z.string()),
+    /**
+     * `verified` when every replayed exchange answered as recorded, `failed`
+     * when one answered differently, `partial` when something was left out,
+     * and `unknown` when nothing was comparable at all.
+     */
+    outcome: z.enum(["verified", "failed", "partial", "unknown"]),
+    exchanges: z.array(
+      z.object({
+        exchange_id: exchangeIdSchema,
+        method: z.string(),
+        /** Where the exchange was recorded from, which is the upstream at capture time. */
+        url: z.string(),
+        /** Where this replay sent it. Equal to `url` unless a target was given. */
+        replayed_url: z.string(),
+        outcome: z.enum(["matched", "differs", "skipped", "not_comparable"]),
+        /** Why it was not sent, or why part of the comparison was left out. */
+        reason: z.string().optional(),
+        /** Which recorded facts were put side by side. */
+        compared: z.array(z.enum(["status", "body"])),
+        recorded_status: z.number().int().optional(),
+        observed_status: z.number().int().optional(),
+        /**
+         * Digest of the recorded body, present only when that body is whole.
+         * A body the session's recording limit cut is a prefix, and a digest of
+         * a prefix compared with a digest of a whole body is the comparison this
+         * field would otherwise invite.
+         */
+        recorded_body_digest: z.string().optional(),
+        /** The same for the replayed body, when the call completed and it is whole. */
+        observed_body_digest: z.string().optional(),
+        /** Why the replayed call did not complete. The record is still reported. */
+        error: z.string().optional(),
+      }),
+    ),
+    /** Every exchange this session recorded, in the window, held back, or dropped. */
+    total_recorded: z.number().int(),
+    /** Held back by this replay's `limit`. */
+    withheld_by_limit: z.number().int(),
+    /** Dropped by the session's retention caps, so no longer replayable. */
+    withheld_by_retention: z.number().int(),
+    /** True when `since_id` is not an exchange this session still holds. */
+    since_id_unknown: z.boolean(),
+    /** The per-direction recording limit this session was started with. */
+    body_limit_bytes: z.number().int(),
+  }),
+  effects: {
+    // The session store is process state, read here exactly as
+    // `uvp_capture_read` reads it; nothing is written.
+    readsFilesystem: true,
+    writesFilesystem: false,
+    // It contacts a host: the origin being replayed against, which is the
+    // session's upstream unless the caller names another one.
+    network: true,
+    spawnsProcess: false,
+    // Not a hope that the endpoint is safe on a GET — the absence of any request
+    // that could change it. `REPLAYABLE_METHODS` is what this declaration means.
+    mutatesTarget: false,
+  },
+  examples: [
+    {
+      description: "Replay the last capture against the origin it came from",
+      input: {},
+    },
+    {
+      description: "Replay against a restarted service on another port",
+      input: { target: "http://127.0.0.1:9090", limit: 500 },
+    },
+  ],
+});
+
+/**
  * Assertions over a captured exchange.
  *
  * Kept separate from the request primitive so that a check can be re-evaluated

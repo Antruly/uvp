@@ -1,6 +1,6 @@
 # MCP contracts
 
-uvp exposes 13 tools over MCP, from the same contracts that back the CLI. This
+uvp exposes 14 tools over MCP, from the same contracts that back the CLI. This
 page is the reference: what each tool does, what it touches, and what a result
 contains.
 
@@ -41,6 +41,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_load_test`        | web       |     |     |  ●  |      |  ●  |           |
 | `uvp_capture_start`    | web       |     |     |  ●  |      |  ●  |           |
 | `uvp_capture_read`     | web       |  ●  |     |     |      |     |     ●     |
+| `uvp_capture_replay`   | web       |  ●  |     |  ●  |      |     |           |
 | `uvp_assert_exchange`  | web       |  ●  |     |     |      |     |           |
 
 Read the table before granting a tool. `uvp_run_stop` reports no filesystem
@@ -139,6 +140,22 @@ keeps, and a count ceiling bounds how many exchanges — so a read reports
 and `retained_limit_bytes` for the bound itself, and `since_id_unknown` when the
 cursor given is no longer held. `untrusted` because captured bodies are remote
 content.
+
+**`uvp_capture_replay`** — Replay a capture against a target.
+Reads recorded exchanges back and issues the same requests again at a target you
+name, so a capture taken against one build can be replayed against the next. It
+is the one web tool that does not probe the subject: it probes the record, and
+the target answers for it. Only `GET`, `HEAD`, and `OPTIONS` are sent —
+re-issuing a recorded `POST` would turn a regression suite into a second write,
+so those exchanges are `skipped` with the method named in `skipped_methods`.
+Each exchange is `matched`, `differs`, `skipped`, or `not_comparable`, and the
+run's `outcome` is `verified` only when every replayed exchange was compared and
+matched: `partial` means fewer facts were compared than the record holds, and
+`unknown` means nothing was compared at all, which is not a pass. Bodies are
+compared by digest and never returned, and a side reports a digest only when that
+side's bytes are whole. `network` because it contacts the target the caller
+named; not `untrusted` because what comes back is a verdict, an outcome per
+exchange, and the digests behind them.
 
 **`uvp_assert_exchange`** — Assert over a recorded exchange.
 Evaluates assertions against an exchange captured earlier — status, headers, a

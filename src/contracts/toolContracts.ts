@@ -9,6 +9,7 @@ import {
 import {
   assertExchangeContract,
   captureReadContract,
+  captureReplayContract,
   captureStartContract,
   httpRequestContract,
   loadTestContract,
@@ -44,6 +45,7 @@ export const TOOL_CONTRACTS = [
 
   captureStartContract,
   captureReadContract,
+  captureReplayContract,
   assertExchangeContract,
 
   verifyContract,

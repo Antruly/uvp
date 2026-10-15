@@ -131,6 +131,12 @@ describe("effects and annotations", () => {
     // distinction worth pinning: they read exchanges the session already
     // recorded, so they touch no host. `uvp_capture_start` is present because it
     // opens a listener, and `uvp_verify` because it drives requests.
+    //
+    // `uvp_capture_replay` is the row that looks like a mistake and is not: it
+    // reads the same store as `uvp_capture_read` and then *sends*, to the origin
+    // the capture came from or to whichever one the caller names. A replay that
+    // declared itself a local read would be the exact under-declaration this
+    // list exists to catch.
     expect(reaching).toEqual([
       "uvp_run",
       "uvp_http_request",
@@ -138,6 +144,7 @@ describe("effects and annotations", () => {
       "uvp_soap_call",
       "uvp_load_test",
       "uvp_capture_start",
+      "uvp_capture_replay",
       "uvp_verify",
     ]);
   });
@@ -180,6 +187,9 @@ describe("effects and annotations", () => {
     const marked = TOOL_CONTRACTS.filter((contract) => contract.returnsTargetContent).map(
       (contract) => contract.name,
     );
+    // `uvp_capture_replay` is absent for the same reason `uvp_load_test` is: it
+    // reports what it compared and the digests behind it, never the bytes. Its
+    // whole result is statuses, counts, and hashes of the target's responses.
     expect(marked).toEqual([
       "uvp_build",
       "uvp_run",

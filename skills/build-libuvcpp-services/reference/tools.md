@@ -1,7 +1,7 @@
 # uvp tool reference
 
-Generated from the tool contracts. 13 tools; catalog digest
-`f4875009ac5ae171a6671cea8c542016426fbd460af4887656eb60f9d580574c`.
+Generated from the tool contracts. 14 tools; catalog digest
+`94c5247cf1b223af5a0f185fa68f3f8512d8a833bf284702b43e141cb7447ab8`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -20,6 +20,7 @@ they are where an unanswerable question and a truncation are declared.
 | `uvp_load_test` | web | network, mutatesTarget | no |
 | `uvp_capture_start` | web | network, mutatesTarget | no |
 | `uvp_capture_read` | web | readsFilesystem | yes |
+| `uvp_capture_replay` | web | readsFilesystem, network | no |
 | `uvp_assert_exchange` | web | readsFilesystem | no |
 | `uvp_verify` | workflow | readsFilesystem, writesFilesystem, network, spawnsProcess, mutatesTarget | no |
 
@@ -224,6 +225,20 @@ Example:
   "limit": 20,
   "include_payloads": true
 }
+```
+
+## `uvp_capture_replay` — Replay a capture
+
+Send a capture session's recorded exchanges again, to the origin it was captured from or to another one, and report which answers are unchanged. Response bodies are compared by digest and never returned, so the result carries no content from the target. Only methods that are defined as safe are replayed; a recorded POST is reported as skipped rather than sent twice. A replay that could compare nothing reports `unknown`, not success.
+
+- **Kind:** web
+- **Effects:** readsFilesystem, network
+- **Returns target content:** no
+
+Example:
+
+```json
+{}
 ```
 
 ## `uvp_assert_exchange` — Assert over a recorded exchange

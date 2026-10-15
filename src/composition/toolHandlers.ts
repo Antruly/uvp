@@ -19,6 +19,7 @@ import {
 import {
   assertExchangeContract,
   captureReadContract,
+  captureReplayContract,
   captureStartContract,
   httpRequestContract,
   loadTestContract,
@@ -787,6 +788,66 @@ export const createToolHandlers = (
             ],
           }),
           ...read,
+        };
+      },
+    ),
+
+    [captureReplayContract.name]: handler(
+      captureReplayContract.inputSchema,
+      async (input, recorder) => {
+        const replay = await services.capture.replay(
+          {
+            capture_id: input.capture_id,
+            since_id: input.since_id,
+            target: input.target,
+            headers: input.headers,
+            limit: input.limit,
+            timeout_ms: input.timeout_ms,
+            verify_tls: input.verify_tls,
+          },
+          recorder,
+        );
+
+        return {
+          ...envelopeOf(recorder, {
+            tool: captureReplayContract.name,
+            provider: identity,
+            limitations: [
+              "A replayed response is compared with the bytes recorded at capture time, so a value " +
+                "that differs between two requests — a timestamp, a nonce, a request id — is " +
+                "reported as a change in the service.",
+              "Response bodies are compared by digest and never returned, so this result carries no " +
+                "content from the target; `uvp_capture_read` is what returns recorded bodies.",
+              ...(replay.skipped === 0
+                ? []
+                : [
+                    `${String(replay.skipped)} recorded exchange(s) were not sent at all, because ` +
+                      `replaying a method that writes would write a second time: ` +
+                      `${replay.skipped_methods.join(", ")}. Their absence is not a pass.`,
+                  ]),
+              ...(replay.not_comparable === 0
+                ? []
+                : [
+                    `${String(replay.not_comparable)} replayed exchange(s) produced nothing comparable ` +
+                      "with their record; each one names its own reason, and none of them is evidence " +
+                      "that the target still behaves.",
+                  ]),
+              ...(replay.withheld_by_limit === 0
+                ? []
+                : [
+                    `${String(replay.withheld_by_limit)} recorded exchange(s) were held back by this ` +
+                      `replay's limit of ${String(input.limit)}; replaying with a larger limit covers ` +
+                      "them, because the window is taken oldest-first.",
+                  ]),
+              ...(replay.withheld_by_retention === 0
+                ? []
+                : [
+                    `${String(replay.withheld_by_retention)} exchange(s) this session recorded are no ` +
+                      "longer held, so they could not be replayed at all.",
+                  ]),
+            ],
+          }),
+          ...replay,
         };
       },
     ),

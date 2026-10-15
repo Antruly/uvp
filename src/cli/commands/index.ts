@@ -6,6 +6,7 @@ import { initCommand } from "./workspace.js";
 import {
   assertCommand,
   captureReadCommand,
+  captureReplayCommand,
   captureStartCommand,
   httpCommand,
   loadCommand,
@@ -39,6 +40,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   assertCommand,
   captureStartCommand,
   captureReadCommand,
+  captureReplayCommand,
   mcpCommand,
   setupCommand,
 ];

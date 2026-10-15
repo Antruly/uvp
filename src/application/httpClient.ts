@@ -14,6 +14,16 @@ import { Buffer } from "node:buffer";
  * hiding the answer.
  */
 
+/**
+ * The most response bytes this transport will read into memory.
+ *
+ * One number for both protocol paths, because it is one decision: past it the
+ * body is a prefix and the exchange says `bodyTruncated`. A caller comparing
+ * recorded bytes with replayed ones has to know the value rather than assume
+ * both sides were whole, which is why it is exported rather than a literal.
+ */
+export const TRANSPORT_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+
 export interface HttpRequestSpec {
   readonly url: string;
   readonly method: string;
@@ -242,7 +252,7 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       const chunks: Buffer[] = [];
       let bytes = 0;
       let truncated = false;
-      const limit = 8 * 1024 * 1024;
+      const limit = TRANSPORT_BODY_LIMIT_BYTES;
       res.on("data", (chunk: Buffer) => {
         firstByteAt ??= Date.now();
         bytes += chunk.byteLength;
@@ -275,6 +285,13 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     });
 
     req.on("socket", (socket) => {
+      // Only on a socket that is still being established. A kept-alive socket
+      // from the agent's pool has already looked its name up and connected, so
+      // these `once` listeners would never fire — they would only accumulate,
+      // one set per request, until Node reports eleven of them. The timings are
+      // unchanged either way: on a reused socket they are absent because the
+      // lookup and the connect happened for a different request.
+      if (!socket.connecting) return;
       socket.once("lookup", () => {
         dnsAt = Date.now();
       });
@@ -348,7 +365,7 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     const chunks: Buffer[] = [];
     let bytes = 0;
     let truncated = false;
-    const limit = 8 * 1024 * 1024;
+    const limit = TRANSPORT_BODY_LIMIT_BYTES;
     stream.on("data", (chunk: Buffer) => {
       firstByteAt ??= Date.now();
       bytes += chunk.byteLength;

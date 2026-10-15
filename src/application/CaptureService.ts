@@ -10,10 +10,17 @@ import {
   createCaptureRetention,
   retainCaptureExchange,
 } from "./sessionStore.js";
-import type { CaptureRetention, ExchangeRecord, SessionStore } from "./sessionStore.js";
+import type {
+  CaptureRetention,
+  CaptureSession,
+  ExchangeRecord,
+  SessionStore,
+} from "./sessionStore.js";
 import { performRequest } from "./httpClient.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import { coverageComplete, coveragePartial, endpointSource, record } from "./evidenceHelpers.js";
+import { replayCapture } from "./captureReplay.js";
+import type { ReplayRequest, ReplayResult } from "./captureReplay.js";
 
 /**
  * Traffic capture.
@@ -266,6 +273,61 @@ export class CaptureService {
     };
   }
 
+  /**
+   * The session a caller means, or a failure naming the one that was not there.
+   *
+   * One home for the lookup and its wording: `read` and `replay` mean a session
+   * the same way — the id, or the most recent one — and a caller who mistyped an
+   * id should not have to work out which of the two tools they mistyped it into.
+   */
+  #session(captureId: string | undefined): CaptureSession {
+    const session =
+      captureId === undefined ? this.store.latestCapture() : this.store.capture(captureId);
+    if (session !== undefined) return session;
+    throw new UvpFailure({
+      code: "capture_unavailable",
+      message:
+        captureId === undefined
+          ? "No capture session has been started in this session."
+          : `No capture session ${captureId} exists in this session.`,
+      remediation: {
+        action:
+          "Start one with uvp_capture_start. Capture sessions do not survive the end of a session.",
+      },
+    });
+  }
+
+  /**
+   * The exchanges a caller means, in the order the call will handle them.
+   *
+   * A cursor this session no longer holds is reported rather than treated as
+   * "start at the beginning": an id that aged out of the retention window and an
+   * id that never existed both land here, and answering either one with the
+   * oldest retained exchange is a guess a caller would read as continuity.
+   *
+   * The page is a prefix of the window, oldest first, so raising the limit adds
+   * exchanges rather than replacing them — which is what makes a replay with a
+   * larger limit a superset of the run before it. It is a prefix of *this*
+   * window, not of the capture: a session still running drops its oldest
+   * exchanges to stay inside its caps, and that drop is counted separately.
+   */
+  #select(
+    session: CaptureSession,
+    sinceId: string | undefined,
+    limit: number,
+  ): {
+    readonly ordered: readonly ExchangeRecord[];
+    readonly start: number;
+    readonly slice: readonly ExchangeRecord[];
+    readonly sinceIdUnknown: boolean;
+  } {
+    const ordered = session.retention.exchanges;
+    const cursor = sinceId === undefined ? -1 : ordered.findIndex((e) => e.exchangeId === sinceId);
+    const sinceIdUnknown = sinceId !== undefined && cursor === -1;
+    const start = cursor < 0 ? 0 : cursor + 1;
+    return { ordered, start, slice: ordered.slice(start, start + limit), sinceIdUnknown };
+  }
+
   async read(input: {
     readonly capture_id: string | undefined;
     readonly since_id: string | undefined;
@@ -299,37 +361,14 @@ export class CaptureService {
     retained_bytes: number;
     bodies_truncated: number;
   }> {
-    const session =
-      input.capture_id === undefined
-        ? this.store.latestCapture()
-        : this.store.capture(input.capture_id);
-    if (session === undefined) {
-      throw new UvpFailure({
-        code: "capture_unavailable",
-        message:
-          input.capture_id === undefined
-            ? "No capture session has been started in this session."
-            : `No capture session ${input.capture_id} exists in this session.`,
-        remediation: {
-          action:
-            "Start one with uvp_capture_start. Capture sessions do not survive the end of a session.",
-        },
-      });
-    }
+    const session = this.#session(input.capture_id);
 
     const { retention } = session;
-    const ordered = retention.exchanges;
-    // A cursor this session no longer holds is reported rather than treated as
-    // "start at the beginning": an id that aged out of the retention window and
-    // an id that never existed both land here, and answering either one with the
-    // oldest retained exchange is a guess a caller would read as continuity.
-    const cursor =
-      input.since_id === undefined
-        ? undefined
-        : ordered.findIndex((entry) => entry.exchangeId === input.since_id);
-    const sinceIdUnknown = input.since_id !== undefined && cursor === -1;
-    const start = cursor === undefined || cursor < 0 ? 0 : cursor + 1;
-    const slice = ordered.slice(start, start + input.limit);
+    const { ordered, start, slice, sinceIdUnknown } = this.#select(
+      session,
+      input.since_id,
+      input.limit,
+    );
 
     if (input.stop && !session.stopped) {
       session.stopped = true;
@@ -377,6 +416,31 @@ export class CaptureService {
         (entry) => entry.requestBodyTruncated || entry.responseBodyTruncated,
       ).length,
     };
+  }
+
+  /**
+   * Replay this session's captured exchanges, and report what still answers the
+   * same.
+   *
+   * The session and the window are this class's to resolve — `#session` and
+   * `#select` answer the same cursor and limit for `uvp_capture_read`, and a
+   * second reading of them would be a second definition of what a cursor means.
+   * What the record *means* once it is a list of exchanges belongs to
+   * `captureReplay.ts`, which is where the sending and the comparing live.
+   */
+  async replay(input: ReplayRequest, recorder: EvidenceRecorder): Promise<ReplayResult> {
+    const session = this.#session(input.capture_id);
+    const { start, slice, sinceIdUnknown } = this.#select(session, input.since_id, input.limit);
+    return await replayCapture(
+      {
+        session,
+        exchanges: slice,
+        withheldByLimit: Math.max(0, session.retention.exchanges.length - start - slice.length),
+        sinceIdUnknown,
+      },
+      input,
+      recorder,
+    );
   }
 
   async #forward(

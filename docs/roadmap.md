@@ -20,7 +20,7 @@ end to end on real libuvcpp.
 | ✅  | Both discovery routes: CMake package and `pkg-config`, version floor on each                     |
 | ✅  | Feature-to-switch mapping verified by building, not by reading                                   |
 | ✅  | The three-state assessment: `satisfied`, `unmet`, `undetermined`                                 |
-| ✅  | 13 tool contracts, shared by the CLI and MCP surfaces                                            |
+| ✅  | 14 tool contracts, shared by the CLI and MCP surfaces                                            |
 | ✅  | The services behind them: `DoctorService`, `WebService`, `CaptureService`, `VerificationService` |
 | ✅  | The adapters: MCP registrar, CLI registrar, entrypoints                                          |
 | ✅  | Packaged install (`npm pack` → install → run) in CI                                              |
@@ -180,12 +180,30 @@ five that need neither when they are not, and reachable from nothing.
 | ⬜  | HTTP/2 and HTTP/3 end-to-end, template through probe                  |
 | ⬜  | TLS with real certificates, including the failure paths               |
 | ⬜  | Database-backed templates                                             |
-| ⬜  | Replaying a capture as a regression suite                             |
+| ✅  | Replaying a capture as a regression suite                             |
 | ⬜  | Comparing two evidence bundles by semantic digest to see what changed |
 
 The last one is the reason `digest` is semantic rather than a record hash. Two
 runs of the same check on the same subject produce the same digest, so a diff
 between them is a change in the world and not in the clock.
+
+Replay turned out not to be about replaying. Sending a recorded request again is
+a loop; the work is deciding what "the same request" means when only one side of
+the comparison still exists, and that is not a question a pass/fail can carry.
+It is why the tool reports what it compared rather than only whether it matched —
+a run whose recorded body was cut by the recording limit is `partial`, not
+`verified` — and why a run that compared nothing is `unknown` rather than a pass.
+Re-issuing a writing method is refused by construction rather than by a note in
+the description: only `GET`, `HEAD`, and `OPTIONS` are sent, which is what makes
+the contract's absent `mutatesTarget` an observation instead of a promise.
+
+Running it also found a defect in the transport, at a boundary that had nothing
+to do with replay: the timing listeners were registered per request on pooled
+sockets, where `lookup` and `connect` never fire again, so they accumulated one
+set per request until Node reported eleven of them. The `once` listeners were
+never going to fire; the fix is to register them only on a socket that is still
+connecting. Both the warning and the fix are visible from outside the process,
+which is the only reason it was found.
 
 ## Hardening {#hardening}
 

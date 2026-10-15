@@ -22,7 +22,7 @@ than a formatting change.
 
 ## The conformance project
 
-Four files, each asking one question, none of them needing a compiler.
+Five files, each asking one question, none of them needing a compiler.
 
 `handlers.test.ts` calls every tool through its handler and parses the result
 against the contract that describes it. The contract is the single source of
@@ -46,6 +46,20 @@ classifies each failure where it happens, retries only on a protocol mismatch,
 and treats `timeout_ms` as one deadline for the whole call. Three tests in
 `src/application/httpClient.test.ts` assert that from the transport's side,
 including the number of connections one failed request opens.
+
+`captureReplay.test.ts` asks whether replaying a capture means what it says. The
+failure mode it exists for is a replay that reports success without having
+compared anything, so every test drives a real request through a real capture
+session and then replays it: a run over two matching routes, a body difference
+from an echoed request header, a status difference on a route whose body is
+constant (so the digests match and the status is the only thing that differed),
+a `POST` skipped by name rather than re-sent, a capture replayed against a dead
+port, a capture whose upstream was never there at all, a session whose 8-byte
+recording limit leaves the replayed body comparable on status alone, and a
+replay against a second origin, which is what pins the stripping of the
+connection headers the proxy added. The session limit, the record, and the
+second origin are all real; nothing here is a fixture standing in for a
+different fixture.
 
 `providerConformance.test.ts` and `providerContractFaults.test.ts` are the two
 halves of one question: does a toolchain satisfy the port it is injected through?

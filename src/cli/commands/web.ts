@@ -644,3 +644,70 @@ export const captureReadCommand: CommandSpec = {
     ...optional("stop", asBoolean(parsed, "stop")),
   }),
 };
+
+export const captureReplayCommand: CommandSpec = {
+  path: ["capture", "replay"],
+  tool: "uvp_capture_replay",
+  summary: "Send a capture's exchanges again and report what changed.",
+  usage:
+    "uvp capture replay [--capture-id ID] [--since EXCHANGE_ID] [--target ORIGIN] [--header K:V]… " +
+    "[--limit N] [--timeout MS] [--json]",
+  flags: [
+    {
+      name: "capture-id",
+      type: "string",
+      value: "ID",
+      description: "Defaults to the most recent session.",
+    },
+    {
+      name: "since",
+      type: "string",
+      value: "EXCHANGE_ID",
+      description: "Replay only exchanges recorded after this one.",
+    },
+    {
+      name: "target",
+      type: "string",
+      value: "ORIGIN",
+      description:
+        "Origin to replay against, such as http://127.0.0.1:9090. Defaults to the capture's upstream.",
+    },
+    {
+      name: "header",
+      type: "list",
+      value: "NAME:VALUE",
+      description: "Add to every replayed request, overriding a recorded header of that name.",
+    },
+    {
+      name: "limit",
+      type: "number",
+      value: "N",
+      description: "Replay at most N exchanges, oldest first. Default 200.",
+    },
+    timeoutFlag,
+    tlsFlag,
+  ],
+  notes: [
+    "This is a check with a yes-or-no shape, so it exits 1 when a replayed exchange answers",
+    "differently and 2 when the question could not be put at all — an unknown outcome exits 2",
+    "rather than 0, because nothing was compared and that is not a pass.",
+    "Only GET, HEAD, and OPTIONS are sent. A recorded POST is counted and named, never replayed:",
+    "sending it again would be a second write, and uvp cannot know the endpoint is idempotent.",
+    "Bodies are compared by digest and not printed. `uvp capture read --payloads` shows the bytes.",
+  ],
+  input: (parsed) => ({
+    ...optional("capture_id", asString(parsed, "capture-id")),
+    ...optional("since_id", asString(parsed, "since")),
+    ...optional("target", asString(parsed, "target")),
+    ...headersSection(parsed),
+    ...optional("limit", asNumber(parsed, "limit")),
+    ...optional("timeout_ms", asNumber(parsed, "timeout")),
+    ...optional("verify_tls", asBoolean(parsed, "tls")),
+  }),
+  verdict: (output) =>
+    str(output["outcome"]) === "unknown"
+      ? EXIT_WRONG
+      : (num(output["differed"]) ?? 0) > 0
+        ? EXIT_NO
+        : undefined,
+};
