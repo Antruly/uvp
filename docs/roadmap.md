@@ -186,7 +186,7 @@ five that need neither when they are not, and reachable from nothing.
 | ✅  | HTTP/2 end-to-end, template through probe                             |
 | ✅  | HTTP/3 end-to-end, template through libuvcpp's own QUIC client        |
 | ✅  | TLS with real certificates, including the failure paths               |
-| ⬜  | Database-backed templates                                             |
+| ✅  | Database-backed templates                                             |
 | ✅  | Replaying a capture as a regression suite                             |
 | ✅  | Comparing two evidence bundles by semantic digest to see what changed |
 
@@ -311,6 +311,42 @@ never going to fire; the fix is to register them only on a socket that is still
 connecting. Both the warning and the fix are visible from outside the process,
 which is the only reason it was found.
 
+The database row was ambiguous on one point that mattered — does `db` add a
+template or change one? — and the answer was in the code that was already there.
+`rest-api`'s generated `main.cpp` said, in a comment, to replace its store with
+the db module when the service needs durability; a seventh template that was
+`rest-api` with a pool underneath would be two copies of one route table, and the
+copy nobody edits is the one that drifts. So `db` switches the store:
+`--features db` on `rest-api` generates the same routes, status codes and JSON
+over `uvcpp_db_pool` instead of an `unordered_map`, reading `UVP_DATABASE_URL`
+and defaulting to a SQLite file in the working directory. On the other web
+templates `db` is a build requirement and a guard and nothing more, because they
+have no store to back — stated in
+[libuvcpp features](libuvcpp-features.md#the-db-module-backs-exactly-one-template)
+rather than left to be discovered by diffing two generated projects, and stated
+again in the tool contract, because that is what a caller reads before
+generating anything.
+
+What the lane establishes is durability rather than the shape of the source:
+`tests/toolchain/database.test.ts` writes a value unique to the run, stops the
+service, starts it again, and reads the value back — because a handler that
+answers `{"stored":1}` and then forgets produces the same source and the same
+first response. Beside it, the two ways to be misconfigured: a connection string
+that cannot be opened ends the process before it listens, with the driver's own
+reason and no port held, and no connection string at all opens `./<name>.db`.
+The recorded transcript and the decisions behind it are in
+[testing](testing.md#the-database-backed-template).
+
+Two limits belong to the row rather than to the lane. **Only SQLite was
+exercised**: libuvcpp loads all three drivers at run time, so MySQL and
+PostgreSQL are the same template and the same generated code, but only SQLite
+needs nothing else present on the host, and uvp reports what it observed rather
+than generalising from the one dialect it can reach. And **the pool shares
+libuv's worker pool** — four threads by default, the same ones serving `uv_fs_*`
+and DNS — which is why generated services bound each statement with a 5 s
+timeout instead of resizing a process-global pool, and why the generated README
+carries `UV_THREADPOOL_SIZE` for a caller who has measured their own workload.
+
 ## Hardening {#hardening}
 
 Known gaps in the project's own engineering, tracked here rather than left
@@ -329,23 +365,28 @@ implicit.
 | ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                      |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
-rather than as a bug report. It has been seen twice, both times as the only error
-in the `lint` task, with no rule name:
+rather than as a bug report. It has been seen three times, each time as the only
+error in the `lint` task, with no rule name:
 
 ```
 x Failed to open file .../dist/toolchains/local/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-15, first
 x Failed to open file .../dist/toolchains/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-15, second
-Found 22 warnings and 1 error.
+x Failed to open file .../dist/toolchains/processRunner.js with error
+  "No such file or directory (os error 2)"          # 2026-10-16, third
+Found 26 warnings and 1 error.
 ```
 
-Read the two lines as one observation rather than two: the name tracks whatever
-path that file occupies at the time, so it is not a stale reference to a file
-that has moved. In both cases the file existed and was readable immediately
-afterwards, and in both cases `dist/` had been rebuilt out of band shortly
-before the gate — which is consistent with, but does not establish, a window in
-which a just-written file is not yet openable.
+Read the three lines as one observation rather than three: the name tracks
+whatever path that file occupies at the time, so it is not a stale reference to a
+file that has moved. In all three cases the file existed and was readable
+immediately afterwards — `npm run lint` run again straight after the third
+passed with 26 warnings and no errors — and in all three `dist/` had been rebuilt
+out of band shortly before the gate (the third run followed a manual
+`npm run compile` and `npm run docs:generate` in the same shell), which is
+consistent with, but does not establish, a window in which a just-written file is
+not yet openable.
 
 What the task graph does say is that `compile` runs _inside_ `check:ci` and
 concurrently with `lint`: `knip` and `docs:check` both `dependsOn: ["compile"]`,

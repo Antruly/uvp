@@ -308,6 +308,105 @@ describe("the http3-service template, which is not a uvcpp_web_app", () => {
   });
 });
 
+describe("the db feature reaches the generated service", () => {
+  it("replaces the in-memory store with the db module's pool", () => {
+    const source = render("rest-api", ["db"]);
+    expect(source).toContain("#include <db/uvcpp_db_pool.h>");
+    expect(source).toContain("uvcpp_db_pool pool;");
+    expect(source).toContain("uvcpp_db_params params;");
+    // The connection string is the caller's, and the pool is opened where a
+    // failure can be reported at startup rather than on the first request.
+    expect(source).toContain("UVP_DATABASE_URL");
+    expect(source).toContain("pool.init(url, 1, 4)");
+    // The store it replaced, gone rather than left beside the new one.
+    expect(source).not.toContain("unordered_map");
+    expect(manifest("rest-api", ["db"])["features"]).toEqual(["db"]);
+  });
+
+  it("leaves the in-memory store alone when the feature was not requested", () => {
+    // The other half, and the one that would catch a branch that always took the
+    // database path: a workspace that never asked for a database must not open
+    // one, and must not read an environment variable to find out where it is.
+    const source = render("rest-api", []);
+    expect(source).toContain("std::unordered_map<std::string, std::string> g_items");
+    expect(source).not.toContain("uvcpp_db_");
+    expect(source).not.toContain("UVP_DATABASE_URL");
+    expect(source).not.toContain("getenv");
+  });
+
+  it("answers the same routes with either store", () => {
+    // The feature changes where the bytes live, not what the service says — so
+    // the route table is the same one in both files. A caller who swaps the
+    // store keeps their client.
+    const memory = render("rest-api", []);
+    const database = render("rest-api", ["db"]);
+    for (const source of [memory, database]) {
+      for (const route of ['"/healthz"', '"/items"', '"/items/:id"']) {
+        expect(source, `${route} missing`).toContain(route);
+      }
+    }
+    // The write route is new, because a store that cannot be written to has no
+    // durability to test.
+    expect(memory).not.toContain("app.post(");
+    expect(database).toContain('app.post("/items/:id"');
+  });
+
+  it("resumes the chain after every dispatched query, and answers when it cannot dispatch", () => {
+    // Three properties of the async shape, each of which fails silently and each
+    // of which this template asserts about itself rather than leaving to a lane
+    // that takes minutes to run.
+    //
+    // 1. One `rv->end()` + `next()` pair per dispatch. Ending without resuming
+    //    leaves the client waiting for a reply nobody sends, and there is no
+    //    error anywhere to say so.
+    // 2. The `next` in each callback captured by value — that is what tells the
+    //    framework this link resumes later, so the chain waits instead of
+    //    finishing the request when the handler returns.
+    // 3. The synchronous 503 for a dispatch that never happens: when the pool
+    //    returns non-zero it **never calls the callback**, so a handler that did
+    //    not answer for that case would leave the request open for good.
+    // The dispatched calls are the ones given a loop. The schema statement at
+    // startup is deliberately not one of them: it runs before `app.start()`, on
+    // a thread that is not the loop's, which is the only place the synchronous
+    // pool methods are allowed.
+    const source = render("rest-api", ["db"]);
+    const dispatches = source.match(/pool\.(?:query|execute)\(app\.loop\(/gu) ?? [];
+    expect(dispatches.length).toBeGreaterThan(0);
+    expect(source.match(/rp->end\(\);\n\s+next\(\);/gu) ?? []).toHaveLength(dispatches.length);
+    expect(source.match(/\[rp, next\]\(/gu) ?? []).toHaveLength(dispatches.length);
+    expect(source.match(/if \(dispatched != 0\)/gu) ?? []).toHaveLength(dispatches.length);
+    expect(source).toContain('"the database is not accepting work"');
+  });
+
+  it("documents the database in the generated README, and only when it is one", () => {
+    const readme = (features: readonly UvpFeature[]): string => {
+      const files = renderTemplate("rest-api", { name: "svc", port: 8080, features });
+      const file = files.find((entry) => entry.path === "README.md");
+      if (file === undefined) throw new Error("no README.md");
+      return file.content;
+    };
+    const text = readme(["db"]);
+    expect(text).toContain("## Database");
+    // The facts a reader cannot get from the source without opening libuvcpp's
+    // headers: where the connection string comes from, which dialects exist,
+    // which of them needs nothing on the host, and that the placeholders are the
+    // dialect's business.
+    expect(text).toContain("UVP_DATABASE_URL");
+    expect(text).toContain("sqlite://");
+    expect(text).toContain("postgres://");
+    expect(text).toContain("$1");
+    // A database file is where the running service writes, so it is ignored —
+    // the same reason the build directory is.
+    const gitignore = renderTemplate("rest-api", {
+      name: "svc",
+      port: 8080,
+      features: ["db"],
+    }).find((entry) => entry.path === ".gitignore");
+    expect(gitignore?.content).toContain("*.db");
+    expect(readme([])).not.toContain("## Database");
+  });
+});
+
 describe("requesting a feature a web-app template has no code for", () => {
   it("records http3 in the manifest and writes no HTTP/3 code for it", () => {
     // Stated rather than left implicit, because the two are different facts and

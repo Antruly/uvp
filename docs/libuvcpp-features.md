@@ -220,6 +220,59 @@ If you are building from source and want WSDL generation as well, add
 `-DUVCPP_ENABLE_WSDL=ON` yourself. uvp will not turn it on for you, because a
 feature that is not requested should not appear in your build.
 
+### The db module backs exactly one template
+
+`UVCPP_ENABLE_DB` compiles libuvcpp's database layer, and `uvcpp_db_pool` is what
+a generated service opens. Of the six templates, one has a store for it to back:
+`rest-api`. `uvp init --template rest-api --features db` replaces that template's
+in-memory map with the pool, and its routes, status codes and JSON stay as they
+are. Declaring `db` on any other web template records the build requirement and
+writes the same `#error` guard as any other feature, and nothing else — a
+template with no store has nothing for a database to hold. That is stated here
+rather than left to be found by diffing two generated projects.
+
+One connection string reaches all three dialects:
+
+| Dialect    | Connection string                   |
+| ---------- | ----------------------------------- |
+| SQLite     | `sqlite:///path/to/file.db`         |
+| MySQL      | `mysql://user:pass@host:3306/db`    |
+| PostgreSQL | `postgres://user:pass@host:5432/db` |
+
+The driver is loaded at run time, which is why a generated project links `uvcpp`
+and nothing else: with the drivers as `dlopen`ed modules, `libuvcpp.so` carries
+no `NEEDED` entry for `libsqlite3`, `libmysqlclient` or `libpq`. It is also why
+the client library has to be on the host rather than in the build, and why its
+absence is `no_driver` at pool-init — naming the packages to install — instead
+of a link error. SQLite is the one dialect that needs nothing else present,
+because it is a library and not a server; uvp's lanes can only reach that one
+end to end, and the generated README says so rather than implying the other two
+were exercised.
+
+Four properties of the layer shape what generated code can promise, and none of
+them can be smoothed over from above:
+
+- **Placeholders are dialect-native and are not translated.** `?` for SQLite and
+  MySQL, `$1`…`$n` for PostgreSQL, passed to the driver as written. A generated
+  statement carries whichever the connection string implies, and the README says
+  which.
+- **A statement is passed as written, trailing semicolon included**, which the
+  dialects do not agree on accepting. The generated statements carry none.
+- **A failed `execute` carries one status code.** `uvcpp_db_status` cannot tell a
+  taken key from a dropped connection, which is why `rest-api --features db`
+  creates with `POST` and reports a failed create, rather than offering the
+  upsert that `PUT` would claim.
+- **The asynchronous calls run on libuv's worker pool** — the same default four
+  threads that serve `uv_fs_*` and DNS — so a statement that never returns holds
+  a thread other work is queued behind. `UV_THREADPOOL_SIZE`, or
+  `uvcpp_set_threadpool_size(n)` _before the first dispatch_, is the caller's
+  lever; generated services set a 5 s statement timeout on each connection
+  instead of resizing a pool that also governs file IO.
+
+`acquire()` blocks and is for a thread that is not the loop's, which in a
+generated service is no thread at all: a transaction needs acquire/release and
+therefore belongs outside a request handler, and no template writes one.
+
 ## How a feature is decided
 
 `assessFeatures(wanted, modules, probe)` compares the features a caller asked for

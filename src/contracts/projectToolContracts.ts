@@ -44,7 +44,10 @@ export const workspaceCreateContract = defineTool({
       .default(["websocket"])
       .describe(
         "Transport and service modules to build against. Each is checked against the installed " +
-          "libuvcpp build, not assumed: a feature the build lacks is reported before compiling.",
+          "libuvcpp build, not assumed: a feature the build lacks is reported before compiling. " +
+          "`db` also changes what the generated service keeps, on the one template that keeps " +
+          "anything: `rest-api` is written with libuvcpp's connection pool in place of its " +
+          "in-memory map, and the other templates carry it as a build requirement only.",
       ),
     port: z.number().int().min(1).max(65535).default(8080),
     force: z

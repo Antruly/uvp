@@ -163,6 +163,13 @@ Most templates start a `uvcpp_web_app`. `http3-service` does not: it is written
 against `uvcpp_http_server`, which is the only type in 1.7.0 that can open a QUIC
 listener, and it serves one route table over TCP and HTTP/3 at once.
 
+`db` is the one feature that changes what a template keeps. `rest-api` is the
+only template with a store, so `--features db` writes it over libuvcpp's
+connection pool — SQLite, MySQL or PostgreSQL, from `UVP_DATABASE_URL`, with a
+SQLite file in the working directory as the default — in place of its in-memory
+map. The routes, status codes and JSON are the same either way. Declaring `db` on
+any other template is a build requirement, as every feature is, and no more.
+
 <a id="current-status"></a>
 
 ## Current status
@@ -207,6 +214,14 @@ because that client verifies against a CA bundle it is handed or not at all, and
 redirects are refused because the probe makes one request. The result reports
 `verification: not_checked` rather than a certificate nobody examined, and names
 the response headers it read rather than presenting them as the whole set.
+
+The database-backed template is verified as a store rather than as a transport, and
+the assertion is a restart: `tests/toolchain/database.test.ts` writes a value
+unique to the run, stops the service, starts it again, and reads the value back —
+which is the only thing that separates a store from a handler that answers
+`{"stored":1}` and forgets. The lane exercises SQLite, the one dialect that needs
+nothing else installed; MySQL and PostgreSQL go through the same generated code
+and the same driver-loading path, and are not claimed as observed.
 
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp

@@ -154,15 +154,15 @@ These require `npm run compile` to have run first. They exercise the artifacts
 that ship: the CLI as a process, the MCP server as a process, the packaged
 tarball.
 
-| Project            | Covers                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------- |
-| `boundary`         | Import-surface rules across built output                                              |
-| `cli-boundary`     | The CLI driven as a subprocess                                                        |
-| `process-boundary` | Process supervision: start, readiness, stop, orphans                                  |
-| `mcp-boundary`     | The MCP server over real stdio                                                        |
-| `toolchain`        | Real CMake and real libuvcpp: six templates, a failing build, both provider contracts |
-| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                  |
-| `process-global`   | What a call leaves in the process it ran in, and whose session it is                  |
+| Project            | Covers                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `boundary`         | Import-surface rules across built output                                                                     |
+| `cli-boundary`     | The CLI driven as a subprocess                                                                               |
+| `process-boundary` | Process supervision: start, readiness, stop, orphans                                                         |
+| `mcp-boundary`     | The MCP server over real stdio                                                                               |
+| `toolchain`        | Real CMake and real libuvcpp: six templates, a database-backed one, a failing build, both provider contracts |
+| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                                         |
+| `process-global`   | What a call leaves in the process it ran in, and whose session it is                                         |
 
 `toolchain` is serial (`maxWorkers: 1`, `fileParallelism: false`) because it
 configures and compiles real CMake projects, and two of those at once on one
@@ -304,6 +304,79 @@ because both are product decisions rather than defects in the parser:
   phases already disagree, which is itself part of why this is recorded rather
   than resolved here.
 
+### The database-backed template
+
+`tests/toolchain/database.test.ts` asks the one question a string cannot answer:
+whether what a service stored survives the process that stored it. It generates
+`rest-api --features db`, compiles it, starts it on a SQLite file, writes a value
+that did not exist before the run, stops it, **starts it again**, and reads the
+value back.
+
+The second process is the assertion. `src/application/templates.test.ts` covers
+the cheaper half — that declaring `db` replaces the in-memory map in the
+generated source — and that is a claim about a string, which is exactly what a
+handler that answers `{"stored":1}` and then forgets would also produce. The
+value written is unique to the run, so nothing the template could have canned
+satisfies the read.
+
+The recorded run, against libuvcpp 1.7.0, with
+`UVP_DATABASE_URL=sqlite://<root>/doc.db`. The start line is the service
+announcing the connection string it actually opened, which is how a caller learns
+the variable was read at all; the JSON bodies are the db module's own `to_json()`
+reflowed onto one line here, because it indents, and the service's own log lines
+are left out:
+
+```
+serving from sqlite://<root>/doc.db
+listening on 8097
+
+GET  /items          -> 200 {"table":"","columns":["id","value"],"rows":[]}
+GET  /items/nobody   -> 404 {"error":"not found"}
+POST /items/7        -> 201 {"stored":1}
+GET  /items/7        -> 200 {"table":"","columns":["id","value"],"rows":[{"id":"7","value":"hello-db"}]}
+POST /items/8        -> 400 {"error":"empty body"}          # no body sent
+POST /items/7        -> 500 {"error":"not stored","status":"exec_failed"}
+
+-rw-r--r-- 12288 …/doc.db                                   # the file, not the process
+
+--- a second process, nothing shared but the connection string ---
+GET  /items          -> 200 {"table":"","columns":["id","value"],"rows":[{"id":"7","value":"hello-db"}]}
+
+--- the same binary, a connection string it cannot open ---
+cannot open sqlite:///no/such/directory/svc.db: open_failed: …      (exit 1)
+```
+
+Four things behind that transcript are decisions rather than consequences:
+
+- **`/items` is empty at the start.** The in-memory template seeds two rows, so
+  this is also the shortest statement that the store behind these routes is not
+  that one.
+- **The duplicate key is a 500 and not a 409.** The layer underneath reports one
+  status for every failed `execute`, so a taken key and a dropped connection
+  arrive with the same name (`exec_failed`) and the service reports what it was
+  told. It is the same fact that makes the route a `POST`: an upsert is a promise
+  this code cannot keep.
+- **The refusal happens before the listener.** `init` opens the first connection
+  at startup, so a connection string that cannot be opened is an exit code, the
+  driver's own reason, and the URL echoed back — not a service that comes up
+  green, answers `/healthz`, and 500s on the first request that needs data,
+  reporting a deployment mistake as a bug in the request. The port is checked to
+  be free afterwards.
+- **With no `UVP_DATABASE_URL` at all it opens `sqlite://./<name>.db`** in the
+  working directory, and the lane asserts the file is there. That default is what
+  makes a freshly generated workspace runnable with nothing installed but
+  libuvcpp — SQLite is a library, not a server — and `uvp verify`, which starts a
+  service with no environment at all, is the caller that depends on it.
+
+The lane exercises **SQLite only**, and this is a limit of the host rather than a
+choice. libuvcpp loads the three drivers at run time, so all three dialects are
+the same template and the same generated code; MySQL and PostgreSQL additionally
+need a server to connect to. What the lane says about them is what it can see:
+nothing runs against them here, and the generated README says which of the three
+it was tried against rather than implying all three were. The port is 8096, in
+the toolchain lane's block, and the file reuses none of `realToolchain.test.ts`'s
+six.
+
 ### The native probe, against a generated service
 
 `tests/toolchain/nativeProbe.test.ts` answers the one question the rest of the
@@ -355,7 +428,7 @@ The four verdicts are asked of one workspace on one port, reusing one build,
 because that is what a caller does — and because a pass that leaked its service
 would show up as the _next_ pass failing to bind. Ports are allocated per file
 (`8301`, `8311`, `8321`, `8322`) and stay disjoint from the toolchain lane's
-`8090–8095`.
+`8090–8099`.
 
 `http2.test.ts` is the one file here whose subject is a transport rather than a
 verdict, and it is written so that it cannot pass by accident. The generated

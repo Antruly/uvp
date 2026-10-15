@@ -464,7 +464,7 @@
             "default": [
               "websocket"
             ],
-            "description": "Transport and service modules to build against. Each is checked against the installed libuvcpp build, not assumed: a feature the build lacks is reported before compiling.",
+            "description": "Transport and service modules to build against. Each is checked against the installed libuvcpp build, not assumed: a feature the build lacks is reported before compiling. `db` also changes what the generated service keeps, on the one template that keeps anything: `rest-api` is written with libuvcpp's connection pool in place of its in-memory map, and the other templates carry it as a build requirement only.",
             "type": "array",
             "items": {
               "type": "string",

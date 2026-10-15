@@ -53,6 +53,10 @@ export const initCommand: CommandSpec = {
     "one readable compile error rather than a cascade of failures inside libuvcpp's headers.",
     "http3-service needs --features tls,http3, and holds them: HTTP/3 runs on QUIC, which has no",
     "cleartext mode, so a request for it without a certificate is refused rather than downgraded.",
+    "db is the one feature that changes what a template keeps: rest-api is written with libuvcpp's",
+    "connection pool in place of its in-memory map, reading UVP_DATABASE_URL and defaulting to a",
+    "SQLite file in the working directory. The other templates have no store to back, so there it",
+    "is a build requirement and nothing more.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp init ./svc --name svc");

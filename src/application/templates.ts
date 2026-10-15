@@ -225,10 +225,13 @@ endif()
  * as the shape of the service.
  */
 const webPreamble = (input: TemplateInput, extra: readonly string[] = []): string => {
-  // `std::getenv`, for the TLS setup below. Included only when that setup is
-  // emitted, so a workspace without the tls module carries no include it cannot
-  // explain.
-  const featureIncludes = input.features.includes("tls") ? ["#include <cstdlib>"] : [];
+  // `std::getenv`, for the TLS and database setups below. Included only when one
+  // of them is emitted, so a workspace with neither carries no include it cannot
+  // explain. One condition rather than one include per feature, because two
+  // features that both read the environment read it the same way and a repeated
+  // `#include` is a line a reader has to stop and account for.
+  const readsEnvironment = input.features.includes("tls") || input.features.includes("db");
+  const featureIncludes = readsEnvironment ? ["#include <cstdlib>"] : [];
   return `#include <webapp/uvcpp_web_app.h>
 #include <webapp/uvcpp_web_request.h>
 #include <webapp/uvcpp_web_response.h>
@@ -403,12 +406,42 @@ ${webAppSetup(input)}
   });
 ${webTail(input)}`;
 
+/**
+ * `rest-api`'s store, chosen by whether the workspace declared the `db` module.
+ *
+ * This is the one template whose feature list changes *what the service keeps*
+ * rather than how it talks, and it is the reason `db` is the only feature that
+ * reaches a web template's route bodies. The alternative — a seventh template
+ * that is this one with a database under it — would be two copies of one route
+ * table, and the copy nobody edits is the one that drifts.
+ *
+ * The routes, the status codes and the JSON are the same either way. What the
+ * feature buys is durability, which is a fact about where the bytes live and not
+ * about what the service says, so a caller that swaps the store keeps their
+ * client.
+ *
+ * On the other web templates `db` remains a build requirement and a guard and
+ * nothing more: they have no store for it to back. That is stated in
+ * [docs/libuvcpp-features.md](../../docs/libuvcpp-features.md) rather than left
+ * for a reader to discover by diffing generated projects.
+ */
 const restApiMain = (input: TemplateInput): string =>
+  input.features.includes("db") ? restApiDatabaseMain(input) : restApiMemoryMain(input);
+
+/**
+ * The in-memory store, which is what `rest-api` generates without `db`.
+ *
+ * A map in the process, so the workspace is runnable with nothing installed but
+ * libuvcpp — and, just as much, so that the difference the `db` feature makes is
+ * visible: the same requests against the same routes answer from a file instead.
+ */
+const restApiMemoryMain = (input: TemplateInput): string =>
   `${webPreamble(input, ["#include <unordered_map>"])}
 namespace {
 
 // An in-memory store, so the template is runnable with no database. Replace it
-// with the db module when the service needs durability.
+// with the db module when the service needs durability — \`uvp init --features db\`
+// generates that version of this file.
 std::unordered_map<std::string, std::string> g_items = {{"1", "first"}, {"2", "second"}};
 
 std::string JsonItem(const std::string& id, const std::string& value) {
@@ -456,6 +489,247 @@ ${webAppSetup(input)}
     resp.status(200).json_str(JsonItem(found->first, found->second));
     resp.end();
   });
+${webTail(input)}`;
+
+/**
+ * The db module's headers, as the database-backed template includes them.
+ *
+ * Four of them, named individually: `<db/uvcpp_db.h>` is the single client and
+ * this template uses the pool instead, because a handler that borrows the one
+ * client serialises every request behind it. `uvcpp_db_params.h` is included for
+ * the bound parameters, and the status and table headers for the two types the
+ * callbacks are declared in terms of.
+ */
+const DATABASE_INCLUDES = [
+  "#include <db/uvcpp_db_params.h>",
+  "#include <db/uvcpp_db_pool.h>",
+  "#include <db/uvcpp_db_status.h>",
+  "#include <db/uvcpp_db_table.h>",
+] as const;
+
+/**
+ * The database-backed service: the same routes as the in-memory template, over
+ * `uvcpp_db_pool`.
+ *
+ * Three things here are about the shape of a request-routed query rather than
+ * about SQL, and each is written down where it is used because each fails
+ * silently: the handler must not run the query itself (it is on the loop
+ * thread), the callback must resume the chain and not only end the response, and
+ * the dispatch itself can fail without any callback ever arriving.
+ *
+ * The connection string is read once, at startup, and the schema is created
+ * there too. A service that discovered a missing table on its first request
+ * would be reporting a deployment problem as a 500, and the driver's own reason
+ * — which is the part worth reading — would be in a log line nobody is looking
+ * at yet.
+ */
+const restApiDatabaseMain = (input: TemplateInput): string =>
+  `${webPreamble(input, DATABASE_INCLUDES)}
+namespace {
+
+// The schema, created at startup and idempotently, so a deployed service needs
+// nothing but a connection string. \`VARCHAR(255)\` for the key rather than TEXT
+// because MySQL cannot index a TEXT column without a prefix length; the other
+// two dialects take it as written. A deployment with real migrations to run
+// should drop this statement rather than keep it as the source of truth.
+const char* const kSchema =
+    "CREATE TABLE IF NOT EXISTS items (id VARCHAR(255) PRIMARY KEY, value TEXT NOT NULL)";
+
+// A failure body. The status name is the driver's own code and not a guess at
+// what went wrong: the enum carries one code for every failed execute, so "the
+// key was already taken" and "the connection dropped" arrive here with the same
+// name, and the template reports which one it got rather than inventing a
+// distinction the layer underneath does not make.
+std::string DbError(const char* what, uvcpp_db_status status) {
+  return std::string(R"({"error":")") + what + R"(","status":")" +
+         uvcpp_db_status_name(status) + R"("})";
+}
+
+// The read statements. No trailing semicolon: libuvcpp passes a statement to the
+// driver as written, and the three dialects do not agree on whether to accept one.
+const char* const kSelectAll = "SELECT id, value FROM items ORDER BY id";
+const char* const kSelectOne = "SELECT id, value FROM items WHERE id = ?";
+
+}  // namespace
+
+int main() {
+${webAppSetup(input)}
+  // Where the database is, from the environment. A generated service cannot know
+  // where a deployment keeps its database, and a path hardcoded in generated
+  // source is how a template ends up wrong in every environment but the one it
+  // was written in.
+  //
+  //   UVP_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/app ./${input.name}
+  //
+  // Unset, it opens a SQLite file in the working directory. That default is what
+  // makes a freshly generated workspace runnable with nothing installed but
+  // libuvcpp — SQLite is a library, not a server — and it is a development
+  // default, printed below. The MySQL and PostgreSQL drivers are loaded at run
+  // time, so pointing this at one of them needs no rebuild, only the client
+  // library on the host.
+  const char* url_env = std::getenv("UVP_DATABASE_URL");
+  const std::string url = (url_env != nullptr && url_env[0] != '\\0')
+                              ? std::string(url_env)
+                              : std::string("sqlite://./${input.name}.db");
+
+  // The pool, not the single client: a handler runs on the event loop thread and
+  // may not wait on a connection another request is holding. \`init\` opens the
+  // first connection here and now, so a connection string that cannot be opened
+  // is reported at startup with the driver's own reason instead of as a 500 on
+  // the first request that needs it.
+  uvcpp_db_pool pool;
+  const uvcpp_db_status opened = pool.init(url, 1, 4);
+  if (!uvcpp_db_ok(opened)) {
+    std::cerr << "cannot open " << url << ": " << uvcpp_db_status_name(opened) << ": "
+              << pool.last_error() << "\\n";
+    return 1;
+  }
+
+  // A bound on every statement the pool runs. Without one, a statement that never
+  // returns holds its worker thread for as long as the process lives — and those
+  // worker threads are libuv's own, shared with DNS and file IO. The pool is what
+  // opens the connections, so it is the only place this can be set.
+  pool.set_timeout_ms(5000);
+
+  const uvcpp_db_status created = pool.execute(kSchema, uvcpp_db_params());
+  if (!uvcpp_db_ok(created)) {
+    std::cerr << "cannot create the items table in " << url << ": "
+              << uvcpp_db_status_name(created) << ": " << pool.last_error() << "\\n";
+    return 1;
+  }
+
+  std::cout << "serving from " << url << "\\n" << std::flush;
+
+  app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+    // This route does not touch the database, on purpose: it answers whether the
+    // process is serving. A database that is down is a fact about the routes that
+    // need it, not a reason for the process to look dead.
+    resp.status(200).json_str(R"({"status":"ok"})");
+    resp.end();
+  });
+
+  // GET /items — every row, as the db module's own JSON
+  // (\`{"table":…,"columns":[…],"rows":[…]}\`), so the escaping is libuvcpp's and
+  // not a hand-rolled encoder's.
+  //
+  // The query is dispatched rather than run here. A handler runs on the event
+  // loop thread and a database call blocks for as long as the server takes, so
+  // the handler hands the work to the pool and returns; the callback runs on this
+  // loop's thread, exactly once, and writes the response. Three things about that
+  // hand-off are worth reading before changing this handler:
+  //
+  //   - \`next\` is captured **by value**, and that is what tells the framework
+  //     this link will resume later, so the chain waits for it rather than
+  //     finishing the request the moment the handler returns.
+  //   - \`rp->end()\` marks the response written; \`next()\` is what resumes the
+  //     chain and sends it. A callback that ends without resuming leaves the
+  //     client waiting for a reply that is never sent.
+  //   - When the pool cannot dispatch the query it returns non-zero and **never
+  //     calls the callback**. That case is answered here, synchronously, or the
+  //     request waits forever for a callback that does not exist.
+  //
+  // \`resp\` itself is not captured: \`rp\` points into the context that \`next\`
+  // keeps alive, and it is the pointer the callback needs.
+  app.get("/items",
+          [&app, &pool](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next next) {
+            uvcpp_web_response* const rp = &resp;
+            const int dispatched =
+                pool.query(app.loop(), kSelectAll,
+                           [rp, next](uvcpp_db_status status, const uvcpp_db_table& rows) {
+                             if (uvcpp_db_ok(status)) {
+                               rp->status(200).json_str(rows.to_json());
+                             } else {
+                               rp->status(500).json_str(DbError("query failed", status));
+                             }
+                             rp->end();
+                             next();
+                           });
+            if (dispatched != 0) {
+              resp.status(503).json_str(R"({"error":"the database is not accepting work"})");
+              resp.end();
+            }
+          });
+
+  // GET /items/:id — one row, or 404. The value is a bound parameter and never
+  // string concatenation into the statement. \`?\` is the placeholder SQLite and
+  // MySQL use, and libuvcpp passes it to the driver untranslated — so a
+  // PostgreSQL connection string needs \`$1\` here instead, which is a change to
+  // this line and to no other.
+  app.get("/items/:id",
+          [&app, &pool](uvcpp_web_request& req, uvcpp_web_response& resp, uvcpp_web_next next) {
+            const std::string* const id = req.param("id");
+            if (id == nullptr) {
+              resp.status(400).json_str(R"({"error":"missing id"})");
+              resp.end();
+              return;
+            }
+            uvcpp_db_params params;
+            params.add(*id);
+            uvcpp_web_response* const rp = &resp;
+            const int dispatched =
+                pool.query(app.loop(), kSelectOne, params,
+                           [rp, next](uvcpp_db_status status, const uvcpp_db_table& rows) {
+                             if (!uvcpp_db_ok(status)) {
+                               rp->status(500).json_str(DbError("query failed", status));
+                             } else if (rows.empty()) {
+                               rp->status(404).json_str(R"({"error":"not found"})");
+                             } else {
+                               rp->status(200).json_str(rows.to_json());
+                             }
+                             rp->end();
+                             next();
+                           });
+            if (dispatched != 0) {
+              resp.status(503).json_str(R"({"error":"the database is not accepting work"})");
+              resp.end();
+            }
+          });
+
+  // POST /items/:id — store the request body as this item's value.
+  //
+  // The body is the value verbatim, so this service parses no document format
+  // and cannot fail on a malformed one. It is a POST and not a PUT because of
+  // what the layer underneath can report: a failed execute carries one status
+  // code whether the key was already taken or the connection dropped, so an
+  // upsert would be a promise this code cannot keep, and a create that reports
+  // the failure is the answer that is true.
+  app.post("/items/:id",
+           [&app, &pool](uvcpp_web_request& req, uvcpp_web_response& resp, uvcpp_web_next next) {
+             const std::string* const id = req.param("id");
+             if (id == nullptr) {
+               resp.status(400).json_str(R"({"error":"missing id"})");
+               resp.end();
+               return;
+             }
+             const std::string value = req.body_str();
+             if (value.empty()) {
+               resp.status(400).json_str(R"({"error":"empty body"})");
+               resp.end();
+               return;
+             }
+             uvcpp_db_params params;
+             params.add(*id);
+             params.add(value);
+             uvcpp_web_response* const rp = &resp;
+             const int dispatched =
+                 pool.execute(app.loop(), "INSERT INTO items (id, value) VALUES (?, ?)", params,
+                              [rp, next](uvcpp_db_status status, int64_t affected) {
+                                if (!uvcpp_db_ok(status)) {
+                                  rp->status(500).json_str(DbError("not stored", status));
+                                } else {
+                                  // The driver's own count, passed on as a number
+                                  // rather than read as a verdict.
+                                  rp->status(201).json_str(
+                                      std::string(R"({"stored":)") + std::to_string(affected) + "}");
+                                }
+                                rp->end();
+                                next();
+                              });
+             if (dispatched != 0) {
+               resp.status(503).json_str(R"({"error":"the database is not accepting work"})");
+               resp.end();
+             }
+           });
 ${webTail(input)}`;
 
 const websocketEchoMain = (input: TemplateInput): string =>
@@ -804,6 +1078,68 @@ with the reason OpenSSL gave — which is the honest result, and what
 };
 
 /**
+ * The section a `db` workspace's README needs and the others must not carry.
+ *
+ * Four facts here are not visible from the generated source without reading
+ * libuvcpp's headers: which connection strings work, that only one of the three
+ * dialects needs nothing installed on the host, that the placeholder syntax is
+ * the dialect's business rather than the library's, and that the async call
+ * shares libuv's default worker pool with DNS and file IO. All four are
+ * deployment facts, and the second and fourth are the ones that turn into a
+ * mystery at three in the morning.
+ */
+const databaseReadme = (input: TemplateInput): string => {
+  if (!input.features.includes("db")) return "";
+  return `
+## Database
+
+This service keeps its items in a database, which it reaches through libuvcpp's
+db module. The connection string comes from the environment:
+
+\`\`\`bash
+UVP_DATABASE_URL=sqlite:///var/lib/${input.name}/app.db ./build/${input.name}
+\`\`\`
+
+With it unset the service opens \`./${input.name}.db\` in the working directory
+and prints the path it is serving from at startup. That default is a SQLite file
+— a library, not a server — and it is what makes a generated workspace runnable
+with nothing installed but libuvcpp. \`uvp verify\` starts this service with no
+environment, so it verifies against that default.
+
+Three connection strings are accepted:
+
+| Dialect    | Example                                    | Needs on this host     |
+| ---------- | ------------------------------------------ | ---------------------- |
+| SQLite     | \`sqlite:///var/lib/app.db\`                 | the library only       |
+| MySQL      | \`mysql://user:pass@127.0.0.1:3306/app\`     | the client library     |
+| PostgreSQL | \`postgres://user:pass@127.0.0.1:5432/app\`  | the client library     |
+
+The drivers are loaded **at run time**, so the project itself still links nothing
+but \`uvcpp\` and pointing it at MySQL or PostgreSQL needs no rebuild — but the
+client library has to be on the host, and its absence is reported at startup
+rather than on the first request.
+
+Two things to know before pointing this at PostgreSQL:
+
+- The placeholders in \`src/main.cpp\` are \`?\`. PostgreSQL wants \`$1\`, \`$2\`, and
+  libuvcpp passes a statement to the driver untranslated, so the three statements
+  in that file are the lines to change.
+- The schema is created at startup with \`CREATE TABLE IF NOT EXISTS\`. That is
+  what keeps a fresh deployment to one environment variable; a deployment with
+  migrations of its own should drop the statement.
+
+The pool opens at most 4 connections and sets a 5 s statement timeout on each.
+Both are set in \`src/main.cpp\`, on \`pool.init\` and \`pool.set_timeout_ms\`.
+
+Queries run on libuv's worker pool — 4 threads unless \`UV_THREADPOOL_SIZE\` says
+otherwise — and that pool is shared with DNS and file IO. A service with more
+concurrent database work than that should raise it with \`UV_THREADPOOL_SIZE\` or
+\`uvcpp_set_threadpool_size(n)\` **before the first query is dispatched**; after
+that the size is fixed for the life of the process.
+`;
+};
+
+/**
  * The section an HTTP/3 workspace's README needs and the others must not carry.
  *
  * Two things about this service are not visible from the source in the way they
@@ -892,7 +1228,7 @@ binary's location:
 \`\`\`
 
 ${portNote(template, input)}
-${tlsReadme(input)}${template === "http3-service" ? http3Readme(input) : ""}
+${tlsReadme(input)}${databaseReadme(input)}${template === "http3-service" ? http3Readme(input) : ""}
 ## Verify
 
 \`\`\`bash
@@ -909,7 +1245,16 @@ export const renderTemplate = (
     { path: "src/main.cpp", content: MAIN_BY_TEMPLATE[template](input) },
     { path: "uvp.json", content: manifest(input, template) },
     { path: "README.md", content: readme(input, template) },
-    { path: ".gitignore", content: "build/\ncompile_commands.json\n" },
+    {
+      path: ".gitignore",
+      // A database-backed workspace has a database in it, and a SQLite database
+      // is several files beside the one named in the connection string. Ignored
+      // because it is where the *running* service writes, not source — the same
+      // reason the build directory is.
+      content:
+        "build/\ncompile_commands.json\n" +
+        (input.features.includes("db") ? "*.db\n*.db-journal\n*.db-wal\n*.db-shm\n" : ""),
+    },
   ];
   if (template === "static-files") {
     files.push({
