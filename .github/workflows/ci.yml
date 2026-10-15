@@ -549,6 +549,11 @@ jobs:
           # .cache/ is gitignored: in a fresh checkout it does not exist yet.
           mkdir -p .cache
           npm pack --pack-destination .cache
+      # Before the install, because a tarball whose bytes depend on where or when
+      # it was packed is not the artifact a consumer can check against a source
+      # tree. This packs three more times from two places and compares digests.
+      - name: Reproduce the archive from its own contents
+        run: npm run verify:pack-reproducible
       - name: Install it into an empty prefix, with lifecycle scripts disabled
         run: |
           set -euo pipefail

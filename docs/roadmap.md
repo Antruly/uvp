@@ -406,7 +406,7 @@ implicit.
 | ✅  | Every third-party `uses:` under `.github/` is pinned to a commit SHA with the release named beside it, and `npm run verify:actions` fails one that is not — or that pins the same action at two SHAs. Each SHA was resolved with `gh api repos/<owner>/<repo>/git/ref/tags/v4`, never from memory, and each `# vX.Y.Z` label read from the tag list. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ⬜  | Reproducible builds for the packaged tarball                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ✅  | The packaged tarball is a fact about its contents: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — and fails if any digest differs. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                             |
 | ⬜  | A link failure has no diagnostic format here. `FAILED: hello`, `ld: cannot find -luvcpp`, `collect2: error: ld returned 1 exit status` are all dropped by the build-output parser, and no test in this repository has ever captured a real link failure to write a format from — the drive-letter fix beside it is exactly why the gap is left open rather than closed from a plausible-looking log, since a pattern invented that way is how a parser starts inventing diagnostics. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -417,6 +417,7 @@ implicit.
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and passed on every run since, local and CI. The mechanism is unknown and the row is here rather than in a commit message because an intermittent gate teaches people to re-run until it is green. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ⬜  | `tests/conformance/captureReplay.test.ts` failed once, locally, with `TransportFailure: socket hang up` from a request to a loopback fixture (2026-10-16T05:59:33Z, inside a full gate run) and has passed on every run since. The client keeps pooled connections, so this is the class where a peer closes a socket under a request — but reuse of a socket closed long ago was eliminated, the client's own idle close samples clean at 2400 reuses, and the mechanism is not established. The probes were scratch scripts outside the repository. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                                                                        |
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens |
 | ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down. Six major bumps now sit open as Dependabot pull requests (`#1`–`#6`, per [the pins above](#action-pins)), each of which is where this would be addressed; two of those bodies name Node.js 24 in their release notes and four do not mention a runtime at all, so which majors clear the warning is unobserved                                                                                                                                                                                                                                                                                              |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -782,6 +783,57 @@ be tested against anything. So the row above stays open, and what was done inste
 that the assertion now prints the failure's message and details alongside the code: a
 repeat of the first mechanism prints an error with no `UvpFailure` in it, and a repeat
 of the second prints `UvpFailure`, which is the whole difference between them.
+
+### A socket hang-up in the conformance lane {#socket-hang-up}
+
+`tests/conformance/captureReplay.test.ts` failed once, on this machine, inside a
+full local gate: `reports a body that changed as a difference, with the status
+still matching` ended with `TransportFailure: socket hang up` from
+`src/application/httpClient.ts:414` (2026-10-16T05:59:33Z). That log lives outside
+the repository, so the run is described rather than linked; the same file passed
+in the gate run afterwards and in every other local and CI run, and its twelve
+tests take about 250 ms.
+
+Both ends are Node's own defaults, which is what makes this a class rather than a
+one-off. uvp's client calls `http.request` with no `agent`, so it gets
+`http.globalAgent`, keep-alive with no idle timeout since Node 19; the capture
+proxy is `http.createServer(...)` with no `keepAliveTimeout`, so it advertises
+`keep-alive: timeout=5`. Connections are reused, and a failure can therefore be
+a socket rather than a connection.
+
+**Eliminated: reusing a socket the server closed long ago.** Against a Node server
+with the default idle close, a request issued six seconds after the previous one
+did not reuse the dead socket at all — the agent dropped it, opened a new one and
+answered 200.
+
+**The first sweep said nothing, and the reason is worth keeping.** Sweeping
+`keepAliveTimeout` down to 50 ms to sample the close cheaply gave 3000 requests
+with `reused=false` on every one: below one second the server advertises
+`timeout=0`, and the client reads that as "never reuse". The sweep never sampled
+the boundary it was aimed at. It is recorded because "0 of 3000, so it is not the
+race" is the conclusion it invites and the wrong one.
+
+**Where the boundary is.** With a server advertising `timeout=2`, reuse survives
+an 800 ms gap and is gone by 1200 ms: the client closes an idle pooled socket
+itself, a second before the server would. So the window is not the server's FIN,
+and a request cannot be written into a socket the peer closed minutes ago.
+
+**And 4800 samples across it produced nothing.** Twenty concurrent requests to
+establish twenty pooled sockets, a gap swept over the client's own close, then
+twenty more: 2400 of the 4800 reused a pooled socket, and not one failed. If this
+is the mechanism, it is rarer than one in 2400 reuses. The pool width is part of
+the model — the lane's own pattern is one socket at a time — and the probes were
+scratch scripts under `/tmp`, not lanes here, so nothing in this repository
+re-runs them.
+
+**What is left** is a peer that closes a connection exactly as a request is
+written to it: the fixture child process, the proxy, or the kernel under the load
+of a gate that was running real CMake builds alongside. None of those was
+examined, and the mechanism stays unknown. Nothing was changed on this evidence,
+and one candidate fix is named so the next person does not have to re-derive the
+trade: making the client open one connection per exchange would remove the class
+and would also change what `uvp_load_test` measures, which is not a trade an
+unreproduced failure should settle.
 
 ### The skip list, wherever a run sets its own reporters {#the-skip-list}
 
@@ -1179,6 +1231,58 @@ that can affect a verdict: a step-output comparison such as
 `steps.openssl-cache.outputs.cache-hit != 'true'` is recorded and not parsed, since
 parsing it would make the check refuse to run on workflows holding expressions it
 has no business judging.
+
+### Pack reproducibility {#pack-reproducibility}
+
+The tarball is the artifact a user installs, and `npm pack` is the last thing
+between the source tree and `npm publish`. If those bytes depend on where the
+checkout sits, when it was packed, or which directory received it, then the
+digest a consumer can compute is not a fact about the source — so it cannot be
+checked against a tag, and a release cannot be reproduced by anyone who wants to.
+`npm run verify:pack-reproducible` states the claim in the one way that can be
+tested: **packing the same contents twice, from two places, must produce the same
+bytes.**
+
+**The three packs, and the one thing each varies.** A second pack of the tree,
+seconds later, into another directory: the moment and the destination are not
+inputs. Then the first tarball's own contents, unpacked at a different absolute
+path and depth with fresh mtimes: the path and the clock are not inputs. Then the
+tree again, after all of that, which fails if packing has a side effect on what
+it packs.
+
+**Why the copy is an unpacking rather than a copy of "the inputs".** Which files
+go into a tarball is npm's answer, from `files[]`, `.npmignore`, and npm's own
+defaults. Copying the inputs would mean writing a second implementation of that
+answer, and a second implementation drifts: the day `files[]` gains an entry, the
+copy misses it and the check compares two trees that are no longer the same tree.
+Unpacking the first tarball cannot drift, because it is the artifact's own
+contents — and it asks the sharper question, that packing what the tarball holds
+produces the tarball.
+
+**The check had to be fixed before it was worth anything.** Its first version
+packed two of the four into one directory. `npm pack` names the file after the
+package, so the second pack replaced the first, and the comparison then read one
+tarball twice: a check that reported agreement while never looking at the second
+pack. Mutation testing found it — appending a newline to the unpacked copy failed
+the run, and the failure was attributed to the _second destination_, which is
+impossible unless the two are the same file. Each pack now has its own directory
+and is digested where it lands.
+
+**Measured, on 2026-10-16.** The digest is identical across repeated packs, across
+destinations, across the contents being unpacked at another path and depth, and
+across a clean rebuild of `dist/` between one run and the next (`npm run compile`
+deletes and rewrites it). It is also identical with the `prepare` lifecycle and
+without it, which is why all three packs pass `--ignore-scripts`: a copy of the
+tarball's contents has no `node_modules` for `husky` to run in, and holding that
+constant keeps one thing varying at a time.
+
+**What is not established, and what a pass therefore does not say.** Another
+machine, another npm version, another filesystem: the unpacked copy is the
+closest local stand-in for a different checkout and it is a stand-in, not a second
+host. So the honest reading of a green run is "packaging is a function of the
+contents on this toolchain", not "anyone can reproduce this digest". Nothing else
+in the release path is pinned either — no SBOM, and no lane that installs the
+tarball on a second platform; both remain rows above.
 
 ## Not planned
 

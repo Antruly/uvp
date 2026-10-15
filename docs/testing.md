@@ -634,8 +634,9 @@ without naming the skip reporter. The flags replace what `vitest.config.ts`
 registers rather than adding to it, so the step loses the names and keeps the
 count — green, and unreadable. It is the same defect the discovery check exists
 for, one level down: a lane that reports nothing looks like a lane that passed.
-These repository checks are scripts rather than turbo tasks, and each one runs in
-the static job.
+These repository checks are scripts rather than turbo tasks. Every one of them
+runs in the static job except the pack check, which needs a built `dist/` and so
+runs in the packaged rehearsal job instead.
 
 **Action pins.** `npm run verify:actions` fails if a `uses:` under `.github/`
 names a third-party action by anything but a 40-hex commit SHA with the release
@@ -658,6 +659,17 @@ one as the other is what the check got wrong first. `actionlint` checks what a
 workflow says about itself and cannot see any of this: no single job's condition
 is wrong, so nothing is wrong until two of them are read together. See
 [the roadmap](roadmap.md#artifact-guards) for the run that made it necessary.
+
+**Pack reproducibility.** `npm run verify:pack-reproducible` packs three more
+times — twice more from the tree, once from the first tarball's own contents
+unpacked at a different absolute path — and fails if the bytes differ. It is the
+one check here whose subject is the artifact rather than the repository: a
+tarball whose bytes depend on the checkout's path or on the clock is a tarball
+nobody can reproduce from a tag. Packing what the tarball holds is what asks that
+question without a second implementation of npm's file selection. It needs
+`dist/`, so it fails on an unbuilt tree rather than passing over one. See
+[the roadmap](roadmap.md#pack-reproducibility) for what it does and does not
+establish.
 
 **Generated files.** The tool catalog, package metadata, skill metadata, and
 error schema are generated from source. CI regenerates them and fails on a diff,

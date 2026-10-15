@@ -120,10 +120,15 @@ of this fails:
 ```bash
 npm ci
 npm run compile
-npm run check:pr              # the static gate, all three repository checks, and the whole suite
+npm run check:pr              # the static gate, every repository check, and the whole suite
 npm run test:toolchain        # skipped if libuvcpp is absent
 npm pack --dry-run            # inspect what will ship
 ```
+
+`check:pr` includes the pack reproducibility check, which packs the tarball three
+more times and compares digests — see
+[what it establishes](#reproducibility-of-the-tarball), and note that it needs
+`dist/`, so it belongs after `npm run compile` rather than before it.
 
 Then the packaged check, which is the one that catches the mistakes that matter:
 
@@ -139,6 +144,28 @@ Installing the tarball rather than the workspace is the point. A package that
 works from `node_modules` in the repository and fails from a tarball is usually
 missing a file from `files[]` or reaching for a path that only exists in a
 checkout.
+
+### Reproducibility of the tarball {#reproducibility-of-the-tarball}
+
+The tarball is meant to be a fact about the source tree: the same tree packs to
+the same bytes, so the digest a consumer computes can be checked against a tag,
+and a release can be reproduced by anyone who wants to. `npm run
+verify:pack-reproducible` — part of `check:pr`, and a step in the packaged
+rehearsal — packs the tree, packs it again seconds later into a different
+directory, unpacks the first tarball's contents at another absolute path and
+packs those, and fails if any digest differs. All three pass `--ignore-scripts`,
+because a copy of the tarball's contents has no `node_modules` for `husky` to run
+in; packing this tree with the lifecycle scripts and without them produced the
+same digest, which is why holding that constant costs nothing.
+
+Measured on 2026-10-16: the digest is stable across repeated packs, across pack
+destinations, across the contents being unpacked at a different path and depth,
+and across a clean rebuild of `dist/` in between (`npm run compile` deletes and
+rewrites it). What that does _not_ establish is another machine, another npm
+version, or a different filesystem: the unpacked copy is the closest local
+stand-in for a different checkout and it is a stand-in. The npm version is held
+by `packageManager` in `package.json`, and the check is a check about _this_
+toolchain's packing until someone runs it elsewhere.
 
 ## Maintainer checklist
 
