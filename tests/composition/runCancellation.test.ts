@@ -140,7 +140,18 @@ describe("a run whose caller withdrew", () => {
       clear();
     }
 
-    expect(failure?.code).toBe("cancelled");
+    // The failure's own words travel with the code, because of a CI run that has
+    // never been explained: `expected 'execution_failure' to be 'cancelled'` in run
+    // 38805381480, 21.5 ms into the request — far too early to be the cancellation
+    // grace. The two mechanisms that could produce that code differ in exactly this
+    // text (a real failure from a second copy of the errors module keeps its
+    // message; an unrecognised error carries its own), so a repetition should print
+    // the one fact that tells them apart rather than send the next reader through
+    // the same search. See docs/roadmap.md#the-cancellation-flake.
+    expect(
+      failure?.code,
+      `${String(failure?.message)} | details: ${JSON.stringify(failure?.details)}`,
+    ).toBe("cancelled");
     // The old wording was "the probe did not answer within 10000 ms", filed as an
     // unknown about the service with the bound as its reason. That the caller
     // stopped waiting is not a fact about the service.
