@@ -308,7 +308,7 @@ jobs:
             cmake ninja-build g++ pkg-config libsqlite3-dev libuv1-dev
       - name: Cache OpenSSL 3.5 with the QUIC API
         id: openssl-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/openssl-quic
           key: openssl-3.5.0-${{ runner.os }}-${{ runner.arch }}-quic
@@ -375,7 +375,7 @@ jobs:
             >> "$GITHUB_ENV"
       - name: Cache the libuvcpp build
         id: libuvcpp-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/uvcpp-prefix
           # The key names the flag set as well as the version: a change to the
