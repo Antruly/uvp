@@ -104,7 +104,7 @@ jobs:
         run: npm run format:check
       - name: Upload static diagnostics
         if: always() && needs.changes.outputs.code == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: static-check-reports
           path: .cache/static-checks/
@@ -133,7 +133,7 @@ jobs:
       - name: Generate the derived artifacts the built lanes read
         run: npm run artifacts:tool-catalog
       - name: Upload the runtime the built lanes consume
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: uvp-test-runtime
           path: |
@@ -164,7 +164,7 @@ jobs:
           VITEST_BLOB_LABEL: source
       - name: Upload source test reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vitest-report-source
           path: .vitest/blob/*
@@ -202,7 +202,7 @@ jobs:
           VITEST_BLOB_LABEL: built
       - name: Upload shard reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vitest-report-built-${{ strategy.job-index }}
           path: .vitest/blob/*
@@ -261,7 +261,7 @@ jobs:
           fi
       - name: Upload merged results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results
           path: |
@@ -483,7 +483,7 @@ jobs:
         run: npm run test:toolchain
       - name: Upload toolchain diagnostics
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: toolchain-lane-${{ github.run_attempt }}
           path: .cache/toolchain/
