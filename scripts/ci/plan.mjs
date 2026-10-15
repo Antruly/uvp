@@ -19,22 +19,68 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
-/** Path prefixes and the lanes they select. First match wins per file. */
+/**
+ * The lanes a matching change selects.
+ *
+ * **Every rule that matches contributes its lanes**, rather than the first match
+ * winning. That is the whole reason the shape is `lanes` and not `lane`: a file
+ * that can break two things has to be able to select two lanes, and under a
+ * first-match-wins table it could not. The table was one until this was written,
+ * and the effect was not a smaller diff — it was that every `toolchain` entry
+ * below was unreachable, because `src/application/templates.ts` is matched by
+ * `src/` and `tests/toolchain/` by `tests/` first. The real-libuvcpp lane, the
+ * one that compiles a generated project, was therefore never selected by a
+ * change to the template that generates it. A rule a reader can see and a plan
+ * that ignores it is worse than no rule.
+ *
+ * The default, when nothing matches, is `code`: a file this table has never
+ * heard of is more likely to be TypeScript than to be documented prose, and the
+ * cost of the wrong guess is one extra lane rather than a silent gap.
+ */
 const LANE_RULES = [
+  // The ordinary source, and the reason a rule's lanes are a list: the entries
+  // below that also match `src/` files contribute their own lane alongside this
+  // one rather than replacing it.
+  { lanes: ["code"], test: (path) => path.startsWith("src/") },
   {
-    lane: "code",
-    test: (path) => path.startsWith("src/"),
+    // The generated C++ and the mapping behind it. These select the real
+    // toolchain lane as well as `code`, because the only proof that a template
+    // works is compiling and running it — and the TypeScript that emits it still
+    // has to typecheck.
+    lanes: ["toolchain"],
+    test: (path) => path === "src/application/templates.ts",
+  },
+  { lanes: ["toolchain"], test: (path) => path === "src/application/ToolchainProvider.ts" },
+  { lanes: ["toolchain"], test: (path) => path.startsWith("src/toolchains/") },
+  { lanes: ["code"], test: (path) => path.startsWith("tests/") },
+  { lanes: ["toolchain"], test: (path) => path.startsWith("tests/toolchain/") },
+  {
+    // The probe's own C++. It is compiled by hand and never by the Node test
+    // run, so without this rule an edit to an exchange handler selects only the
+    // `code` lane — which lints TypeScript and would report a clean pass about a
+    // file it never read. The lanes that can catch a broken probe are the ones
+    // that build it and run it against a generated service.
+    lanes: ["toolchain"],
+    test: (path) => path.startsWith("native/"),
+  },
+  { lanes: ["code"], test: (path) => path.startsWith("scripts/") },
+  {
+    // This script configures and compiles the probe, so a wrong libuvcpp option
+    // here is a probe that does not build — and the `code` lane cannot see that,
+    // since it never runs a compiler.
+    lanes: ["toolchain"],
+    test: (path) => path === "scripts/build-native-probe.mjs",
   },
   {
-    lane: "code",
-    test: (path) => path.startsWith("tests/"),
+    // The packaged entry point is both: `code` because it is a file this
+    // repository's own checks read, and `package` because the packed tarball is
+    // what `package-e2e` installs and speaks MCP to.
+    lanes: ["package"],
+    test: (path) => path.startsWith("scripts/uvp.mjs"),
   },
+  { lanes: ["package"], test: (path) => path.startsWith("server.json") },
   {
-    lane: "code",
-    test: (path) => path.startsWith("scripts/"),
-  },
-  {
-    lane: "code",
+    lanes: ["code"],
     test: (path) =>
       [
         "package.json",
@@ -49,40 +95,10 @@ const LANE_RULES = [
         ".jscpd.json",
       ].includes(path),
   },
-  {
-    // The generated C++ and the mapping behind it. These select the real
-    // toolchain lane even though they are ordinary source files, because the
-    // only proof that a template works is compiling and running it.
-    lane: "toolchain",
-    test: (path) => path === "src/application/templates.ts",
-  },
-  {
-    lane: "toolchain",
-    test: (path) => path === "src/application/ToolchainProvider.ts",
-  },
-  {
-    lane: "toolchain",
-    test: (path) => path.startsWith("src/toolchains/"),
-  },
-  {
-    lane: "toolchain",
-    test: (path) => path.startsWith("tests/toolchain/"),
-  },
-  {
-    lane: "package",
-    test: (path) => path.startsWith("scripts/uvp.mjs"),
-  },
-  {
-    lane: "package",
-    test: (path) => path.startsWith("server.json"),
-  },
-  {
-    lane: "docs",
-    test: (path) => path.startsWith("docs/"),
-  },
-  { lane: "docs", test: (path) => path.startsWith("README") },
-  { lane: "docs", test: (path) => path.startsWith(".agents/skills/") },
-  { lane: "workflows", test: (path) => path.startsWith(".github/") },
+  { lanes: ["docs"], test: (path) => path.startsWith("docs/") },
+  { lanes: ["docs"], test: (path) => path.startsWith("README") },
+  { lanes: ["docs"], test: (path) => path.startsWith(".agents/skills/") },
+  { lanes: ["workflows"], test: (path) => path.startsWith(".github/") },
 ];
 
 const run = (command, args) =>
@@ -107,13 +123,61 @@ const classify = (files) => {
   const lanes = new Set();
   for (const file of files) {
     const normalized = file.replace(/^\.\//u, "");
-    const rule = LANE_RULES.find((candidate) => candidate.test(normalized));
-    lanes.add(rule ? rule.lane : "code");
+    const matched = LANE_RULES.filter((candidate) => candidate.test(normalized));
+    // No `.find`, and no default per rule: every match counts, and a file no
+    // rule knows is `code`.
+    if (matched.length === 0) lanes.add("code");
+    for (const rule of matched) for (const lane of rule.lanes) lanes.add(lane);
   }
   return lanes;
 };
 
+/**
+ * What the table above is supposed to do, checked against the table itself.
+ *
+ * The bug this exists for is the one that is invisible from a single run: a rule
+ * that reads correctly and never fires, because a broader rule above it took the
+ * file. Nothing in a plan's own output would say so — the lanes it printed would
+ * look deliberate, and the lane that was missing is the one nobody asked for.
+ * So the expectations are named here as paths, and a rule that stops being
+ * reachable fails the plan rather than quietly narrowing the verification.
+ *
+ * These are claims about *selection*, not about what a lane does; the lanes
+ * themselves are `ci.yml`'s business.
+ */
+const EXPECTED_LANES = [
+  ["src/application/templates.ts", ["code", "toolchain"]],
+  ["src/application/ToolchainProvider.ts", ["code", "toolchain"]],
+  ["src/toolchains/native/NativeProbeRunner.ts", ["code", "toolchain"]],
+  ["tests/toolchain/realToolchain.test.ts", ["code", "toolchain"]],
+  ["native/uvcpp-probe/http3_exchange.cpp", ["toolchain"]],
+  ["scripts/build-native-probe.mjs", ["code", "toolchain"]],
+  ["scripts/uvp.mjs", ["code", "package"]],
+  ["src/application/WebService.ts", ["code"]],
+  ["docs/testing.md", ["docs"]],
+  ["README.md", ["docs"]],
+  [".github/workflows/ci.yml", ["workflows"]],
+  ["LICENSE", ["code"]],
+];
+
+const checkTable = () => {
+  const wrong = [];
+  for (const [path, expected] of EXPECTED_LANES) {
+    const actual = [...classify([path])].sort();
+    if (actual.join(",") !== [...expected].sort().join(",")) {
+      wrong.push(`${path}: expected ${expected.join("+")}, got ${actual.join("+") || "(none)"}`);
+    }
+  }
+  if (wrong.length > 0) {
+    process.stderr.write(
+      `plan: LANE_RULES no longer selects what this file says it does:\n${wrong.map((line) => `  ${line}`).join("\n")}\n`,
+    );
+    process.exit(1);
+  }
+};
+
 const main = () => {
+  checkTable();
   const base = process.env["BASE_SHA"] ?? "";
   const head = process.env["HEAD_SHA"] ?? "HEAD";
   const forced = process.env["CI_FULL"] === "true";
