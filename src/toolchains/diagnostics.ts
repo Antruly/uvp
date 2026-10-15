@@ -18,8 +18,26 @@ import type { BuildDiagnostic, BuildPhase } from "../application/ToolchainProvid
  * problem that does not exist.
  */
 
+/**
+ * The file part of a GCC or Clang diagnostic, drive letter and all.
+ *
+ * The drive prefix is there because the file part is otherwise "everything up to
+ * the first colon", and a Windows path has one of its own. That is not
+ * hypothetical here: `LocalToolchainProvider` probes for `gcc` on Windows as well
+ * as `cl`, so a MinGW or clang build there reports
+ * `C:/Users/dev/src/main.cpp:12:5: error: …` and a parser that stopped at the
+ * drive colon read the whole line as not a diagnostic — the failure this module
+ * exists to prevent, one platform over. It is the format being matched rather
+ * than approximated, since that line is exactly what the tool prints.
+ *
+ * A separator is required after the colon rather than a drive letter being enough
+ * on its own: `C:main.cpp` is relative to a drive's current directory and does
+ * not appear in build output, while `a:b.cpp:3:5: error: …` — the shape a bare
+ * letter-plus-colon rule would newly read as a diagnostic — is text a build log
+ * can hold by accident.
+ */
 const GCC_DIAGNOSTIC =
-  /^(?<file>[^:\n]+):(?<line>\d+):(?:(?<column>\d+):)?\s*(?<severity>error|warning|note|fatal error):\s*(?<message>.*)$/u;
+  /^(?<file>(?:[A-Za-z]:[\\/])?[^:\n]+):(?<line>\d+):(?:(?<column>\d+):)?\s*(?<severity>error|warning|note|fatal error):\s*(?<message>.*)$/u;
 const MSVC_DIAGNOSTIC =
   /^(?<file>[^(]+)\((?<line>\d+)(?:,(?<column>\d+))?\)\s*:\s*(?<severity>error|warning|note)\s+[A-Z]+\d+:\s*(?<message>.*)$/u;
 

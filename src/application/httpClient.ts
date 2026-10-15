@@ -142,6 +142,21 @@ const PROTOCOL_ALERT_CODES: ReadonlySet<string> = new Set([
 const OPAQUE_CODES: ReadonlySet<string> = new Set(["ERR_HTTP2_STREAM_CANCEL"]);
 
 /**
+ * An error's `code` as a string, or `""` when it has none this module can use.
+ *
+ * Node sets `code` to a string on every error it raises, but this module's job is
+ * to classify *whatever a caller caught*, and it runs inside the `catch` blocks
+ * that report failures: a throw from here does not report a failure, it replaces
+ * the caller's error handling with a `TypeError` about a field nobody asked
+ * about. `code` is typed as optional, not as "absent or a string", so a caller
+ * that assigns it something else — a number, an object — reached the string
+ * methods below and threw. A `code` that is not a string is not a code, and reads
+ * as one that matched nothing, which is what an absent one already did.
+ */
+const errorCode = (error: NodeJS.ErrnoException): string =>
+  typeof error.code === "string" ? error.code : "";
+
+/**
  * The kind of a failure Node raised, from the errno it attached.
  *
  * Anything unrecognised is `unreachable` — the bucket that says "the exchange
@@ -150,7 +165,7 @@ const OPAQUE_CODES: ReadonlySet<string> = new Set(["ERR_HTTP2_STREAM_CANCEL"]);
  * classification, which is the error the whole evidence model exists to avoid.
  */
 const kindOfNodeError = (error: NodeJS.ErrnoException): TransportFailureKind => {
-  const code = error.code ?? "";
+  const code = errorCode(error);
   if (code === "ETIMEDOUT") return "timeout";
   if (PROTOCOL_ALERT_CODES.has(code)) return "protocol";
   if (TLS_CODES.has(code) || code.startsWith("ERR_TLS") || code.startsWith("ERR_SSL")) return "tls";
@@ -173,7 +188,7 @@ const describedError = (error: unknown): NodeJS.ErrnoException => {
   for (let depth = 0; depth < 4; depth += 1) {
     if (!(current instanceof Error)) break;
     const candidate = current as NodeJS.ErrnoException;
-    if (!OPAQUE_CODES.has(candidate.code ?? "")) return candidate;
+    if (!OPAQUE_CODES.has(errorCode(candidate))) return candidate;
     current = (current as { readonly cause?: unknown }).cause;
   }
   return error as NodeJS.ErrnoException;
@@ -679,7 +694,25 @@ export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchang
   }
 };
 
-/** Decode a body as text when it plausibly is text. */
+/**
+ * Decode a body as text when it plausibly is text.
+ *
+ * The answer carries exactly one of `text` and `base64`, so the caller reads the
+ * one that is there rather than choosing: a result carrying both would make the
+ * answer depend on which of the two a caller happened to look at first.
+ *
+ * `text` is the body decoded as UTF-8, and decoding bytes that are not UTF-8 is
+ * **lossy** — `Buffer.from([0x48, 0x69, 0xff])` decodes to `"Hi�"`, which
+ * re-encodes to three different bytes. A peer that declares `text/html` and sends
+ * something else therefore gets `decoded_as_text: true` with text that is not the
+ * response's bytes, and the caller has no field saying so; the WebSocket half of
+ * this repository names the same condition (`text_omitted: "invalid-utf8"`)
+ * instead of hiding it. It is not fixed here because the obvious rule — refuse to
+ * call it text whenever a re-encode differs — also refuses every body truncated
+ * mid-character, which is the ordinary case for a body cut to `max_body_bytes`
+ * and is not the peer's doing. Telling the two apart changes what a caller sees,
+ * so the roadmap carries it. `decodeBody`'s fuzz lane records the behaviour.
+ */
 export const decodeBody = (
   body: Buffer,
   contentType: string | undefined,
@@ -691,8 +724,13 @@ export const decodeBody = (
     );
   if (!textual) return { base64: body.toString("base64"), decodedAsText: false };
   const decoded = body.toString("utf8");
-  // A NUL byte in the first kilobyte means this is not text, whatever the
-  // Content-Type claims.
+  // A NUL in the first 1024 characters of the decoded body means this is not
+  // text, whatever the Content-Type claims. Characters rather than bytes, because
+  // the guard is applied to the decoded string: that reaches at least the first
+  // kilobyte, since a character is never shorter than a byte, and further when the
+  // body is multi-byte — a NUL at byte 2000 sitting behind a thousand two-byte
+  // characters is caught. Erring toward base64 for a body that had a NUL in it is
+  // the right direction to be wrong in.
   if (decoded.slice(0, 1024).includes("\u0000")) {
     return { base64: body.toString("base64"), decodedAsText: false };
   }

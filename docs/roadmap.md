@@ -408,7 +408,9 @@ implicit.
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ⬜  | Reproducible builds for the packaged tarball                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                             |
+| ⬜  | A link failure has no diagnostic format here. `FAILED: hello`, `ld: cannot find -luvcpp`, `collect2: error: ld returned 1 exit status` are all dropped by the build-output parser, and no test in this repository has ever captured a real link failure to write a format from — the drive-letter fix beside it is exactly why the gap is left open rather than closed from a plausible-looking log, since a pattern invented that way is how a parser starts inventing diagnostics. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                |
+| ⬜  | `decodeBody` answers `decoded_as_text: true` with text that is not the response's bytes when a peer declares a text content type and sends something that is not UTF-8: `Buffer.from([0x48, 0x69, 0xff])` becomes `"Hi\uFFFD"`, which re-encodes to three different bytes, and no field in the output says so. The WebSocket half of the repository names the same condition (`text_omitted: "invalid-utf8"`). Not fixed alongside, because "refuse to call it text when a re-encode differs" also refuses every body truncated mid-character — the ordinary case for a body cut to `max_body_bytes`, and not the peer's doing — so the two have to be told apart first. See [below](#fuzzing)                                                                                                                                                                                                            |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -975,6 +977,98 @@ still not observed is the schedule: those runs were triggered by the file
 appearing, not by the weekly timer, so "Mondays at 05:17 and 05:37 UTC" is a
 statement about the configuration rather than a thing anyone has watched happen.
 The first Monday that passes with the file in place is where that gets settled.
+
+### Fuzzing the two parsers {#fuzzing}
+
+Every parser test in this repository before this item was written from output
+captured off a real tool, which is what makes those tests evidence about the tools
+rather than about the parser's own shapes. Their limit is the other side of the
+same coin: they cover the lines somebody thought of, and a parser's failure mode is
+the line nobody thought of. `tests/support/fuzz.ts` draws those lines.
+
+**Determinism is the contract, not a nicety.** A generator that redrew its inputs
+on every run would turn a real defect into something that shows up once and cannot
+be looked at again. The seeds come from a fixed list, each iteration is seeded from
+the pair `(seed, iteration)` rather than from a stream that runs across iterations,
+and a failure prints the seed and iteration that identify that case on its own —
+replaying does not mean replaying four hundred cases to get back to it.
+`UVP_FUZZ_SEED` draws different ones and `UVP_FUZZ_ITERATIONS` draws more, and every
+run prints what it examined:
+
+```
+fuzz: build diagnostics, invariants — seed(s) 1, 2, 3, 4, 5, 6, 7, 8 × 200 iteration(s) = 1600 generated input(s)
+```
+
+That line is the same instinct as the skip reporter and the lane plan: a bounded
+search that says nothing about its bounds reads like a proof, and "no case failed"
+and "no case was tried" are different statements.
+
+**No new dependency.** `fast-check` would be the obvious choice and is not here,
+for two reasons that point the same way: an added top-level dependency is a design
+discussion in this repository, and this is not a reason to have one; and the value
+is reproducibility rather than statistical quality, so a fuzz whose seed handling
+lives in someone else's upgrade path is a fuzz that stops reproducing on an
+unrelated commit. Mulberry32 is fifteen lines.
+
+**What it found, first run.** Every Windows GCC or Clang diagnostic was being
+dropped. The file part of the format was "everything up to the first colon", and a
+Windows path has a colon of its own, so `C:/Users/dev/src/main.cpp:12:5: error: …`
+read as not a diagnostic at all while the same line with a POSIX path was read
+fine. That is not hypothetical here — `LocalToolchainProvider` probes for `gcc` on
+Windows as well as `cl`, so a MinGW or clang build there is a supported
+configuration whose every compiler diagnostic uvp would have reported as nothing.
+The fix is a `(?:[A-Za-z]:[\\/])?` prefix on the file part, and **a separator is
+required after the colon** rather than a drive letter being enough on its own:
+`C:main.cpp` is relative to a drive's current directory and does not appear in
+build output, while `a:b.cpp:3:5: error: …` is text a build log can hold by
+accident, and a bare letter-plus-colon rule would newly read it as a diagnostic.
+The second finding is a `TypeError` made reachable: `transportFailureKind` read
+`error.code` and called `.startsWith` on it, which throws for an error whose `code`
+is a number. Node always sets a string, so nothing raised it today — but the
+function runs _inside_ the `catch` blocks that report failures, where a throw does
+not report the caller's failure, it replaces the caller's error handling with a
+`TypeError` about a field nobody asked about. `errorCode()` at that boundary reads
+a `code` that is not a string as one that matched nothing, which is what an absent
+one already did.
+
+**Two defects in the generator, found by using it**, and worth keeping visible
+because they were both cases of a helper quietly disagreeing with its own
+description. `pick()` threw when the value it drew was `undefined` — so it refused
+to draw a legitimate element of a list that contains one, like "no `Content-Type`
+header", and the emptiness of the array is what makes a draw impossible rather than
+the value drawn. And `string()` indexed its alphabet as a string, which yields
+UTF-16 code units, so an alphabet containing 🙂 let a draw take half a surrogate
+pair; `Buffer.from(text, "utf8")` turns that half into U+FFFD, so the generator was
+producing text that no caller could put on the wire. It spreads the alphabet into
+characters now.
+
+**Two things recorded rather than fixed.** The lane asserts them as they are, with
+the reasoning for leaving them, and each carries a row above. A link failure has no
+diagnostic format here: `ld:`, `collect2:` and `FAILED:` are dropped, and no test
+in this repository has ever captured a real link failure, so writing a pattern from
+a log that looks plausible is how a parser starts inventing diagnostics. And
+`decodeBody` calls lossy UTF-8 decoding "text": a peer that declares `text/html`
+and sends something else gets `decoded_as_text: true` with replacement characters
+in it, so a caller comparing the text against the response digest finds a
+difference no field explains. The obvious fix is wrong for a reason the lane also
+pins — refusing to call it text whenever a re-encode differs also catches a body
+truncated through a multi-byte character, which is the ordinary case for
+`max_body_bytes` and is not the peer's doing.
+
+**And it corrected a comment rather than being satisfied by one.** The NUL guard in
+`decodeBody` is applied to the first 1024 _characters_ of the decoded string while
+its comment claimed the first kilobyte of bytes. Characters are never shorter than
+bytes, so the real rule reaches at least the first kilobyte and further when the
+body is multi-byte: a NUL at byte 2000 behind a thousand two-byte characters is
+caught. The lane pins both ends, because "the first kilobyte" and "the first 1024
+characters" are different claims and only one of them is true.
+
+**What a fuzz does not establish.** A bounded search over generated inputs is a
+statement about the cases it drew, never about the input space, and the printed
+scope exists so that no reader has to work out which statement was made. The lanes
+also do not replace the captured-fixture tests beside them: bytes a socket on this
+host actually produced are evidence about Node and about the peer, and generated
+bytes are not. The two files say which is which in their own headers.
 
 ## Not planned
 

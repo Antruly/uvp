@@ -20,6 +20,44 @@ These import from `src/` directly and run with no build step.
 lives and where a mutation is likely to be a real behavioural difference rather
 than a formatting change.
 
+### The fuzz lanes {#fuzz}
+
+Two source tests state invariants over generated input instead of over examples:
+`src/toolchains/diagnostics.fuzz.test.ts` for the build-output parser and
+`src/application/httpClient.fuzz.test.ts` for the response decoder and the
+transport classifier. They use `tests/support/fuzz.ts`, a seeded generator with no
+dependency behind it.
+
+They are not a replacement for the captured-fixture tests they sit beside, and the
+two kinds answer different questions. A capture is evidence about the tool that
+produced it; a generated input is evidence about the parser. Where the parser has
+to agree with Node or with a real compiler, only a capture can say so, and each
+fuzz file's header states what it therefore does not establish.
+
+**Rules for a lane like this**, all of which exist so that a failure is a defect
+rather than a coincidence:
+
+- **Every case comes from a seed.** `DEFAULT_FUZZ_SEEDS` is a fixed list, and each
+  iteration is seeded from `(seed, iteration)` rather than from a stream that runs
+  across iterations, so the seed and iteration a failure prints identify that one
+  case. A red fuzz run is re-run with `UVP_FUZZ_SEED=<n>`; `UVP_FUZZ_ITERATIONS`
+  widens a run.
+- **A run states its scope.** `reportFuzzRun` prints the seeds and the iteration
+  count, because a bounded search that does not say what it bounded reads like a
+  proof.
+- **A failure carries its input.** `replay` renders the problem, the reproduction
+  line, and the input itself — hex for bytes, quoted and numbered lines for text.
+  The cost of a generator is that the failing case exists nowhere but in the run
+  that produced it.
+- **A recorded behaviour says that it is recorded.** Where the lane pins something
+  known to be wrong, the test says so and says why the obvious repair is not the
+  one taken, and the item carries a roadmap row. A fuzz lane that asserted only
+  what it approved of would be silently narrower than the parser.
+- **Only reachable inputs are drawn.** An impossible value proves a point about a
+  case nobody can hit. Where a shape is reachable in principle but not from Node
+  today — a `code` that is not a string — the test names it and says so rather than
+  leaving it to the generator.
+
 ## The conformance project
 
 Five files, each asking one question, none of them needing a compiler.
