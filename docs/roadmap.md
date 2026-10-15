@@ -403,9 +403,9 @@ implicit.
 
 |     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⬜  | Pin third-party GitHub Actions to commit SHAs. Workflows currently reference major version tags (`actions/checkout@v4`); full SHA pinning needs the SHAs verified rather than guessed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ✅  | Every third-party `uses:` under `.github/` is pinned to a commit SHA with the release named beside it, and `npm run verify:actions` fails one that is not — or that pins the same action at two SHAs. Each SHA was resolved with `gh api repos/<owner>/<repo>/git/ref/tags/v4`, never from memory, and each `# vX.Y.Z` label read from the tag list. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ⬜  | Renovate or Dependabot with grouped, reviewed updates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ⬜  | Reproducible builds for the packaged tarball                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -853,6 +853,92 @@ not in the `reporters` array (reported, naming the `[String, Object]` it resolve
 to instead); and writing a `run:` whose value is a quoted scalar running past its
 line (reported as unreadable, with the `--reporter` remedy correctly left off,
 since a remedy about flags is not the answer to a form the scan cannot see).
+
+### The pins, and what keeps them current {#action-pins}
+
+`uses: actions/checkout@v4` names a tag, and a tag is a pointer its owner can
+move. Forty references across the six files under `.github/` named one of six
+actions that way. All forty now name a commit, and `npm run verify:actions` fails
+any that goes back.
+
+**The SHAs were resolved, not remembered.** Each one came from
+`gh api repos/<owner>/<repo>/git/ref/tags/v4 --jq '.object.sha + " " + .object.type'`,
+which also answers the question a tag list does not: the refs are lightweight
+(`type: commit`), so the SHA is the commit rather than a tag object. The `# vX.Y.Z`
+beside each pin came from the same repository's tag list —
+`actions/checkout@11d5960a… # v4.4.0`, `setup-node@49933ea5… # v4.4.0`,
+`cache@0057852b… # v4.3.0` (and `cache/restore`, the same commit),
+`upload-artifact@ea165f8d… # v4.6.2`, `download-artifact@d3f86a10… # v4.3.0`,
+`github-script@f28e40c7… # v7.1.0`.
+
+**A pin must name its release, and that is not decoration.** Dependabot rewrites
+a SHA pin's version comment _only when the comment is on the same line_ as the
+`uses:`, which GitHub's own security-hardening page states. So a bare SHA is a pin
+whose next update is an unreadable hash, and the rule requires the comment for the
+same reason the check exists at all.
+
+**And the pin costs something, which is why the bot is the same change.**
+Dependabot alerts do not cover actions pinned to a SHA — they apply to
+semantic-version references — so pinning trades an alert for immutability. The
+weekly pull request is then where a bump is seen, and a repository pinned without
+a bot has taken the immutability and given up the notification. That is why the
+two rows above close together rather than in sequence.
+
+**Dependabot rather than Renovate**, because Renovate is an app installed on the
+repository and Dependabot is GitHub reading `.github/dependabot.yml`. Only one of
+those asks uvp to extend someone's authority over the repository, and it is not
+the one chosen. Routine bumps are grouped one-per-ecosystem; a major arrives alone,
+because a grouped major is a major nobody read the changelog for. The
+`chore(deps)` prefix is load-bearing too: `pr-title.yml` requires a conventional
+title, and Dependabot's default ("Bump x from a to b") would fail the gate before
+anyone read it.
+
+**Three decisions in the check itself.**
+
+- **One action, one SHA.** Two spellings of `actions/checkout` at two SHAs is what
+  hand-pinning produces, and both jobs look pinned while running different code.
+  The key is everything before the last `@`, so `actions/cache` and
+  `actions/cache/restore` are separate actions — they are separate steps that
+  happen to share a repository, and holding them to one SHA would forbid a release
+  that moved only one.
+- **A form the check cannot read is a failure, not a skip.** `uses:` whose value
+  starts on the next line is reported with "whether that action is pinned is
+  unknown", because a reference nobody read is a reference nobody checked — the
+  same reasoning as the reporter check's empty-`run:` guard.
+- **Lines inside a `run:` scalar are masked before anything is matched.** This is
+  not hypothetical: `verify-reporters.mjs`'s own extraction fixture contains a
+  `run:` block holding a line that begins `run:`. A `uses:` line in shell text is a
+  string a script prints, and reporting it would be a false alarm — which is why
+  the mutation below includes the control that disables the masking and shows the
+  case fails without it.
+
+**The extraction moved rather than being written twice.** Both checks ask the same
+question about the same file — which lines are workflow syntax and which are shell
+text — so it now lives in `scripts/lib/runKeySpans.mjs`, with its fixture and
+self-check, and `verify-reporters.mjs` imports it instead of owning a copy. One
+interpretation, two callers, one place to get it wrong.
+
+The CI step is guarded on `code` as well as `workflows`, which is not the same
+reason as the step above it: this checker is under `scripts/`, the `code` lane's
+territory, so a change to the rule has to run the rule.
+
+**Verified by nine mutations**, each applied, run, and reverted: a tag
+reintroduced at one of forty steps (attributed to `pages.yml:25`, not to the
+file); a pin that keeps its SHA and loses its comment; one action at two SHAs;
+a `uses:` whose value sits on the next line; a `uses:`-looking line inside a `run:`
+block, which must stay silent, **and the same case with the masking disabled,
+which must not**; a `docker://` image with no digest; and the two self-checks,
+shown to fail loudly when a rule table or a fixture expectation stops meaning what
+the file says. Turning the masking off is in that list because a case that passes
+without the mechanism under test proves nothing about the mechanism.
+
+**One thing this does not establish.** The pins are reviewed by a human like any
+other change, and what each action's code does with the permissions a workflow
+grants is not something a pin changes. A pin fixes _which_ commit runs, not what
+it is allowed to do. Nor is the Dependabot configuration verified here beyond
+parsing as YAML and saying what it is meant to say: whether GitHub accepts it is
+GitHub's answer, and it arrives on the first scheduled run rather than from
+anything run locally.
 
 ## Not planned
 
