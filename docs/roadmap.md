@@ -78,10 +78,26 @@ inspection-only provider stays implementable.
 | --- | -------------------------------------------------------------------------------------------- |
 | ⬜  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly       |
 | ⬜  | `remote-ssh/` — build and run on another machine, with the provider identity on every result |
-| ⬜  | A provider conformance suite both of them must pass                                          |
+| ✅  | A provider conformance suite both of them must pass                                          |
 
-The conformance suite comes first. Two providers that pass the same suite are
-swappable; two that merely both "work" are two code paths.
+The conformance suite came first, and it is what the two providers below will be
+written against. Two providers that pass the same suite are swappable; two that
+merely both "work" are two code paths.
+
+Twelve obligations, in `tests/conformance/providerContract.ts`, run against a
+provider through `ToolchainProvider` and nothing below it. They are values rather
+than tests so that `providerSubjects.ts` can hand each one a provider built to
+break exactly that clause, and `providerContractFaults.test.ts` requires the
+named obligation to reject it and every other obligation to accept it — a check
+nobody has seen fail is a comment, and a check that fires on everything localises
+nothing. Against the scripted provider they are the control; against
+`LocalToolchainProvider` in `tests/toolchain/` they are the real thing, with the
+four build-shaped ones skipping by name on a host with no compiler.
+
+Writing it corrected a claim in the port: `modules` is not the `UVCPP_*_ENABLE`
+macros, as `ToolchainProvider.ts` said, but the `UVCPP_*` symbols a build defines
+as exactly `1` — the installed 1.7.0 header also carries `UVCPP_ENABLE_MEMORY_POOL`
+and `UVCPP_DB_RUNTIME_LOAD`. The reader was right and the sentence was wrong.
 
 ## Milestone 3 — depth
 

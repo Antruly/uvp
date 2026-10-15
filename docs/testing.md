@@ -8,13 +8,13 @@ tests** against **built tests**.
 
 These import from `src/` directly and run with no build step.
 
-| Project       | Covers                                                                        |
-| ------------- | ----------------------------------------------------------------------------- |
-| `domain`      | Evidence, unknown, errors, result algebra, identity, features                 |
-| `services`    | Application workflows against fake providers                                  |
-| `adapters`    | Contract schemas, CLI registration, MCP registration                          |
-| `composition` | Wiring: the right provider reaches the right service                          |
-| `conformance` | Handler output against its own contract, HTTP behaviour, and cross-file rules |
+| Project       | Covers                                                                     |
+| ------------- | -------------------------------------------------------------------------- |
+| `domain`      | Evidence, unknown, errors, result algebra, identity, features              |
+| `services`    | Application workflows against fake providers                               |
+| `adapters`    | Contract schemas, CLI registration, MCP registration                       |
+| `composition` | Wiring: the right provider reaches the right service                       |
+| `conformance` | Handler output against its own contract, HTTP behaviour, the provider port |
 
 `services` is the project Stryker mutates. It is where the interesting logic
 lives and where a mutation is likely to be a real behavioural difference rather
@@ -22,8 +22,7 @@ than a formatting change.
 
 ## The conformance project
 
-Two files, each asking one question, both asked offline against a local fixture
-process.
+Four files, each asking one question, none of them needing a compiler.
 
 `handlers.test.ts` calls every tool through its handler and parses the result
 against the contract that describes it. The contract is the single source of
@@ -47,6 +46,24 @@ classifies each failure where it happens, retries only on a protocol mismatch,
 and treats `timeout_ms` as one deadline for the whole call. Three tests in
 `src/application/httpClient.test.ts` assert that from the transport's side,
 including the number of connections one failed request opens.
+
+`providerConformance.test.ts` and `providerContractFaults.test.ts` are the two
+halves of one question: does a toolchain satisfy the port it is injected through?
+`local/` is the only provider today, and one implementation is not a port — it is
+a class that happens to be injected. `providerContract.ts` holds the twelve
+obligations every provider must meet, as data rather than as a list of `it`s;
+`providerConformance.test.ts` runs them against the scripted provider, which is
+the control that proves every check is reached, and
+`tests/toolchain/providerConformance.test.ts` runs the same twelve against the
+real one, where four of them need a compiler, a CMake, and a libuvcpp and skip by
+name when the host has none.
+
+The reason the obligations are data is `providerContractFaults.test.ts`. For each
+one, `providerSubjects.ts` builds a provider that breaks _exactly_ that clause,
+and the test requires two things: that the named obligation rejects it, and that
+every other obligation accepts it. A check nobody has seen fail is a comment, and
+a check that fires on everything localises nothing; between them those two rules
+are what let a failing run be read as "this clause is the reason".
 
 The rules that no single file owns are checked, and none of them here — worth
 knowing before going to look for them. The layering rules are enforced twice:
@@ -76,15 +93,15 @@ These require `npm run compile` to have run first. They exercise the artifacts
 that ship: the CLI as a process, the MCP server as a process, the packaged
 tarball.
 
-| Project            | Covers                                                               |
-| ------------------ | -------------------------------------------------------------------- |
-| `boundary`         | Import-surface rules across built output                             |
-| `cli-boundary`     | The CLI driven as a subprocess                                       |
-| `process-boundary` | Process supervision: start, readiness, stop, orphans                 |
-| `mcp-boundary`     | The MCP server over real stdio                                       |
-| `toolchain`        | Real CMake and real libuvcpp: five templates, and a build that fails |
-| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary |
-| `process-global`   | What a call leaves in the process it ran in, and whose session it is |
+| Project            | Covers                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| `boundary`         | Import-surface rules across built output                                             |
+| `cli-boundary`     | The CLI driven as a subprocess                                                       |
+| `process-boundary` | Process supervision: start, readiness, stop, orphans                                 |
+| `mcp-boundary`     | The MCP server over real stdio                                                       |
+| `toolchain`        | Real CMake and real libuvcpp: five templates, a failing build, the provider contract |
+| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                 |
+| `process-global`   | What a call leaves in the process it ran in, and whose session it is                 |
 
 `toolchain` is serial (`maxWorkers: 1`, `fileParallelism: false`) because it
 configures and compiles real CMake projects, and two of those at once on one
@@ -129,11 +146,20 @@ the test suite is worth much.
 `tests/support/realLibuvcpp.ts` is the shared helper: it locates the install,
 creates a scratch workspace under `TMPDIR`, builds it, runs it, ends it, and
 cleans up. It talks to the published `bin.uvp` as a process and imports nothing
-from `src/`, so nothing in this project can pass because a module agreed with
+from `src/`, so nothing that uses it can pass because a module agreed with
 itself. Two lanes use it — `toolchain`, which builds a workspace and starts the
 binary itself, and `acceptance`, which goes through `uvp verify` — and it lives
 in `tests/support/` rather than inside either lane so the second cannot drift
 from the first.
+
+One file in `toolchain` is not written that way, and it is the only one:
+`providerConformance.test.ts` imports `LocalToolchainProvider` rather than the
+CLI, because the module _is_ its subject — the question is whether a provider
+satisfies the port, and a version of it that went through five adapter layers to
+reach the provider would be testing something else. Everything it can establish
+about the real toolchain it establishes the same way the rest of the lane does:
+by compiling a real workspace with a real CMake against the libuvcpp that is
+installed, and by skipping by name when this host has none.
 
 Both lanes need to be told where libuvcpp is. `uvp doctor` searches `UVCPP_ROOT`,
 `LIBUVCPP_ROOT`, `CMAKE_PREFIX_PATH`, the usual system prefixes, and

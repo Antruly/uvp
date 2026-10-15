@@ -166,9 +166,10 @@ describe.skipIf(realLibuvcpp === undefined)(
     it("reads the feature set from the build, not from the version string", () => {
       // The regression this pins: two builds of the same version can differ in
       // what was compiled in, so a capability claim derived from a number is a
-      // guess. The modules come from the `UVCPP_*_ENABLE` symbols that this
-      // build's config header defines. An empty list would mean the check did
-      // not run, which is `undetermined` — not "this build has no features".
+      // guess. The modules come from the `UVCPP_*` symbols this build's config
+      // header defines as `1` — mostly, but not only, the `*_ENABLE` flags. An
+      // empty list would mean the check did not run, which is `undetermined` —
+      // not "this build has no features".
       expect(install().modules.length).toBeGreaterThan(0);
       expect(install().modules.every((symbol) => symbol.startsWith("UVCPP_"))).toBe(true);
     });

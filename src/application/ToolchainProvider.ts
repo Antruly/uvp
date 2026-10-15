@@ -273,8 +273,16 @@ export type HeaderProbe = (header: string) => Promise<boolean | undefined>;
 /**
  * Compare the feature set a caller wants against what a build actually has.
  *
- * `modules` is the list of `UVCPP_*_ENABLE` macros the build defines non-zero,
- * as read out of its generated `uvcpp_config.h`.
+ * `modules` is the `UVCPP_*` symbols the build defines as exactly `1`, as read
+ * out of its generated `uvcpp_config.h`. Not the `*_ENABLE` flags, which is what
+ * this said until the installed 1.7.0 header was read: that header also carries
+ * `UVCPP_ENABLE_MEMORY_POOL` and `UVCPP_DB_RUNTIME_LOAD`, which are defined as `1`
+ * and do not end in `_ENABLE`. The list is the symbols, so it is a superset of
+ * the flags. The feature table below looks up specific symbols and does not care;
+ * a provider reporting `modules` does, which is why the obligation in
+ * `tests/conformance/providerContract.ts` checks the `UVCPP_` prefix rather than
+ * a suffix. The header's `UVCPP_HTTP_COMPRESS_ENABLE (1||1)` is left out by the
+ * reader, which admits only a value spelled exactly `1`.
  *
  * Two kinds of feature meet two kinds of evidence. When libuvcpp has a switch
  * for a module, the config header decides it outright. When it has none — grpc,

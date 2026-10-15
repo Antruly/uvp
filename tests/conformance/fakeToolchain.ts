@@ -10,6 +10,7 @@ import type {
   ToolchainIdentity,
   ToolchainProvider,
 } from "../../src/application/ToolchainProvider.js";
+import { cancelledFailure } from "../../src/domain/errors.js";
 import { sha256 } from "../../src/domain/identity.js";
 
 /**
@@ -25,9 +26,31 @@ import { sha256 } from "../../src/domain/identity.js";
  * The fixture is deliberately explicit about what it does *not* establish. It
  * reports a compiler it never ran and a digest of bytes it wrote itself, and the
  * results that pass through it are only as true as the canned answers.
+ *
+ * It does establish one thing, and it is the reason `inspectAvailability`,
+ * `findLibuvcpp`, and `build` below read the signal before they answer: a script
+ * is as capable of honouring the provider contract as a compiler is, and
+ * `providerContract.ts` runs the whole contract against this provider as its
+ * control. A fake that answered a withdrawn call would make the contract's own
+ * suite fail on its control, which is what a control is for.
  */
 
 const NOWHERE = "/nonexistent/uvp-conformance-fixture";
+
+/**
+ * What each entry point says when the caller withdrew before it answered.
+ *
+ * Written out rather than shared with the local provider's constants, because a
+ * fixture that quoted the real provider's wording would pass a test of that
+ * wording for the wrong reason. The contract is that the failure is a
+ * cancellation; the sentence is this fixture's own.
+ */
+const INSPECTION_CANCELLED =
+  "The inspection was cancelled before it answered, so nothing was observed about this host.";
+const DISCOVERY_CANCELLED =
+  "The libuvcpp search was cancelled before it answered, so nothing was observed about this machine.";
+const BUILD_CANCELLED =
+  "The build was cancelled before it ran, so nothing was compiled and nothing was observed about the workspace.";
 
 export interface FakeToolchainOptions {
   readonly id?: string;
@@ -134,31 +157,42 @@ export const createFakeToolchain = (options: FakeToolchainOptions = {}): Toolcha
     // The outcome builders are synchronous because nothing in them awaits; the
     // client's contract is asynchronous because a real one does. Normalising in
     // one place keeps every fixture from having to remember which it is.
-    build: async (request) => await (options.build ?? succeededBuild)(request),
+    build: async (request) => {
+      // Before the build, not after it. A scripted provider has no child process
+      // to kill, so "cancelled" here is about the contract rather than about
+      // stopping work: a caller that arrives cancelled gets a cancellation, and
+      // never a report about a workspace nothing looked at.
+      if (request.signal.aborted) throw cancelledFailure(BUILD_CANCELLED);
+      return await (options.build ?? succeededBuild)(request);
+    },
   };
 
   return {
     identity: () => identity,
     inspectAvailability: async (signal) => {
-      if (signal.aborted) throw new Error("aborted");
+      if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
       return defaultAvailability(options);
     },
-    findLibuvcpp: async () =>
-      options.libuvcpp ?? {
-        found: true,
-        version: "1.7.0",
-        versionSource: "pkgconfig",
-        installPrefix: NOWHERE,
-        modules: [
-          "UVCPP_OPENSSL_ENABLE",
-          "UVCPP_NGHTTP2_ENABLE",
-          "UVCPP_HTTP3_ENABLE",
-          "UVCPP_QUIC_ENABLE",
-          "UVCPP_WEB_ENABLE",
-          "UVCPP_WEBAPP_ENABLE",
-          "UVCPP_DB_ENABLE",
-        ],
-      },
+    findLibuvcpp: async (_workspacePath, signal) => {
+      if (signal.aborted) throw cancelledFailure(DISCOVERY_CANCELLED);
+      return (
+        options.libuvcpp ?? {
+          found: true,
+          version: "1.7.0",
+          versionSource: "pkgconfig",
+          installPrefix: NOWHERE,
+          modules: [
+            "UVCPP_OPENSSL_ENABLE",
+            "UVCPP_NGHTTP2_ENABLE",
+            "UVCPP_HTTP3_ENABLE",
+            "UVCPP_QUIC_ENABLE",
+            "UVCPP_WEB_ENABLE",
+            "UVCPP_WEBAPP_ENABLE",
+            "UVCPP_DB_ENABLE",
+          ],
+        }
+      );
+    },
     createClient: () => client,
   };
 };

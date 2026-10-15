@@ -180,10 +180,16 @@ The useful fields and what each one actually tells you:
 | `route`                          | `cmake_package`, `pkg_config`, or `absent` — which discovery route answered |
 | `prefix`                         | The install root, so you can inspect it yourself                            |
 | `version`                        | Read from the package config or the `.pc` file, not from the library        |
-| `modules`                        | The `UVCPP_*_ENABLE` macros this build sets to `1`                          |
+| `modules`                        | The `UVCPP_*` symbols this build defines as exactly `1`                     |
 | `features.satisfied`             | Features you asked for that this build provides                             |
 | `features.unmet[].cmakeOptions`  | The switches that would fix it, verbatim                                    |
 | `features.undetermined[].reason` | Why a feature could not be decided                                          |
+
+The list is not only `*_ENABLE`: 1.7.0's header also carries
+`UVCPP_ENABLE_MEMORY_POOL` and `UVCPP_DB_RUNTIME_LOAD`, and uvp reports the
+symbols rather than filtering for a suffix. It excludes two kinds of line for the
+same reason — `UVCPP_HTTP_COMPRESS_ENABLE (1||1)` and `UVCPP_UDP_GSO_ENABLE 0` are
+not the value `1`, so neither proves a module is compiled in.
 
 `modules` is the list as read from the build's generated `uvcpp_config.h`. It is
 observed, not inferred from the CMake cache — a build directory whose cache says

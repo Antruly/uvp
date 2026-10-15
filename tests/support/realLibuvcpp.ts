@@ -167,7 +167,7 @@ export interface RealLibuvcpp {
   /** The install prefix every build in this lane is pointed at. */
   readonly prefix: string;
   readonly version: string;
-  /** The `UVCPP_*_ENABLE` symbols that build defined, as it reported them. */
+  /** The `UVCPP_*` symbols that build defines as `1`, as it reported them. */
   readonly modules: readonly string[];
 }
 
