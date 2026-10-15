@@ -10,6 +10,7 @@ import { commandName } from "../../../src/cli/commandSpec.js";
 import { COMMANDS } from "../../../src/cli/commands/index.js";
 import { EXIT_NO, EXIT_OK, EXIT_WRONG } from "../../../src/cli/exitCodes.js";
 import { parseUvpError } from "../../../src/domain/errors.js";
+import { uvpVersionBanner } from "../../../src/version.js";
 import { freePort } from "../../support/ports.js";
 
 /**
@@ -563,6 +564,58 @@ describe("help", () => {
       if (help.stderr.trim() !== "") wrong.push(`${name} wrote to stderr`);
     }
     expect(wrong).toEqual([]);
+  });
+});
+
+describe("version", () => {
+  it("answers `uvp --version` with the banner, and exits 0", async () => {
+    // Documented in three places that had no implementation behind them until
+    // now: docs/installation.md's install check, docs/releasing.md's release
+    // checklist, and the bug-report template's version field. The banner rather
+    // than a bare number because a version on its own does not say whose it is,
+    // and it comes from `src/version.ts` — one owner for how this build names
+    // itself, shared with the MCP server's metadata.
+    const answered = await invoke(["--version"]);
+    expect(answered.exit).toBe(EXIT_OK);
+    expect(answered.stderr.trim()).toBe("");
+    expect(answered.stdout.trim()).toBe(uvpVersionBanner());
+  });
+
+  it("answers it only before the command word, and says so when it is after", async () => {
+    // `--version` is deliberately not universal: `uvp soap --version 1.2` is the
+    // SOAP protocol version, and universal flags are appended after a command's
+    // own, so a universal `--version` would take that spelling. The cost is
+    // positional, and the refusal points at the position rather than pretending
+    // the flag does not exist.
+    const misplaced = await invoke(["doctor", "--version", "--json"]);
+    expect(misplaced.exit).toBe(EXIT_WRONG);
+    expect(misplaced.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(misplaced.stderr, "uvp doctor --version"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.details?.["flag"]).toBe("version");
+    expect(error.message).toContain("put it before the command name");
+  });
+
+  it("leaves the spelling to a command that declares it", async () => {
+    // The whole reason the flag is positional. If `--version` had been made
+    // universal this call would be refused as "a switch that takes no value",
+    // while `uvp soap --help` went on describing `--version 1.1`. The call gets
+    // as far as trying to connect, which is what says the value was read as SOAP
+    // 1.2 rather than as a switch.
+    const call = await invoke([
+      "soap",
+      CLOSED_HTTP,
+      "--operation",
+      "GetQuote",
+      "--version",
+      "1.2",
+      "--json",
+    ]);
+    expect(call.exit).toBe(EXIT_WRONG);
+    // Exit 2 with a result on stdout is the divergence recorded at the top of
+    // this file — `uvp soap` reports a transport outcome where `uvp ws` raises.
+    // This asserts the flag was read, not which of the two is right.
+    expect(soleJson(call.stdout, "uvp soap --version 1.2")["outcome"]).toBe("transport_error");
   });
 });
 

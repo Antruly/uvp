@@ -21,6 +21,14 @@ not ask it".
 where there is one. A schema violation is `invalid_request` naming the field, not
 a usage dump.
 
+**`--version` before the command.** `uvp --version` prints `uvp-agents 0.1.0` on
+stdout and exits `0`. It is answered before a command word and not after one,
+because `uvp soap --version 1.2` is already the SOAP protocol version: a command
+that declares the spelling keeps it, and `uvp doctor --version` is refused with a
+message saying where the flag belongs rather than one claiming it does not exist.
+Like `--help`, the text is the answer to the question asked, so `--json` does not
+change it.
+
 **No command.** Bare `uvp` prints the command list on stdout and exits `2`: a
 person who typed `uvp` wants the list, and the code says the question was not
 finished being asked. `--help` asks for the same text and exits `0`. Under

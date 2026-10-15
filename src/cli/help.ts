@@ -1,5 +1,5 @@
 import { PACKAGE_DESCRIPTION, PACKAGE_VERSION } from "../generatedPackageMetadata.js";
-import { UNIVERSAL_FLAGS } from "./args.js";
+import { UNIVERSAL_FLAGS, VERSION_FLAG } from "./args.js";
 import type { CommandSpec } from "./commandSpec.js";
 import { commandName } from "./commandSpec.js";
 import { COMMANDS } from "./commands/index.js";
@@ -24,7 +24,10 @@ export const globalHelp = (): string => {
     ...commandList(COMMANDS.map((command) => [commandName(command), command.summary])),
     "",
     "Flags:",
-    ...flagLines(UNIVERSAL_FLAGS),
+    // `--version` is listed here and nowhere else: it is answered before a
+    // command word, so a command's own help would be claiming a spelling it does
+    // not own. `uvp soap --help` is where that one is described.
+    ...flagLines([...UNIVERSAL_FLAGS, VERSION_FLAG]),
     "",
     "Exit codes: 0 success; 1 the operation ran and the answer is no; 2 the input",
     "or the environment was wrong. Run `uvp COMMAND --help` for one command.",

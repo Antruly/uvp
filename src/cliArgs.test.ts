@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   UNIVERSAL_FLAGS,
+  VERSION_FLAG,
   asBoolean,
   asList,
   asNumber,
@@ -13,6 +14,8 @@ import {
   requirePositional,
 } from "./cli/args.js";
 import type { FlagSpec } from "./cli/args.js";
+import { isToolCommand } from "./cli/commandSpec.js";
+import { soapCommand } from "./cli/commands/web.js";
 import { UvpFailure, isUvpFailure, parseUvpError } from "./domain/errors.js";
 
 /**
@@ -239,6 +242,34 @@ describe("parseArgv: -- and --help", () => {
   });
 });
 
+describe("parseArgv: --version belongs to whoever declares the spelling", () => {
+  it("reads --version as a switch when it is the global flag that was offered", () => {
+    const parsed = parseArgv(["--version"], [VERSION_FLAG]);
+    expect(parsed.values["version"]).toBe(true);
+    expect(asBoolean(parsed, "version")).toBe(true);
+    expect(parsed.positionals).toEqual([]);
+  });
+
+  it("leaves `uvp soap --version 1.1` meaning the SOAP version", () => {
+    // The reason `VERSION_FLAG` is not in `UNIVERSAL_FLAGS`. Universal flags are
+    // appended after a command's own (src/cli/args.ts), so a universal `version`
+    // would take the spelling from the one command that declares it: the call
+    // below would be refused with "`--version` is a switch and takes no value"
+    // while `uvp soap --help` went on describing `--version 1.1`.
+    //
+    // Asserted through the real command rather than a copy of its flag table, so
+    // a rename in `web.ts` fails here instead of leaving this test guarding a
+    // spelling nobody uses.
+    const parsed = parseArgv(
+      ["https://svc.example.com/ws", "--operation", "GetQuote", "--version", "1.2"],
+      soapCommand.flags ?? [],
+    );
+    expect(asString(parsed, "version")).toBe("1.2");
+    if (!isToolCommand(soapCommand)) throw new Error("uvp soap is not a tool command");
+    expect(soapCommand.input(parsed)).toMatchObject({ soap_version: "1.2" });
+  });
+});
+
 describe("parseArgv: numbers", () => {
   it("reads a number flag as a number rather than as its text", () => {
     const parsed = parseArgv(["--port", "8080"], FLAGS);
@@ -288,6 +319,21 @@ describe("parseArgv: unknown flags", () => {
     expect(failure.detail.retryable).toBe(false);
     expect(failure.detail.details?.["flag"]).toBe("nope");
     expect(failure.detail.remediation.action).toContain("--help");
+  });
+
+  it("says where a global flag belongs when the command does not declare it", () => {
+    // `uvp --version` is documented (docs/cli.md, docs/installation.md) and
+    // `uvp doctor --version` is the natural wrong guess: the spelling exists, the
+    // position is what is wrong. Reporting the bare "Unknown flag" would tell the
+    // user the flag does not exist when the documented way to ask is one word
+    // earlier.
+    const failure = failureFrom(["--version"]);
+    expect(failure.detail.message).toContain("Unknown flag --version.");
+    expect(failure.detail.message).toContain("put it before the command name");
+    // The hint is about one spelling and does not leak onto any other, nor onto
+    // the same spelling where the table does offer it.
+    expect(failureFrom(["--nope"]).detail.message).not.toContain("global flag");
+    expect(() => parseArgv(["--version"], [VERSION_FLAG])).not.toThrow();
   });
 
   it("suggests the nearest spelling without accepting it", () => {

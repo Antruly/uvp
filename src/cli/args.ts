@@ -61,6 +61,28 @@ export const UNIVERSAL_FLAGS: readonly FlagSpec[] = [
   { name: "help", alias: ["h"], type: "boolean", description: "Print usage and exit." },
 ];
 
+/**
+ * `uvp --version`, answered before the command word rather than after it.
+ *
+ * Deliberately not universal, and this is the whole reason: `uvp soap --version
+ * 1.1` already means the SOAP protocol version (src/cli/commands/web.ts), and a
+ * flag table cannot hold two meanings for one spelling. Universal flags are
+ * appended to a command's own, so a universal `--version` would take the spelling
+ * away from every command that declares it — and `uvp soap --version 1.1` would
+ * be refused as "a switch that takes no value" while the help text went on
+ * describing it as SOAP 1.1.
+ *
+ * So the rule is positional and has to be read as such: a flag before the command
+ * word is a global one, and this one belongs to no command. `uvp --version`
+ * answers for uvp; `uvp soap --version 1.1` answers for the SOAP call. Neither
+ * can be typed in a way that asks both.
+ */
+export const VERSION_FLAG: FlagSpec = {
+  name: "version",
+  type: "boolean",
+  description: "Print the version and exit.",
+};
+
 const looksLikeFlag = (token: string): boolean => token.startsWith("-") && token !== "-";
 
 /**
@@ -108,6 +130,21 @@ const suggestion = (typed: string, known: readonly string[]): string => {
   }
   return best === undefined ? "" : ` Did you mean --${best}?`;
 };
+
+/**
+ * Where a global flag belongs, for a command whose table does not hold it.
+ *
+ * A global flag typed *after* a command word arrives as an unknown flag, because
+ * the table it was read against is that command's. The spelling is not wrong,
+ * only the position, so the message says which — otherwise `uvp doctor
+ * --version` reads as "uvp has no version flag" when the documented way to ask is
+ * `uvp --version`. Offered only when the caller did not hand this table the flag,
+ * which is exactly when the position is the thing to correct.
+ */
+const misplacedGlobal = (spelling: string, specs: readonly FlagSpec[]): string =>
+  spelling === VERSION_FLAG.name && !specs.some((candidate) => candidate.name === spelling)
+    ? ` --${VERSION_FLAG.name} is a global flag; put it before the command name.`
+    : "";
 
 const parseNumber = (name: string, raw: string): number => {
   // `Number("")` and `Number(" ")` are `0`, and zero is a number, so without the
@@ -205,9 +242,12 @@ export const parseArgv = (argv: readonly string[], flags: readonly FlagSpec[]): 
       bySpelling.get(spelling) ?? (negated === undefined ? undefined : bySpelling.get(negated));
 
     if (spec === undefined) {
-      flagError(`Unknown flag --${spelling}.${suggestion(spelling, [...bySpelling.keys()])}`, {
-        flag: spelling,
-      });
+      flagError(
+        `Unknown flag --${spelling}.${misplacedGlobal(spelling, specs)}${suggestion(spelling, [
+          ...bySpelling.keys(),
+        ])}`,
+        { flag: spelling },
+      );
     }
     if (negated !== undefined) {
       if (spec.type !== "boolean") flagError(`--no-${negated} is only meaningful for a switch.`);

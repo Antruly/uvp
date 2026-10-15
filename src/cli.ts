@@ -1,4 +1,4 @@
-import { UNIVERSAL_FLAGS, parseArgv } from "./cli/args.js";
+import { UNIVERSAL_FLAGS, VERSION_FLAG, asBoolean, parseArgv } from "./cli/args.js";
 import type { ParsedArgv } from "./cli/args.js";
 import { isToolCommand, resolveCommand } from "./cli/commandSpec.js";
 import type { CommandSpec, ToolCommand } from "./cli/commandSpec.js";
@@ -11,6 +11,7 @@ import { createToolHandlers, handlerFor } from "./composition/toolHandlers.js";
 import { createUvpServices } from "./composition/uvpServices.js";
 import type { UvpServices } from "./composition/uvpServices.js";
 import { UvpFailure, toUvpError } from "./domain/errors.js";
+import { uvpVersionBanner } from "./version.js";
 import type { StopResult } from "./application/WorkspaceService.js";
 import { describeStop } from "./application/ProcessSupervisor.js";
 
@@ -101,9 +102,23 @@ export const runCli = async (
       // Nothing to dispatch to. `--help` asked a question and gets an answer, with
       // or without a command after it. Anything else gets the failure contract:
       // "no command" and "no such command" are the caller's mistake, not results.
-      const global = parseArgv(pre, []);
+      // `VERSION_FLAG` is passed here and nowhere else: a command that declares
+      // its own `--version` — `uvp soap` does — owns the spelling after its own
+      // name, so this flag is only ever answered for a command word that never
+      // arrived. See the flag's own note in `cli/args.ts`.
+      const global = parseArgv(pre, [VERSION_FLAG]);
       if (global.help) {
         streams.out(globalHelp());
+        return EXIT_OK;
+      }
+      // Before the "no command" failure, and after `--help`: `uvp --version` is a
+      // question with an answer, and the exit code for it is the same `0` as any
+      // other answer. The banner rather than the bare number because a version
+      // number alone does not say whose it is in the middle of a build log, and
+      // because the name and the number come from one place (`src/version.ts`),
+      // which is also what the MCP server reports itself as.
+      if (asBoolean(global, "version") === true) {
+        streams.out(uvpVersionBanner());
         return EXIT_OK;
       }
       const typed = unmatched === undefined ? words : [...words, unmatched];
