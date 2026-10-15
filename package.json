@@ -77,6 +77,7 @@
     "test:mutation": "stryker run",
     "verify:test-discovery": "node scripts/verify-test-discovery.mjs",
     "verify:reporters": "node scripts/verify-reporters.mjs",
+    "verify:actions": "node scripts/verify-actions.mjs",
     "verify:lane-plan": "node scripts/ci/plan.mjs --table-only",
     "artifacts:tool-catalog": "node scripts/generate-mcp-tool-catalog.mjs",
     "artifacts:skills": "node scripts/generate-skill-metadata.mjs",
@@ -91,7 +92,7 @@
     "check": "turbo run typecheck lint format:check metadata:check knip",
     "check:fast": "turbo run typecheck lint",
     "check:ci": "turbo run typecheck lint format:check metadata:check verify:lane-plan knip jscpd docs:check docs:build",
-    "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run verify:reporters && npm run test:run",
+    "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run verify:reporters && npm run verify:actions && npm run test:run",
     "prepare": "husky"
   },
   "dependencies": {

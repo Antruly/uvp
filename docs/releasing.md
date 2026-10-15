@@ -120,7 +120,7 @@ of this fails:
 ```bash
 npm ci
 npm run compile
-npm run check:pr              # the static gate, both repository checks, and the whole suite
+npm run check:pr              # the static gate, all three repository checks, and the whole suite
 npm run test:toolchain        # skipped if libuvcpp is absent
 npm pack --dry-run            # inspect what will ship
 ```

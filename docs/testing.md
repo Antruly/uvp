@@ -596,7 +596,18 @@ without naming the skip reporter. The flags replace what `vitest.config.ts`
 registers rather than adding to it, so the step loses the names and keeps the
 count — green, and unreadable. It is the same defect the discovery check exists
 for, one level down: a lane that reports nothing looks like a lane that passed.
-Both are scripts rather than turbo tasks, and both run in the static job.
+All three repository checks are scripts rather than turbo tasks, and all three
+run in the static job.
+
+**Action pins.** `npm run verify:actions` fails if a `uses:` under `.github/`
+names a third-party action by anything but a 40-hex commit SHA with the release
+beside it (`owner/repo@<sha> # v4.4.0`), or if one action is pinned at two SHAs.
+A tag is a pointer its owner can move, so `@v4` is a decision to run whatever
+`v4` is on the day the job starts — and a bare SHA is a pin a reviewer cannot
+read. It also fails on the one form it cannot read, a `uses:` whose value starts
+on the next line, because a reference nobody read is a reference nobody checked.
+`.github/dependabot.yml` keeps the pins current; it is the same change for the
+same reason, since an unmaintained pin is a stale action that looks reviewed.
 
 **Generated files.** The tool catalog, package metadata, skill metadata, and
 error schema are generated from source. CI regenerates them and fails on a diff,

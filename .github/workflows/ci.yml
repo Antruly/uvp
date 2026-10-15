@@ -93,6 +93,12 @@ jobs:
       - name: Verify that every test run keeps the skip list
         if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
         run: npm run verify:reporters
+      # Guarded on `code` as well, because the checker itself lives under
+      # `scripts/`, which is the `code` lane: a change to the rule has to run the
+      # rule, or the change that breaks it is the change that skips it.
+      - name: Verify that every action is pinned to a commit
+        if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
+        run: npm run verify:actions
       - name: Check formatting when no code changed
         if: needs.changes.outputs.code != 'true'
         run: npm run format:check

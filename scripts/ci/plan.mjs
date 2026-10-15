@@ -197,6 +197,7 @@ const EXPECTED_LANES = [
   [".github/workflows/pages.yml", ["workflows"]],
   [".github/ISSUE_TEMPLATE/bug_report.yml", ["workflows"]],
   [".github/actions/npm-cache/action.yml", ["workflows"]],
+  [".github/dependabot.yml", ["workflows"]],
   ["LICENSE", ["code"]],
 ];
 
