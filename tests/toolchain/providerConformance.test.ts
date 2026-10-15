@@ -169,6 +169,12 @@ const subject: ProviderSubject = {
     ),
   substrate: substrateGap === "" ? substrate : undefined,
   substrateGap,
+  // Empty, and not because a libuvcpp is installed — there may be none. A local
+  // provider searches this machine's filesystem, and that search answers whether
+  // or not anything is there to find. `found: false` is a real answer here, and
+  // the three obligations that read its shape are exactly the ones a bare host
+  // can still exercise.
+  toolchainGap: "",
 };
 
 beforeAll(async () => {

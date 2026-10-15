@@ -144,6 +144,59 @@ provider" was the only provider for long enough that anything generic written
 during that time landed inside it, and nothing distinguished a local fact from a
 host fact because there was no second host.
 
+The container provider then contributed a fifth, and it is the first one that was
+never in the wrong place. `toolchains/libuvcppConfig.ts` was written at the
+`toolchains/` root because by then the question had an obvious owner: which
+`UVCPP_*` symbols a build defines, and where an installed config header lives, are
+the same questions whoever compiles the code. What splits between the providers
+is only the file read — `local` opens the header with `readFile`, `container`
+`cat`s it inside the image — and the layouts are returned as _relative path
+segments_ rather than joined paths, because the join is the one part that cannot
+be shared: a Windows host joining them with `path.join` would hand a Linux image a
+path full of backslashes. Getting that split right the first time is the
+difference between a shared fact and a shared assumption.
+
+`toolchains/diagnostics.ts` grew `noWorkWasDone` in the same period, for a reason
+worth recording because the obvious version of it is wrong. A build that reports
+itself as coming from a cache is reporting that no compiler ran, and the tempting
+evidence is `Built target`, which GNU Make prints for every target on every
+successful build — including a fresh compile that took a second and a half.
+Matching it would label each of those as a cache hit, which is an invented fact
+about work that plainly happened. Only the phrasings that mean exactly "nothing to
+do" are matched, and they are matched in one place so that two providers cannot
+disagree about whether the same output was a no-op.
+
+## The container provider, and where it sits
+
+`toolchains/container/` is a second implementation of the same port, and its
+position in the layer graph is the only thing about it that is not interesting:
+it sits beside `local/` and `native/`, imports `application` and `domain` and the
+`toolchains/` root, and imports nothing from `local/`. That last one is the check
+worth running when a provider is added, because the shared modules described above
+are exactly what a new provider is tempted to reach into the previous one for.
+
+Two decisions inside it are consequences of the layering rather than of
+containers:
+
+**uvp never pulls an image.** The caller names an image reference, the provider
+requires it to be present locally, and its absence is a per-capability gap. uvp's
+scope is building, running, and verifying on a machine the user controls;
+acquiring a registry credential path as a side effect of being asked to compile
+C++ would be a new authority nothing asked for. The refusal is a fact about the
+provider that is checkable offline, and it is checked: the test asserts that when
+the image is absent, exactly one command ran — the inspection — so nothing about
+the image was attempted.
+
+**The workspace is mounted at the same absolute path.** `-v /a/b:/a/b` rather
+than `-v /a/b:/work`. Every path in a `BuildOutcome` — `buildDir`, each
+diagnostic's `file`, each artifact's `path` — is then valid on the host as well as
+inside the container, so `discoverArtifacts` reads the real files and a diagnostic
+points at something the caller can open. Translating paths after the fact would be
+a second interpretation of a string the caller already gave a meaning to, which is
+what the rules in this document exist to prevent. It is also why `artifacts.ts`
+could move to the `toolchains/` root unchanged: the build directory it is handed
+is an ordinary host directory, whoever compiled what is in it.
+
 ## The case that shaped the rules: `UvpFeature`
 
 The feature vocabulary — `tls`, `http2`, `http3`, `grpc`, `websocket`, `soap`,

@@ -49,14 +49,28 @@ including the number of connections one failed request opens.
 
 `providerConformance.test.ts` and `providerContractFaults.test.ts` are the two
 halves of one question: does a toolchain satisfy the port it is injected through?
-`local/` is the only provider today, and one implementation is not a port — it is
-a class that happens to be injected. `providerContract.ts` holds the twelve
-obligations every provider must meet, as data rather than as a list of `it`s;
-`providerConformance.test.ts` runs them against the scripted provider, which is
-the control that proves every check is reached, and
-`tests/toolchain/providerConformance.test.ts` runs the same twelve against the
-real one, where four of them need a compiler, a CMake, and a libuvcpp and skip by
-name when the host has none.
+`providerContract.ts` holds the twelve obligations every provider must meet, as
+data rather than as a list of `it`s; `providerConformance.test.ts` runs them
+against the scripted provider, which is the control that proves every check is
+reached, and the same twelve run against the real providers — `local` in
+`tests/toolchain/providerConformance.test.ts`, and the container in
+`tests/toolchain/containerConformance.test.ts`, its image named by
+`UVP_TEST_IMAGE`.
+
+A provider that cannot do something skips those obligations **by name**, with the
+reason in the test title, and the reason is the provider's own words rather than
+this suite's guess about the host. There are two gaps rather than one because
+they are different questions. `substrateGap` is about running a build: a
+compiler, a CMake, and a libuvcpp. `toolchainGap` is about _looking at_ a
+toolchain, which is what a libuvcpp search needs and a build does not. `local`
+reports no `toolchainGap` even with no compiler installed, because it searches a
+filesystem and `found: false` is a real answer it gives in the shape three
+obligations check — which is exactly the shape exercised by a bare host. A
+container with no runtime cannot look inside its image at all, and `LibuvcppBuild`
+has no way to say "not looked", so it reports the `toolchain_unavailable` failure
+instead and those three skip. Collapsing the two would either skip the
+`found: false` shape on every host without libuvcpp, or claim a search had
+answered when it had not.
 
 The reason the obligations are data is `providerContractFaults.test.ts`. For each
 one, `providerSubjects.ts` builds a provider that breaks _exactly_ that clause,

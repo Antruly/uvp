@@ -16,7 +16,8 @@ import type {
 } from "../../application/ToolchainProvider.js";
 import { cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
-import { parseDiagnostics } from "../diagnostics.js";
+import { noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
+import { configHeaderPaths, modulesFromConfigHeader } from "../libuvcppConfig.js";
 import { isWindows, versionOf, whichOnPath } from "../host.js";
 import { runProcess } from "../processRunner.js";
 
@@ -84,26 +85,15 @@ const libuvcppSearchRoots = (workspacePath: string | undefined): readonly string
 /**
  * Read the feature set out of a build's generated config header.
  *
- * This is the only honest way to learn what a libuvcpp build supports: the
- * header is written at configure time by that build, so it describes that
- * build, not the version it claims.
+ * The layouts to try and the rule for reading the text live in
+ * `toolchains/libuvcppConfig.ts`, because a provider that runs its build
+ * somewhere else reads the *same* header and must reach the same answer. What is
+ * local here is only the file read.
  */
 const readModules = async (installPrefix: string): Promise<readonly string[]> => {
-  const candidates = [
-    join(installPrefix, "include", "uvcpp", "uvcpp_config.h"),
-    join(installPrefix, "include", "uvcpp_config.h"),
-    join(installPrefix, "uvcpp_config.h"),
-  ];
-  for (const candidate of candidates) {
+  for (const candidate of configHeaderPaths(installPrefix)) {
     try {
-      const text = await readFile(candidate, "utf8");
-      const modules: string[] = [];
-      for (const line of text.split("\n")) {
-        const match = /^\s*#\s*define\s+([A-Z0-9_]+)\s+1\b/u.exec(line);
-        const symbol = match?.[1];
-        if (symbol !== undefined && symbol.startsWith("UVCPP_")) modules.push(symbol);
-      }
-      return modules.sort();
+      return modulesFromConfigHeader(await readFile(candidate, "utf8"));
     } catch {
       // Try the next candidate layout.
     }
@@ -428,17 +418,10 @@ class LocalToolchainClient implements ToolchainClient {
     commands.push(compile.command);
     diagnostics.push(...parseDiagnostics(compile.stdout, compile.stderr, "compile"));
 
-    // Only the no-op phrasings count.
-    //
-    // `Built target` is *not* one of them, however much it looks like one: GNU
-    // Make prints it for every target on every successful build, including a
-    // fresh compile that just took a second and a half. Matching it would label
-    // each of those "from cache", which is an invented fact about work that
-    // plainly happened.
+    // Only the no-op phrasings count, which `noWorkWasDone` owns — see there for
+    // why `Built target` is deliberately not one of them.
     const combined = `${compile.stdout}\n${compile.stderr}`;
-    const fromCache =
-      compile.exitCode === 0 &&
-      /ninja: no work to do|Nothing to be done for|is up to date|up-to-date:/iu.test(combined);
+    const fromCache = compile.exitCode === 0 && noWorkWasDone(combined);
 
     return {
       buildDir: request.buildDir,

@@ -41,6 +41,15 @@ import type { UvpError } from "../../src/domain/errors.js";
  * compiler at all. That is deliberate. A lane that skipped everything because the
  * expensive half was unavailable would have thrown away the cheap half.
  *
+ * There is a second gap, `toolchainGap`, and it exists because the two are not
+ * the same question. A build needs a *working* toolchain; a libuvcpp search needs
+ * only a toolchain that can be *looked at*, and a local host with no compiler
+ * still has a filesystem to search. So the three obligations about the shape of a
+ * search that answered run wherever a provider can answer one, which is what makes
+ * the "found nothing" shape exercised for real on a bare host — and are skipped
+ * by name for a provider whose toolchain is a container image it has no runtime
+ * to open.
+ *
  * ## What passing this does not establish
  *
  * Conformance is not correctness. A provider that passes every check below can
@@ -89,6 +98,22 @@ export interface ProviderSubject {
   readonly substrate?: ProviderSubstrate | undefined;
   /** Why `substrate` is absent. Empty when it is present. */
   readonly substrateGap: string;
+  /**
+   * Why this provider cannot examine its own toolchain for a libuvcpp, or empty.
+   *
+   * A second gate rather than a reuse of `substrateGap`, because the two are
+   * genuinely different questions and a provider can answer one without the
+   * other. A local host with no compiler still has a filesystem, so it can search
+   * it and answer `found: false` in the shape three obligations below check — and
+   * skipping those on such a host would throw away the only case where the
+   * "found nothing" shape is exercised for real. A container provider with no
+   * runtime cannot look inside the image at all, and `LibuvcppBuild` has no way to
+   * say "not looked": `found: false` is a claim that there is no libuvcpp in
+   * there, so the honest answer is the `toolchain_unavailable` failure. These
+   * three obligations are about the shape of a search that *answered*, so they are
+   * skipped by name rather than run against a provider that could not search.
+   */
+  readonly toolchainGap: string;
 }
 
 export interface ProviderObligation {
@@ -98,6 +123,8 @@ export interface ProviderObligation {
   readonly description: string;
   /** True when this check cannot run without `ProviderSubstrate`. */
   readonly needsSubstrate: boolean;
+  /** True when this check cannot run unless the provider can examine its toolchain. */
+  readonly needsToolchain: boolean;
   /** Resolves when the provider conforms; throws when it does not. */
   check(subject: ProviderSubject): Promise<void>;
 }
@@ -184,6 +211,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "identity-is-one-answer",
     description: "names one provider, in its availability and in the client it hands out",
     needsSubstrate: false,
+    needsToolchain: false,
     check: async (subject) => {
       const provider = subject.create();
       const identity = provider.identity();
@@ -209,6 +237,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "inspection-has-no-side-effects",
     description: "answers the same question twice the same way, so asking it changes nothing",
     needsSubstrate: false,
+    needsToolchain: false,
     check: async (subject) => {
       const provider = subject.create();
       const first = await provider.inspectAvailability(liveSignal());
@@ -228,6 +257,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "an-unavailable-provider-names-what-is-missing",
     description: "counts the gaps that make it unavailable, and says what each one blocks",
     needsSubstrate: false,
+    needsToolchain: false,
     check: async (subject) => {
       const availability = await subject.create().inspectAvailability(liveSignal());
       for (const gap of availability.missing) {
@@ -254,6 +284,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "a-descriptor-carries-a-path",
     description: "names a path for every compiler and build system it reports finding",
     needsSubstrate: false,
+    needsToolchain: false,
     check: async (subject) => {
       const availability = await subject.create().inspectAvailability(liveSignal());
       for (const entry of [...availability.compilers, ...availability.buildSystems]) {
@@ -269,6 +300,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "a-missing-libuvcpp-claims-nothing-else",
     description: "reports found: false without a version, a prefix, or modules to go with it",
     needsSubstrate: false,
+    needsToolchain: true,
     check: async (subject) => {
       const found = await subject.create().findLibuvcpp(undefined, liveSignal());
       if (found.found) {
@@ -293,6 +325,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "a-version-says-where-it-was-read",
     description: "carries the source alongside a libuvcpp version, since two installs can disagree",
     needsSubstrate: false,
+    needsToolchain: true,
     check: async (subject) => {
       const found = await subject.create().findLibuvcpp(undefined, liveSignal());
       if (!found.found) return;
@@ -315,6 +348,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     description:
       "lists only UVCPP_ symbols as modules, since those are what a feature is matched against",
     needsSubstrate: false,
+    needsToolchain: true,
     check: async (subject) => {
       const found = await subject.create().findLibuvcpp(undefined, liveSignal());
       for (const module of found.modules) {
@@ -330,6 +364,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     description:
       "reports the build directory it was asked for, and a verdict its exit code agrees with",
     needsSubstrate: true,
+    needsToolchain: false,
     check: async (subject) => {
       const { request, outcome } = await substrateOf(subject).successfulBuild();
       expect(
@@ -352,6 +387,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "a-failed-build-is-an-outcome",
     description: "answers a build that did not succeed with diagnostics rather than throwing",
     needsSubstrate: true,
+    needsToolchain: false,
     check: async (subject) => {
       const outcome = await substrateOf(subject).runFailingBuild();
       expect(outcome.succeeded, "a build the substrate was set up to fail reported success").toBe(
@@ -372,6 +408,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "an-artifact-is-described",
     description: "gives every artifact a path, a size, and a digest",
     needsSubstrate: true,
+    needsToolchain: false,
     check: async (subject) => {
       const { outcome } = await substrateOf(subject).successfulBuild();
       for (const artifact of outcome.artifacts) {
@@ -391,6 +428,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     id: "a-call-that-arrives-cancelled-starts-nothing",
     description: "rejects every entry point when the signal was already aborted",
     needsSubstrate: false,
+    needsToolchain: false,
     check: async (subject) => {
       const provider = subject.create();
       const signal = withdrawnSignal();
@@ -407,6 +445,7 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
     description:
       "rejects with a cancellation when the abort lands during the work, not only before it",
     needsSubstrate: true,
+    needsToolchain: false,
     check: async (subject) => {
       const controller = new AbortController();
       // Started with a live signal, and only then interrupted: a provider that
@@ -436,6 +475,23 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
 ];
 
 /**
+ * Why an obligation cannot be run against this subject, or undefined when it can.
+ *
+ * The substrate is checked second because a subject that cannot examine its
+ * toolchain cannot run a build either, and both reasons are true of it: reporting
+ * the narrower one — the search it could not perform — is what tells a reader
+ * which half of the contract this run had no coverage for.
+ */
+const skipReasonFor = (
+  subject: ProviderSubject,
+  obligation: ProviderObligation,
+): string | undefined => {
+  if (obligation.needsToolchain && subject.toolchainGap !== "") return subject.toolchainGap;
+  if (obligation.needsSubstrate && subject.substrate === undefined) return subject.substrateGap;
+  return undefined;
+};
+
+/**
  * Run every obligation against one subject, as tests.
  *
  * `it.skipIf` rather than a conditional test body: a skipped Vitest test is
@@ -446,11 +502,11 @@ export const PROVIDER_OBLIGATIONS: readonly ProviderObligation[] = [
 export const describeProviderConformance = (subject: ProviderSubject): void => {
   describe(`${subject.name}: the provider contract`, () => {
     for (const obligation of PROVIDER_OBLIGATIONS) {
-      const missing = obligation.needsSubstrate && subject.substrate === undefined;
-      it.skipIf(missing)(
-        missing
-          ? `${obligation.description} — skipped: ${subject.substrateGap}`
-          : obligation.description,
+      const skipReason = skipReasonFor(subject, obligation);
+      it.skipIf(skipReason !== undefined)(
+        skipReason === undefined
+          ? obligation.description
+          : `${obligation.description} — skipped: ${skipReason}`,
         async () => {
           await obligation.check(subject);
         },

@@ -76,11 +76,11 @@ inspection-only provider stays implementable.
 
 |     |                                                                                              |
 | --- | -------------------------------------------------------------------------------------------- |
-| ⬜  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly       |
+| 🟡  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly       |
 | ⬜  | `remote-ssh/` — build and run on another machine, with the provider identity on every result |
 | ✅  | A provider conformance suite both of them must pass                                          |
 
-The conformance suite came first, and it is what the two providers below will be
+The conformance suite came first, and it is what the two providers below were
 written against. Two providers that pass the same suite are swappable; two that
 merely both "work" are two code paths.
 
@@ -90,14 +90,54 @@ than tests so that `providerSubjects.ts` can hand each one a provider built to
 break exactly that clause, and `providerContractFaults.test.ts` requires the
 named obligation to reject it and every other obligation to accept it — a check
 nobody has seen fail is a comment, and a check that fires on everything localises
-nothing. Against the scripted provider they are the control; against
-`LocalToolchainProvider` in `tests/toolchain/` they are the real thing, with the
-four build-shaped ones skipping by name on a host with no compiler.
+nothing. Against the scripted provider they are the control; against the real
+providers in `tests/toolchain/` they are the real thing, with the obligations
+that need a toolchain skipping by name when the host has none.
 
 Writing it corrected a claim in the port: `modules` is not the `UVCPP_*_ENABLE`
 macros, as `ToolchainProvider.ts` said, but the `UVCPP_*` symbols a build defines
 as exactly `1` — the installed 1.7.0 header also carries `UVCPP_ENABLE_MEMORY_POOL`
 and `UVCPP_DB_RUNTIME_LOAD`. The reader was right and the sentence was wrong.
+
+### `container/` — what is in and what is not
+
+`src/toolchains/container/ContainerToolchainProvider.ts` is written, and it is a
+second subject of the conformance suite. On this machine it reports 5 passing and
+7 skipped, each skip naming the provider's own reason: there is no container
+runtime here, and uvp does not pull an image, so the image is absent too.
+
+**In:** runtime discovery in preference order (`docker`, `podman`, `nerdctl`);
+refusing an image that is not present without contacting a registry; reporting an
+image that is present but will not run as `image_runnable` rather than as a
+missing compiler; reading the image's compilers and build systems in one container
+start; finding a libuvcpp inside the image with the layouts `local` uses, and
+reading `uvcpp_version.h` from the directory the config header was actually found
+in; building with the workspace bind-mounted at the same absolute path.
+
+**Not in, and not for want of code:** the provider is not reachable from the CLI
+or the MCP surface. Nothing constructs it outside tests, so there is no
+`uvp build --toolchain container` and no tool contract declaring what starting a
+container would do to the machine. That wiring is its own change, and it stays
+open until three questions have answers rather than plausible defaults:
+
+- **Authority.** Which flag or manifest key names the image, and whether naming
+  one is enough to make uvp start a container on the user's behalf. The `effects`
+  block of whatever contract carries this has to declare it, and "runs a process
+  on this host" is a different declaration from "contacts a network endpoint".
+- **Verification.** This host has no container runtime, so a wired-up path would
+  ship a user-facing feature nobody has executed. The provider's _command
+  construction_ is checked offline through its `run` seam, and those checks are
+  labelled as boundary evidence rather than runtime evidence; the wiring deserves
+  the same treatment only once a runtime exists to run it against.
+- **The build obligations.** The four that need a substrate still skip for the
+  container, including the one test that would establish a real workspace
+  compiles inside an image. The substrate needs a generated workspace and a
+  libuvcpp _inside_ the image, and writing that fixture before it can be run
+  would be a fixture nobody has seen work.
+
+Until then the honest description of `container/` is: implemented, conformant in
+the five ways a host without a runtime can check, and unexercised in the ways that
+need one.
 
 ## Milestone 3 — depth
 

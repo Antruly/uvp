@@ -126,6 +126,10 @@ export const fakeSubject = (options: FakeSubjectOptions = {}): ProviderSubject =
     request: (signal) => requestAt(signal, join(NOWHERE, "build")),
     substrate: options.substrate === undefined ? base : options.substrate(base),
     substrateGap: "",
+    // Always answerable here, and it is worth saying why rather than leaving it
+    // empty by habit: the scripted provider is handed a libuvcpp answer and never
+    // looks for one, so no host state can make its search unanswerable.
+    toolchainGap: "",
   };
 };
 

@@ -295,3 +295,19 @@ export const parseDiagnostics = (
   }
   return diagnostics;
 };
+
+/**
+ * Whether a build tool said it had nothing to do.
+ *
+ * Only the phrasings that mean exactly that are matched. `Built target` is *not*
+ * one of them, however much it looks like one: GNU Make prints it for every
+ * target on every successful build, including a fresh compile that took a second
+ * and a half. Matching it would label each of those as coming from a cache,
+ * which is an invented fact about work that plainly happened.
+ *
+ * Here rather than in a provider because it is a reading of build output like
+ * any other, and two providers that disagreed about whether Ninja printed "no
+ * work to do" would report the same build differently.
+ */
+export const noWorkWasDone = (output: string): boolean =>
+  /ninja: no work to do|Nothing to be done for|is up to date|up-to-date:/iu.test(output);
