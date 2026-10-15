@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "94c5247cf1b223af5a0f185fa68f3f8512d8a833bf284702b43e141cb7447ab8",
-  "tool_count": 14,
+  "digest": "81c64af224c7a139a13a6280231c12b163dc369f6f45220a44b0fc2adb53dab4",
+  "tool_count": 15,
   "tools": [
     {
       "name": "uvp_doctor",
@@ -85,7 +85,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -537,7 +538,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -847,7 +849,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -1234,7 +1237,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -1512,7 +1516,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -1852,7 +1857,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -2332,7 +2338,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -2781,7 +2788,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -3159,7 +3167,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -3560,7 +3569,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -3824,7 +3834,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -4203,7 +4214,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -4624,7 +4636,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -5047,7 +5060,8 @@
                     "exchange",
                     "capture",
                     "assertion",
-                    "benchmark"
+                    "benchmark",
+                    "comparison"
                   ]
                 },
                 "observed_at": {
@@ -5354,6 +5368,687 @@
                 ]
               }
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_bundle_diff",
+      "title": "Compare two verification reports",
+      "description": "Compare two reports from earlier `uvp_verify` passes: what the status was, what each request returned, and which questions were left unanswered. Reports separately what the pass's own semantic digest covers and what falls outside it, and says so plainly when two reports are not comparable at all — a different workspace, or a digest that does not match the contents it arrived with.",
+      "kind": "workflow",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Path to the report of the earlier pass, as `uvp verify --json` wrote it."
+          },
+          "after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Path to the report of the later pass."
+          },
+          "include_unchanged": {
+            "default": false,
+            "description": "Report every request the two passes have between them rather than only the ones that differ. The counts are reported either way, so nothing is hidden by filtering.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "before",
+          "after"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "before": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "byte_digest": {
+                "type": "string"
+              },
+              "bundle_id": {
+                "type": "string"
+              },
+              "workspace_id": {
+                "type": "string",
+                "pattern": "^wsp_[0-9a-f]{22}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "partial",
+                  "failed",
+                  "unknown"
+                ]
+              },
+              "digest": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "bytes",
+              "byte_digest",
+              "bundle_id",
+              "workspace_id",
+              "status",
+              "digest"
+            ],
+            "additionalProperties": false
+          },
+          "after": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "byte_digest": {
+                "type": "string"
+              },
+              "bundle_id": {
+                "type": "string"
+              },
+              "workspace_id": {
+                "type": "string",
+                "pattern": "^wsp_[0-9a-f]{22}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "partial",
+                  "failed",
+                  "unknown"
+                ]
+              },
+              "digest": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "bytes",
+              "byte_digest",
+              "bundle_id",
+              "workspace_id",
+              "status",
+              "digest"
+            ],
+            "additionalProperties": false
+          },
+          "comparable": {
+            "type": "boolean"
+          },
+          "incomparable_because": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "digest_consistent": {
+            "type": "object",
+            "properties": {
+              "before": {
+                "type": "boolean"
+              },
+              "after": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          },
+          "same_digest": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "identical",
+              "changed",
+              "incomparable"
+            ],
+            "description": "`incomparable` takes precedence over the other two."
+          },
+          "status_changed": {
+            "type": "boolean"
+          },
+          "goal_changed": {
+            "type": "boolean"
+          },
+          "order_changed": {
+            "type": "boolean"
+          },
+          "build": {
+            "type": "object",
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "before": {
+                "type": "object",
+                "properties": {
+                  "succeeded": {
+                    "type": "boolean"
+                  },
+                  "exit_code": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "succeeded",
+                  "exit_code"
+                ],
+                "additionalProperties": false
+              },
+              "after": {
+                "type": "object",
+                "properties": {
+                  "succeeded": {
+                    "type": "boolean"
+                  },
+                  "exit_code": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "succeeded",
+                  "exit_code"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "changed",
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          },
+          "service": {
+            "type": "object",
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "before": {
+                "type": "object",
+                "properties": {
+                  "ready": {
+                    "type": "boolean"
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ready"
+                ],
+                "additionalProperties": false
+              },
+              "after": {
+                "type": "object",
+                "properties": {
+                  "ready": {
+                    "type": "boolean"
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ready"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "changed",
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          },
+          "exchanges": {
+            "type": "object",
+            "properties": {
+              "unchanged": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "before_count": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "after_count": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "change": {
+                      "type": "string",
+                      "enum": [
+                        "unchanged",
+                        "changed",
+                        "added",
+                        "absent"
+                      ]
+                    },
+                    "changed_fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "status",
+                          "assertions_passed",
+                          "assertions_failed",
+                          "failures"
+                        ]
+                      }
+                    },
+                    "verdict_changed": {
+                      "type": "boolean"
+                    },
+                    "before": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "assertions_passed": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "assertions_failed": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "failures": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "assertions_passed",
+                        "assertions_failed",
+                        "failures"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "after": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "assertions_passed": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "assertions_failed": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "failures": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "assertions_passed",
+                        "assertions_failed",
+                        "failures"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "change",
+                    "changed_fields",
+                    "verdict_changed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "unchanged",
+              "before_count",
+              "after_count",
+              "entries"
+            ],
+            "additionalProperties": false
+          },
+          "unverified": {
+            "type": "object",
+            "properties": {
+              "unchanged": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "before_count": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "after_count": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "string"
+                    },
+                    "change": {
+                      "type": "string",
+                      "enum": [
+                        "unchanged",
+                        "changed",
+                        "added",
+                        "absent"
+                      ]
+                    },
+                    "before": {
+                      "description": "The reason the earlier pass gave.",
+                      "type": "string"
+                    },
+                    "after": {
+                      "description": "The reason the later pass gave.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "question",
+                    "change"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "unchanged",
+              "before_count",
+              "after_count",
+              "entries"
+            ],
+            "additionalProperties": false
+          },
+          "not_compared": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "before",
+          "after",
+          "comparable",
+          "incomparable_because",
+          "digest_consistent",
+          "outcome",
+          "status_changed",
+          "goal_changed",
+          "order_changed",
+          "build",
+          "service",
+          "exchanges",
+          "unverified",
+          "not_compared"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "What changed between a pass before a change and one after it",
+          "input": {
+            "before": "/tmp/pass-before.json",
+            "after": "/tmp/pass-after.json"
           }
         }
       ]

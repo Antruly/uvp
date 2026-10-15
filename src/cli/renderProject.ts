@@ -1,5 +1,6 @@
 import { bytes, millis, oneLine, row, rows, table } from "./format.js";
 import { at, bool, list, num, obj, str, strings, yesNo } from "./readOutput.js";
+import { shortDigest } from "../domain/identity.js";
 
 /**
  * Human renderings for the readiness, workspace, build, and runtime tools.
@@ -272,4 +273,141 @@ export const renderVerify = (output: Record<string, unknown>): string[] => {
 
   lines.push("", row("bundle", str(output["bundle_id"])));
   return lines;
+};
+
+/**
+ * Comparing two saved passes.
+ *
+ * The outcome leads, because it is the answer, and the two sides are printed
+ * under it so that a reader can see *which* reports it is an answer about. A
+ * comparison that printed its differences without naming its two sides would be
+ * a list of changes to nothing in particular.
+ */
+export const renderBundleDiff = (output: Record<string, unknown>): string[] => {
+  const before = obj(output["before"]);
+  const after = obj(output["after"]);
+  const side = (entry: Record<string, unknown>): string =>
+    `${str(entry["path"])}  ${str(entry["status"])}  ${shortDigest(str(entry["digest"]))}`;
+
+  const lines = [
+    row("outcome", str(output["outcome"])),
+    row("before", side(before)),
+    row("after", side(after)),
+    row("digest", digestLine(bool(output["same_digest"]))),
+  ];
+
+  for (const reason of strings(output["incomparable_because"])) {
+    lines.push(row("not comparable", reason));
+  }
+  if (bool(output["comparable"]) === false) lines.push("");
+
+  if (bool(output["status_changed"]) === true) {
+    lines.push(row("status", `${str(before["status"])} -> ${str(after["status"])}`));
+  }
+  if (bool(output["order_changed"]) === true) {
+    lines.push(
+      row(
+        "order",
+        "the two passes recorded their requests or their questions in a different order",
+      ),
+    );
+  }
+  if (bool(output["goal_changed"]) === true) {
+    lines.push(row("goal", `${str(before["goal"], "-")} -> ${str(after["goal"], "-")}`));
+  }
+
+  const exchanges = obj(output["exchanges"]);
+  const entries = list(at(exchanges, "entries"));
+  lines.push(
+    row(
+      "requests",
+      `${String(num(at(exchanges, "before_count")) ?? 0)} before, ` +
+        `${String(num(at(exchanges, "after_count")) ?? 0)} after, ` +
+        `${String(num(at(exchanges, "unchanged")) ?? 0)} unchanged`,
+    ),
+  );
+  if (entries.length > 0) {
+    lines.push(
+      "",
+      table(
+        ["request", "change", "status", "assertions"],
+        entries.map((raw) => {
+          const entry = obj(raw);
+          const left = obj(at(entry, "before"));
+          const right = obj(at(entry, "after"));
+          return [
+            str(at(entry, "name")),
+            changeLabel(entry),
+            `${statusText(left)} -> ${statusText(right)}`,
+            `${String(num(at(right, "assertions_passed")) ?? 0)} passed, ` +
+              `${String(num(at(right, "assertions_failed")) ?? 0)} failed`,
+          ];
+        }),
+      ),
+    );
+    for (const raw of entries) {
+      const entry = obj(raw);
+      for (const failure of changedFailureLines(entry)) {
+        lines.push(`  ${str(at(entry, "name"))}: ${failure}`);
+      }
+    }
+  }
+
+  const unverified = list(at(output["unverified"], "entries"));
+  if (unverified.length > 0) {
+    lines.push("", "unanswered questions:");
+    for (const raw of unverified) {
+      const entry = obj(raw);
+      lines.push(`  ${str(at(entry, "question"))}  (${str(at(entry, "change"))})`);
+      const was = str(at(entry, "before"));
+      const now = str(at(entry, "after"));
+      if (was !== "") lines.push(`    before: ${was}`);
+      if (now !== "") lines.push(`    after:  ${now}`);
+    }
+  }
+
+  // Named rather than implied. A reader who has just compared two digests needs
+  // to know which fields this comparison deliberately left alone, or the report
+  // reads as a claim about all of them.
+  const notCompared = strings(output["not_compared"]);
+  if (notCompared.length > 0) lines.push("", row("not compared", notCompared.join(", ")));
+  return lines;
+};
+
+/** One line for what the two digests did, including the case where they cannot be compared. */
+const digestLine = (same: boolean | undefined): string => {
+  if (same === true) return "the same, so nothing the digest covers moved";
+  if (same === false) return "different";
+  return "not compared: a supplied digest does not match the contents it arrived with";
+};
+
+const statusText = (side: Record<string, unknown>): string => {
+  const status = num(side["status"]);
+  return status === undefined ? "no response" : String(status);
+};
+
+/**
+ * What happened to one exchange.
+ *
+ * The distinction between a change the digest sees and one it does not is in the
+ * label, because it is the difference between "these two passes disagree about
+ * the world" and "these two passes agree, and one of them explained itself
+ * differently" — and a reader comparing the digests afterwards needs to know
+ * which they are looking at.
+ */
+const changeLabel = (entry: Record<string, unknown>): string => {
+  const change = str(at(entry, "change"));
+  if (change !== "changed") return change;
+  const fields = strings(at(entry, "changed_fields"));
+  return bool(at(entry, "verdict_changed")) === true
+    ? "changed"
+    : `changed (not in the digest: ${fields.join(", ")})`;
+};
+
+const changedFailureLines = (entry: Record<string, unknown>): string[] => {
+  const fields = strings(at(entry, "changed_fields"));
+  if (!fields.includes("failures")) return [];
+  const left = strings(at(at(entry, "before"), "failures"));
+  const right = strings(at(at(entry, "after"), "failures"));
+  return [...left.map((text) => `was: ${text}`), ...right.map((text) => `now: ${text}`)];
 };

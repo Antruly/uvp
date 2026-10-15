@@ -1,6 +1,12 @@
 import { TOOL_CONTRACTS } from "../../contracts/toolContracts.js";
 import type { CommandSpec } from "../commandSpec.js";
-import { buildCommand, runCommand, stopCommand, verifyCommand } from "./project.js";
+import {
+  buildCommand,
+  bundleDiffCommand,
+  runCommand,
+  stopCommand,
+  verifyCommand,
+} from "./project.js";
 import { doctorCommand } from "./toolchain.js";
 import { initCommand } from "./workspace.js";
 import {
@@ -33,6 +39,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   runCommand,
   stopCommand,
   verifyCommand,
+  bundleDiffCommand,
   httpCommand,
   websocketCommand,
   soapCommand,

@@ -53,6 +53,64 @@ const sharedBuildFlags = [
   },
 ];
 
+export const bundleDiffCommand: CommandSpec = {
+  path: ["bundle", "diff"],
+  tool: "uvp_bundle_diff",
+  summary: "Compare two verification reports and say what changed.",
+  usage: "uvp bundle diff --before FILE --after FILE [--include-unchanged] [--json]",
+  flags: [
+    {
+      name: "before",
+      type: "string",
+      value: "FILE",
+      description: "Report of the earlier pass, as written by `uvp verify --json`.",
+    },
+    {
+      name: "after",
+      type: "string",
+      value: "FILE",
+      description: "Report of the later pass.",
+    },
+    {
+      name: "include-unchanged",
+      type: "boolean",
+      description: "List every request both reports have, not only the ones that differ.",
+    },
+  ],
+  notes: [
+    "The reports are files, which is what `uvp verify --json > pass.json` leaves behind. Both are",
+    "read whole or not at all: a file above uvp's limit is refused rather than truncated, so a",
+    "comparison never rests on part of a report.",
+    "",
+    "Exit codes: 0 identical, 1 changed, 2 incomparable — two reports of different workspaces, or a",
+    "digest that does not match the contents it arrived with. Incomparable exits 2 rather than 1",
+    "because the question could not be put to these two reports at all.",
+    "",
+    "Identifiers and timings are never compared. They are minted per pass, so treating them as",
+    "findings would report every pair of passes as changed.",
+  ],
+  input: (parsed) => {
+    const before = asString(parsed, "before");
+    const after = asString(parsed, "after");
+    if (before === undefined || after === undefined) {
+      flagError("uvp bundle diff needs both reports to compare.", {
+        usage: "uvp bundle diff --before before.json --after after.json",
+      });
+    }
+    return {
+      before,
+      after,
+      ...optional("include_unchanged", asBoolean(parsed, "include-unchanged")),
+    };
+  },
+  verdict: (output) =>
+    str(output["outcome"]) === "incomparable"
+      ? EXIT_WRONG
+      : str(output["outcome"]) === "changed"
+        ? EXIT_NO
+        : undefined,
+};
+
 export const buildCommand: CommandSpec = {
   path: ["build"],
   tool: "uvp_build",

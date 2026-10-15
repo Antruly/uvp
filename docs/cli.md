@@ -242,6 +242,58 @@ was asked for, because in a bundle `failures` is a list of strings and nothing
 else in the output repeats the expectation. (`uvp assert exchange` carries the
 same pair as structured `observed` and `expected` fields.)
 
+## `uvp bundle diff`
+
+```bash
+uvp verify ./svc --port 8080 --json > before.json
+# … change something …
+uvp verify ./svc --port 8080 --json > after.json
+uvp bundle diff --before before.json --after after.json
+```
+
+Two reports from earlier passes, compared. The unit is a report `uvp_verify`
+wrote, addressed by the file it is in, because a bundle is the one artifact
+carrying a semantic digest — and a comparison built on anything else would answer
+a different question from the one the digest answers.
+
+The report separates three things a reader would otherwise conflate:
+
+| Field               | What it says                                                                           |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| `outcome`           | `identical`, `changed`, or `incomparable`                                              |
+| `exchanges.entries` | Per request: `added`, `absent`, `changed`, or (with `--include-unchanged`) `unchanged` |
+| `changed_fields`    | Which fields of that request moved                                                     |
+| `verdict_changed`   | Whether any of them is a field `bundle_digest` reads                                   |
+| `same_digest`       | Whether the two passes' own digests agree                                              |
+| `digest_consistent` | Whether each supplied digest matches its own contents                                  |
+| `not_compared`      | The fields that were reported and deliberately not judged                              |
+
+`changed_fields` beside `verdict_changed: false` is the case worth knowing:
+`bundle_digest` covers the verdict and not the sentence explaining it, so two
+passes can share a digest while the failure text moved. That pairing is reported
+rather than smoothed over, and `limitations` says it in words.
+
+Identifiers and the clock are never compared — `bundle_id`, `exchange_id`,
+`elapsed_ms`, `service.run_id`, `service.endpoint`. Each is minted per pass or
+belongs to the run rather than to the subject, so a repeat pass over an unchanged
+service reads as `identical` however the two files were produced. Order _is_
+compared, because the sequence of exchanges and questions is part of what the
+digest covers; a reordering is reported as `order_changed` rather than left to be
+discovered by noticing two different digests.
+
+Both files are read whole, and a file above the size limit is refused rather than
+truncated. A path that is not JSON, JSON that is not a report, a directory, a
+missing file, and a report whose `bundle_digest` does not match its own contents
+are all `invalid_request` naming what was found. "JSON that is not a report" and
+"not JSON at all" are distinguished, because the repairs differ.
+
+Exit `0` is `identical`, exit `1` is `changed`, and exit `2` is `incomparable` or
+a refusal: two reports that cannot be read as one subject — a different
+workspace, a digest that does not describe what arrived with it — have not had
+their question answered. A different workspace is two subjects rather than two
+moments, and equality between two self-inconsistent digests would be a
+coincidence rather than a finding.
+
 ## Web commands
 
 Each of these maps to one `web` tool.

@@ -22,6 +22,16 @@ export const evidenceKindSchema = z.enum([
   "capture",
   "assertion",
   "benchmark",
+  /**
+   * Evidence about two reports rather than about a live subject.
+   *
+   * The other kinds are named for what uvp went and looked at. This one is the
+   * exception: a comparison looked at nothing, and every fact in it came out of
+   * records someone else wrote. Giving it their kind would claim an observation
+   * that was never made, so it is named for what it is — second-hand, and saying
+   * so in the one field a caller filters on.
+   */
+  "comparison",
 ]);
 export type EvidenceKind = z.infer<typeof evidenceKindSchema>;
 

@@ -4,12 +4,14 @@ import { UvpFailure } from "../domain/errors.js";
 import {
   createRecorder,
   envelopeOf,
+  fileSource,
   record,
   recordUnknown,
 } from "../application/evidenceHelpers.js";
 import type { EvidenceRecorder } from "../application/evidenceHelpers.js";
 import { doctorContract } from "../contracts/toolchainToolContracts.js";
 import {
+  bundleDiffContract,
   buildContract,
   runContract,
   runStopContract,
@@ -28,6 +30,10 @@ import {
 } from "../contracts/webToolContracts.js";
 import { toolNames } from "../contracts/toolContracts.js";
 import { verify } from "../application/VerificationService.js";
+import { readSavedBundle, reportedSide } from "../application/bundleFile.js";
+import type { SavedBundle } from "../application/bundleFile.js";
+import { diffBundles } from "../application/bundleDiff.js";
+import type { BundleDiff, BundleIdentity } from "../application/bundleDiff.js";
 import type { UvpServices } from "./uvpServices.js";
 
 /**
@@ -105,6 +111,74 @@ const buildOutput = (
   })),
   commands: [...outcome.commands],
 });
+
+/**
+ * What one comparison observed.
+ *
+ * The two files are the observation; what they say is nested under `claims`,
+ * because a report's own `status` and `bundle_digest` are things the file asserts
+ * and not things uvp saw. Flattening the two groups into one would make the
+ * record read as though this call had established the findings it only read.
+ */
+const recordComparison = (
+  recorder: EvidenceRecorder,
+  before: SavedBundle,
+  after: SavedBundle,
+  compared: BundleDiff,
+): void => {
+  const claims = (saved: SavedBundle, identity: BundleIdentity) => ({
+    bundle_id: identity.bundle_id,
+    status: identity.status,
+    digest: identity.digest,
+    exchanges: saved.bundle.exchanges.length,
+    unverified: saved.bundle.unverified.length,
+  });
+  record(recorder, {
+    kind: "comparison",
+    subject: {
+      before: { path: before.path, workspace_id: compared.before.workspace_id },
+      after: { path: after.path, workspace_id: compared.after.workspace_id },
+    },
+    observed: {
+      before: {
+        path: before.path,
+        bytes: before.bytes,
+        byte_digest: before.byte_digest,
+        claims: claims(before, compared.before),
+      },
+      after: {
+        path: after.path,
+        bytes: after.bytes,
+        byte_digest: after.byte_digest,
+        claims: claims(after, compared.after),
+      },
+    },
+    derived: {
+      outcome: compared.outcome,
+      comparable: compared.comparable,
+      digest_consistent: compared.digest_consistent,
+      same_digest: compared.same_digest,
+      exchanges_changed: compared.exchanges.entries.filter((entry) => entry.change !== "unchanged")
+        .length,
+      exchanges_unchanged: compared.exchanges.unchanged,
+      questions_changed: compared.unverified.entries.filter((entry) => entry.change !== "unchanged")
+        .length,
+      order_changed: compared.order_changed,
+    },
+    // Both files were read whole — the size is checked before the read, and a
+    // file over the limit is refused rather than truncated — so the stated scope
+    // was examined without meeting a read limit.
+    coverage: { scope: "the two reports named", status: "complete" },
+    sources: [
+      fileSource(before.path, before.byte_digest),
+      fileSource(after.path, after.byte_digest),
+    ],
+    limitations: [
+      "Every fact in this record came out of the two files. Nothing was observed live, and a " +
+        "report is a record of what some earlier call saw.",
+    ],
+  });
+};
 
 const recordBuild = (
   recorder: EvidenceRecorder,
@@ -456,6 +530,40 @@ export const createToolHandlers = (
         return { ...result };
       },
     ),
+
+    /**
+     * Comparing two reports that have already been written.
+     *
+     * Both files are read here rather than in a service, because no service is
+     * being operated on: the subjects of this call are two documents, the only
+     * thing it can fail at is reading them, and what it does with them afterwards
+     * is a pure function over the two. The reading is what carries the failure —
+     * a missing file and a file that is not a report are different repairs — and
+     * the comparison is what carries the finding.
+     */
+    [bundleDiffContract.name]: handler(bundleDiffContract.inputSchema, async (input, recorder) => {
+      const before = await readSavedBundle(input.before);
+      const after = await readSavedBundle(input.after);
+      const compared = diffBundles(before.bundle, after.bundle, {
+        includeUnchanged: input.include_unchanged,
+      });
+      recordComparison(recorder, before, after, compared);
+
+      // The comparison's own limitations go into the envelope, which is where a
+      // caller reads what a result does not establish, and are destructured out
+      // so the body carries them once rather than twice.
+      const { limitations, before: beforeIdentity, after: afterIdentity, ...body } = compared;
+      return {
+        ...envelopeOf(recorder, {
+          tool: bundleDiffContract.name,
+          provider: identity,
+          limitations,
+        }),
+        ...body,
+        before: reportedSide(before, beforeIdentity),
+        after: reportedSide(after, afterIdentity),
+      };
+    }),
 
     [httpRequestContract.name]: handler(
       httpRequestContract.inputSchema,

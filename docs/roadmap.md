@@ -20,7 +20,7 @@ end to end on real libuvcpp.
 | ✅  | Both discovery routes: CMake package and `pkg-config`, version floor on each                     |
 | ✅  | Feature-to-switch mapping verified by building, not by reading                                   |
 | ✅  | The three-state assessment: `satisfied`, `unmet`, `undetermined`                                 |
-| ✅  | 14 tool contracts, shared by the CLI and MCP surfaces                                            |
+| ✅  | 15 tool contracts, shared by the CLI and MCP surfaces                                            |
 | ✅  | The services behind them: `DoctorService`, `WebService`, `CaptureService`, `VerificationService` |
 | ✅  | The adapters: MCP registrar, CLI registrar, entrypoints                                          |
 | ✅  | Packaged install (`npm pack` → install → run) in CI                                              |
@@ -181,11 +181,16 @@ five that need neither when they are not, and reachable from nothing.
 | ⬜  | TLS with real certificates, including the failure paths               |
 | ⬜  | Database-backed templates                                             |
 | ✅  | Replaying a capture as a regression suite                             |
-| ⬜  | Comparing two evidence bundles by semantic digest to see what changed |
+| ✅  | Comparing two evidence bundles by semantic digest to see what changed |
 
-The last one is the reason `digest` is semantic rather than a record hash. Two
-runs of the same check on the same subject produce the same digest, so a diff
-between them is a change in the world and not in the clock.
+The bundle comparison is the reason `digest` is semantic rather than a record
+hash. Two runs of the same check on the same subject produce the same digest, so
+a diff between them is a change in the world and not in the clock — and where the
+digest stops, the comparison says so instead of guessing. Its unit is a report
+`uvp_verify` wrote, addressed by path, because that is the one artifact carrying a
+semantic digest: a comparison built on anything else would answer a different
+question from the one the digest answers, and the two would eventually disagree
+in public.
 
 Replay turned out not to be about replaying. Sending a recorded request again is
 a loop; the work is deciding what "the same request" means when only one side of

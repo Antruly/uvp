@@ -259,6 +259,51 @@ export const runStopContract = defineTool({
  * launch, exercise, and assert against an existing workspace, then hand back a
  * bundle whose status is honest about what was and was not established.
  */
+/**
+ * The shape of a saved verification report.
+ *
+ * Named once because two tools have to agree about it: the pass that writes one
+ * (`uvp_verify`) and the comparison that reads two of them (`uvp_bundle_diff`).
+ * A reader carrying its own idea of the shape would accept files the writer never
+ * produces, and a field added here would reach the writer's callers before it
+ * reached the reader's, which is how the two drift.
+ */
+export const verificationBundleShape = {
+  ...toolEnvelopeShape,
+  /**
+   * The goal the caller gave, echoed back so the bundle says what it was for.
+   *
+   * Absent when the caller named none — not an empty string, which would read as
+   * a goal somebody stated.
+   */
+  goal: z.string().optional(),
+  workspace_id: workspaceIdSchema,
+  bundle_id: z.string(),
+  bundle_digest: z.string(),
+  status: z.enum(["verified", "partial", "failed", "unknown"]),
+  build: z.object({ succeeded: z.boolean(), exit_code: z.number().int() }),
+  service: z.object({
+    run_id: runIdSchema.optional(),
+    ready: z.boolean(),
+    endpoint: z.string().optional(),
+  }),
+  exchanges: z.array(
+    z.object({
+      name: z.string(),
+      exchange_id: z.string(),
+      status: z.number().int().optional(),
+      elapsed_ms: z.number().int().optional(),
+      assertions_passed: z.number().int(),
+      assertions_failed: z.number().int(),
+      failures: z.array(z.string()),
+    }),
+  ),
+  /** What the pass could not establish, each tied to a reason. */
+  unverified: z.array(z.object({ question: z.string(), reason: z.string() })),
+};
+
+export const verificationBundleSchema = z.object(verificationBundleShape);
+
 export const verifyContract = defineTool({
   name: "uvp_verify",
   title: "Build, run, exercise, and report",
@@ -332,39 +377,7 @@ export const verifyContract = defineTool({
     keep_running: z.boolean().default(false),
     goal: z.string().optional(),
   }),
-  outputSchema: z.object({
-    ...toolEnvelopeShape,
-    /**
-     * The goal the caller gave, echoed back so the bundle says what it was for.
-     *
-     * Absent when the caller named none — not an empty string, which would read
-     * as a goal somebody stated.
-     */
-    goal: z.string().optional(),
-    workspace_id: workspaceIdSchema,
-    bundle_id: z.string(),
-    bundle_digest: z.string(),
-    status: z.enum(["verified", "partial", "failed", "unknown"]),
-    build: z.object({ succeeded: z.boolean(), exit_code: z.number().int() }),
-    service: z.object({
-      run_id: runIdSchema.optional(),
-      ready: z.boolean(),
-      endpoint: z.string().optional(),
-    }),
-    exchanges: z.array(
-      z.object({
-        name: z.string(),
-        exchange_id: z.string(),
-        status: z.number().int().optional(),
-        elapsed_ms: z.number().int().optional(),
-        assertions_passed: z.number().int(),
-        assertions_failed: z.number().int(),
-        failures: z.array(z.string()),
-      }),
-    ),
-    /** What the pass could not establish, each tied to a reason. */
-    unverified: z.array(z.object({ question: z.string(), reason: z.string() })),
-  }),
+  outputSchema: verificationBundleSchema,
   effects: {
     readsFilesystem: true,
     writesFilesystem: true,
@@ -389,6 +402,146 @@ export const verifyContract = defineTool({
           },
         ],
       },
+    },
+  ],
+});
+
+/**
+ * One side of a comparison: the file it came from, and what the pass said.
+ *
+ * Both digests are here because they are different claims. `byte_digest` is over
+ * the file's raw bytes — it changes when a byte of the file changes.
+ * `digest` is the pass's own semantic digest, which survives reformatting and is
+ * what two passes are compared by.
+ */
+const reportedSideSchema = z.object({
+  path: z.string(),
+  bytes: z.number().int(),
+  byte_digest: z.string(),
+  bundle_id: z.string(),
+  workspace_id: workspaceIdSchema,
+  status: z.enum(["verified", "partial", "failed", "unknown"]),
+  digest: z.string(),
+  goal: z.string().optional(),
+});
+
+/**
+ * One request, as a comparison reports it.
+ *
+ * `exchange_id` and `elapsed_ms` are absent rather than optional. They are
+ * per-pass facts — one is minted for each exchange, the other is a stopwatch
+ * reading — so a comparison that carried them could read them, and two passes
+ * that established exactly the same things would appear to differ in both. The
+ * full record stays in the file each side names.
+ */
+const exchangeSummarySchema = z.object({
+  status: z.number().int().optional(),
+  assertions_passed: z.number().int(),
+  assertions_failed: z.number().int(),
+  failures: z.array(z.string()),
+});
+
+const diffedExchangeSchema = z.object({
+  name: z.string(),
+  change: z.enum(["unchanged", "changed", "added", "absent"]),
+  changed_fields: z.array(z.enum(["status", "assertions_passed", "assertions_failed", "failures"])),
+  /** Whether the change reached a field `bundle_digest` reads. */
+  verdict_changed: z.boolean(),
+  before: exchangeSummarySchema.optional(),
+  after: exchangeSummarySchema.optional(),
+});
+
+const diffedUnknownSchema = z.object({
+  question: z.string(),
+  change: z.enum(["unchanged", "changed", "added", "absent"]),
+  before: z.string().optional().describe("The reason the earlier pass gave."),
+  after: z.string().optional().describe("The reason the later pass gave."),
+});
+
+/**
+ * Comparing two verification reports.
+ *
+ * The unit of comparison is a report `uvp_verify` wrote, addressed by the file
+ * it is in, because a bundle is the one artifact that carries a semantic digest
+ * — and a comparison built on anything else would answer a different question
+ * from the one the digest answers.
+ */
+export const bundleDiffContract = defineTool({
+  name: "uvp_bundle_diff",
+  title: "Compare two verification reports",
+  description:
+    "Compare two reports from earlier `uvp_verify` passes: what the status was, what each " +
+    "request returned, and which questions were left unanswered. Reports separately what the " +
+    "pass's own semantic digest covers and what falls outside it, and says so plainly when two " +
+    "reports are not comparable at all — a different workspace, or a digest that does not match " +
+    "the contents it arrived with.",
+  kind: "workflow",
+  inputSchema: z.object({
+    before: z
+      .string()
+      .min(1)
+      .describe("Path to the report of the earlier pass, as `uvp verify --json` wrote it."),
+    after: z.string().min(1).describe("Path to the report of the later pass."),
+    include_unchanged: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Report every request the two passes have between them rather than only the ones that " +
+          "differ. The counts are reported either way, so nothing is hidden by filtering.",
+      ),
+  }),
+  outputSchema: z.object({
+    ...toolEnvelopeShape,
+    before: reportedSideSchema,
+    after: reportedSideSchema,
+    /** False when a difference between the two cannot be read as a change in one subject. */
+    comparable: z.boolean(),
+    incomparable_because: z.array(z.string()),
+    /** Whether each side's supplied digest matches the contents it arrived with. */
+    digest_consistent: z.object({ before: z.boolean(), after: z.boolean() }),
+    /** Absent when either digest is inconsistent — a comparison that was not made. */
+    same_digest: z.boolean().optional(),
+    outcome: z
+      .enum(["identical", "changed", "incomparable"])
+      .describe("`incomparable` takes precedence over the other two."),
+    status_changed: z.boolean(),
+    goal_changed: z.boolean(),
+    order_changed: z.boolean(),
+    build: z.object({
+      changed: z.boolean(),
+      before: z.object({ succeeded: z.boolean(), exit_code: z.number().int() }),
+      after: z.object({ succeeded: z.boolean(), exit_code: z.number().int() }),
+    }),
+    service: z.object({
+      changed: z.boolean(),
+      before: z.object({ ready: z.boolean(), endpoint: z.string().optional() }),
+      after: z.object({ ready: z.boolean(), endpoint: z.string().optional() }),
+    }),
+    exchanges: z.object({
+      unchanged: z.number().int(),
+      before_count: z.number().int(),
+      after_count: z.number().int(),
+      entries: z.array(diffedExchangeSchema),
+    }),
+    unverified: z.object({
+      unchanged: z.number().int(),
+      before_count: z.number().int(),
+      after_count: z.number().int(),
+      entries: z.array(diffedUnknownSchema),
+    }),
+    not_compared: z.array(z.string()),
+  }),
+  effects: {
+    readsFilesystem: true,
+    writesFilesystem: false,
+    network: false,
+    spawnsProcess: false,
+    mutatesTarget: false,
+  },
+  examples: [
+    {
+      description: "What changed between a pass before a change and one after it",
+      input: { before: "/tmp/pass-before.json", after: "/tmp/pass-after.json" },
     },
   ],
 });

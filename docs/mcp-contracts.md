@@ -1,6 +1,6 @@
 # MCP contracts
 
-uvp exposes 14 tools over MCP, from the same contracts that back the CLI. This
+uvp exposes 15 tools over MCP, from the same contracts that back the CLI. This
 page is the reference: what each tool does, what it touches, and what a result
 contains.
 
@@ -35,6 +35,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_run`              | runtime   |  ●  |  ●  |  ●  |  ●   |  ●  |     ●     |
 | `uvp_run_stop`         | runtime   |     |     |     |  ●   |  ●  |           |
 | `uvp_verify`           | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
+| `uvp_bundle_diff`      | workflow  |  ●  |     |     |      |     |           |
 | `uvp_http_request`     | web       |     |     |  ●  |      |     |     ●     |
 | `uvp_websocket_probe`  | web       |     |     |  ●  |  ●   |     |     ●     |
 | `uvp_soap_call`        | web       |     |     |  ●  |      |     |     ●     |
@@ -169,6 +170,22 @@ The whole closure in one supervised pass: configure, compile, launch, drive the
 requests you describe, evaluate the assertions, stop, and return a bundle whose
 status is `verified`, `partial`, `failed`, or `unknown`. See
 [Evidence model](evidence.md#verification-status) for what each status requires.
+
+**`uvp_bundle_diff`** — Compare two verification reports.
+Takes two paths to reports `uvp_verify` wrote and says what moved between them:
+the status, each request's verdict and failures, the questions left unanswered.
+It reports separately what the pass's own `bundle_digest` covers and what falls
+outside it — failure _text_, the build, the service state — because two reports
+can share a digest while the sentence explaining a failure changed. It refuses to
+read a difference as a change when the two reports are not comparable at all: a
+different workspace is two subjects rather than two moments, and a supplied
+digest that does not match the contents it arrived with is a record nothing can
+be concluded from. Identifiers and the clock (`bundle_id`, `exchange_id`,
+`elapsed_ms`, `service.run_id`, `service.endpoint`) are reported and never
+compared, so a repeat pass over an unchanged service reads as `identical`.
+`R` because it reads both files whole, and refuses a file above its size limit
+rather than truncating it. Not `untrusted`: what comes back is the two reports'
+verdicts, counts, and the same failure sentences `uvp_verify` already returns.
 
 ## Every result carries the same envelope
 

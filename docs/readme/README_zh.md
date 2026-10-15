@@ -31,7 +31,7 @@ uvp 把一段关于 C++ Web 服务的描述变成真实的 CMake 工程：针对
 最后交回一份报告 —— 报告里清楚区分它**直接观测到**的事实、它**推导**出的结论，
 以及它**无法确认**的部分。
 
-它是一个 CLI 加一个 MCP server。同一套十四个工具契约同时支撑两者，
+它是一个 CLI 加一个 MCP server。同一套十五个工具契约同时支撑两者，
 因此 Agent 和 shell 脚本得到的行为一致、证据也一致。
 
 生成的代码不是 uvp 的附属产物。它就是普通的 libuvcpp C++，
@@ -143,6 +143,7 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 | 把录制的会话对着一个活动目标重放                | `uvp_capture_replay`                    |
 | 针对已录制的请求往来求值断言                    | `uvp_assert_exchange`                   |
 | 把以上全部作为一次托管流程执行                  | `uvp_verify`                            |
+| 对比两份验证报告，看清到底哪里变了              | `uvp_bundle_diff`                       |
 
 模板：`hello-http`、`rest-api`、`websocket-echo`、`soap-service`、`static-files`。
 

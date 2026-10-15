@@ -1,7 +1,7 @@
 # uvp tool reference
 
-Generated from the tool contracts. 14 tools; catalog digest
-`94c5247cf1b223af5a0f185fa68f3f8512d8a833bf284702b43e141cb7447ab8`.
+Generated from the tool contracts. 15 tools; catalog digest
+`81c64af224c7a139a13a6280231c12b163dc369f6f45220a44b0fc2adb53dab4`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -23,6 +23,7 @@ they are where an unanswerable question and a truncation are declared.
 | `uvp_capture_replay` | web | readsFilesystem, network | no |
 | `uvp_assert_exchange` | web | readsFilesystem | no |
 | `uvp_verify` | workflow | readsFilesystem, writesFilesystem, network, spawnsProcess, mutatesTarget | no |
+| `uvp_bundle_diff` | workflow | readsFilesystem | no |
 
 ## `uvp_doctor` — Inspect toolchain readiness
 
@@ -301,6 +302,23 @@ Example:
       ]
     }
   ]
+}
+```
+
+## `uvp_bundle_diff` — Compare two verification reports
+
+Compare two reports from earlier `uvp_verify` passes: what the status was, what each request returned, and which questions were left unanswered. Reports separately what the pass's own semantic digest covers and what falls outside it, and says so plainly when two reports are not comparable at all — a different workspace, or a digest that does not match the contents it arrived with.
+
+- **Kind:** workflow
+- **Effects:** readsFilesystem
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "before": "/tmp/pass-before.json",
+  "after": "/tmp/pass-after.json"
 }
 ```
 

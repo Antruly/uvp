@@ -2,6 +2,7 @@ import { row, rows } from "./format.js";
 import { at, list, obj, str } from "./readOutput.js";
 import {
   renderBuild,
+  renderBundleDiff,
   renderDoctor,
   renderRun,
   renderRunStop,
@@ -33,6 +34,7 @@ const RENDERERS: Readonly<Record<string, Renderer>> = {
   uvp_run: renderRun,
   uvp_run_stop: renderRunStop,
   uvp_verify: renderVerify,
+  uvp_bundle_diff: renderBundleDiff,
   ...webRenderers,
 };
 

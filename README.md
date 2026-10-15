@@ -33,7 +33,7 @@ against [libuvcpp](https://github.com/Antruly/libuvcpp), starts it, drives
 requests at it, and hands back a report that separates what it **observed** from
 what it **derived** and from what it could **not establish**.
 
-It is one CLI and one MCP server. The same 14 tool contracts back both, so
+It is one CLI and one MCP server. The same 15 tool contracts back both, so
 an agent and a shell script get identical behaviour and identical evidence.
 
 The generated code is not a uvp artifact. It is ordinary libuvcpp C++ that builds
@@ -150,6 +150,7 @@ That last rule is the one that shapes everything else. A tool that says
 | Replay a recorded session against a live target                | `uvp_capture_replay`                    |
 | Evaluate assertions against a recorded exchange                | `uvp_assert_exchange`                   |
 | Do all of the above as one supervised pass                     | `uvp_verify`                            |
+| Compare two verification reports and see what moved            | `uvp_bundle_diff`                       |
 
 Templates: `hello-http`, `rest-api`, `websocket-echo`, `soap-service`,
 `static-files`.

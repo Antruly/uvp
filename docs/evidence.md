@@ -81,7 +81,12 @@ interface Evidence {
 their identifiers.
 
 **`kind`** is one of `toolchain`, `build`, `launch`, `exchange`, `capture`,
-`assertion`, `benchmark` — the seven things uvp produces evidence about.
+`assertion`, `benchmark`, `comparison` — the things uvp produces evidence about.
+Seven of them are named for what uvp went and looked at. `comparison` is the
+exception, and it is the reason the list has a sentence rather than a count: a
+comparison of two saved reports observed neither of them live, and every fact in
+it came out of records something else wrote. Filing it under the kind of the
+thing compared would claim an observation that was never made.
 
 **`subject`** identifies what this is evidence _about_, in a form that survives
 the session. A path, a port, a method and URL. Two runs of the same check on the

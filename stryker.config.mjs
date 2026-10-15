@@ -52,6 +52,13 @@ const config = {
     "src/application/ToolchainProvider.ts",
     // The coverage and evidence algebra.
     "src/application/evidenceHelpers.ts",
+    // The bundle comparison: pure decisions over two parsed reports, where the
+    // mutations that matter are the ones that turn "I could not compare these"
+    // into a yes or a no. `bundleFile.ts` is deliberately absent: it reads a file,
+    // so most of its mutants are decided by the conformance lane rather than by
+    // the `services` suite this runner is scoped to, and a score that counted
+    // them would be measuring the runner's scope rather than the tests.
+    "src/application/bundleDiff.ts",
     // Evidence and unknown semantics.
     "src/domain/evidence.ts",
     "src/domain/unknown.ts",

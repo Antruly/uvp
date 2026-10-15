@@ -1,5 +1,6 @@
 import { doctorContract } from "./toolchainToolContracts.js";
 import {
+  bundleDiffContract,
   buildContract,
   runContract,
   runStopContract,
@@ -49,6 +50,7 @@ export const TOOL_CONTRACTS = [
   assertExchangeContract,
 
   verifyContract,
+  bundleDiffContract,
 ] as const satisfies readonly ToolContract[];
 
 const BY_NAME = new Map<string, ToolContract>(

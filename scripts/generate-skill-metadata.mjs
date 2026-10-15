@@ -11,7 +11,7 @@ import { importCompiled } from "./lib/paths.mjs";
  * The prose is authored in `.agents/skills/build-libuvcpp-services/SKILL.md`,
  * because a skill is written and edited by a person and pretending otherwise
  * produces worse writing. The tool reference beside it is generated, because a
- * hand-maintained table of fourteen tools drifts on the first schema change and
+ * hand-maintained table of fifteen tools drifts on the first schema change and
  * drifts silently.
  *
  * That split is the whole design: authored text is copied unchanged, derived
