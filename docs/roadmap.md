@@ -416,7 +416,7 @@ implicit.
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and passed on every run since, local and CI. The mechanism is unknown and the row is here rather than in a commit message because an intermittent gate teaches people to re-run until it is green. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens |
-| ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ⬜  | Four Actions emit Node.js 20 deprecation warnings on the runner: `actions/checkout@v4`, `setup-node@v4`, `cache@v4`, `download-artifact@v4`. They run on Node 24 today and the warning is not yet a failure — which is exactly the state that ends in a red lane on a date nobody wrote down. Six major bumps now sit open as Dependabot pull requests (`#1`–`#6`, per [the pins above](#action-pins)), each of which is where this would be addressed; two of those bodies name Node.js 24 in their release notes and four do not mention a runtime at all, so which majors clear the warning is unobserved                                                                                                                                                                                                                                                                                              |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | Whether `uvp_verify`'s `exchanges[].results[]` should carry `evaluated` beside `passed`, or a `status: met \| unmet \| undetermined` reusing the capability vocabulary. The third state currently reaches a caller through `unverified` and `unknowns`; two spellings of one answer is how they drift. An additive change, but a change to a tool's output schema, so it waits for the design discussion CONTRIBUTING requires                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
@@ -893,6 +893,28 @@ because a grouped major is a major nobody read the changelog for. The
 title, and Dependabot's default ("Bump x from a to b") would fail the gate before
 anyone read it.
 
+**What the bot did when the file landed.** The `github_actions` update runs
+started four seconds after the push, and by `2026-10-15T21:41Z` six pull requests
+were open, one per action: `#1` upload-artifact 4.6.2→7.0.2, `#2` checkout
+4.4.0→7.0.1, `#3` setup-node 4.4.0→7.1.0, `#4` cache 4.3.0→6.1.0, `#5`
+download-artifact 4.3.0→8.0.2, `#6` github-script 7.1.0→9.0.0. Three things in
+that list are the configuration read back rather than assumed. Every title is
+`chore(deps): bump …`, so the prefix that had to be set for `pr-title.yml` is the
+prefix Dependabot emits. Every title names the release — `from 4.4.0 to 7.0.1` —
+which means the `# vX.Y.Z` comment was read; a bare SHA would have made the same
+pull request read "from `11d5960a` to `…`". And no grouped minor/patch pull
+request appeared, because nothing non-major is pending: an empty group is the
+configuration working, not the group failing.
+
+**Every one of the six is a major, which is the pin earning its keep.** The pins
+hold the major that was already in use, because a change that pins references must
+not also change which code they run — so all six are one major behind, and
+Dependabot says so in six reviewable pull requests instead of a tag moving
+silently. Two of those bodies name Node.js 24 in their release notes (`checkout`
+and `upload-artifact`); the other four say nothing either way, and a release
+note's silence is not evidence, so whether a given major clears the Node.js 20
+deprecation warnings stays with the row above rather than being claimed here.
+
 **Three decisions in the check itself.**
 
 - **One action, one SHA.** Two spellings of `actions/checkout` at two SHAs is what
@@ -920,7 +942,8 @@ interpretation, two callers, one place to get it wrong.
 
 The CI step is guarded on `code` as well as `workflows`, which is not the same
 reason as the step above it: this checker is under `scripts/`, the `code` lane's
-territory, so a change to the rule has to run the rule.
+territory, so a change to the rule has to run the rule. Its first CI run
+(`38811687534`, job _Static checks_) selected it and passed.
 
 **Verified by nine mutations**, each applied, run, and reverted: a tag
 reintroduced at one of forty steps (attributed to `pages.yml:25`, not to the
@@ -935,10 +958,12 @@ without the mechanism under test proves nothing about the mechanism.
 **One thing this does not establish.** The pins are reviewed by a human like any
 other change, and what each action's code does with the permissions a workflow
 grants is not something a pin changes. A pin fixes _which_ commit runs, not what
-it is allowed to do. Nor is the Dependabot configuration verified here beyond
-parsing as YAML and saying what it is meant to say: whether GitHub accepts it is
-GitHub's answer, and it arrives on the first scheduled run rather than from
-anything run locally.
+it is allowed to do. The Dependabot half is no longer in that position: GitHub
+read the file and opened six pull requests, which is the answer to whether it
+accepts the configuration, and it arrived from the first scheduled run exactly as
+this section said it would before that run existed. What is still open is the npm
+half — both of its update runs were still going when this was written and no npm
+pull request had appeared, so `npm_and_yarn` is unobserved rather than working.
 
 ## Not planned
 
