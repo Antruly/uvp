@@ -373,6 +373,17 @@ export const captureStartContract = defineTool({
     /** Stop the capture automatically once this many exchanges are recorded. */
     max_exchanges: z.number().int().min(1).optional(),
     auto_stop_ms: z.number().int().min(1000).optional(),
+    /**
+     * The most bytes recorded per direction per exchange. Not the size a request
+     * may be — a longer body is still forwarded whole — only how much of it is
+     * kept for reading back.
+     */
+    max_body_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(16 * 1024 * 1024)
+      .default(1024 * 1024),
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
@@ -381,6 +392,7 @@ export const captureStartContract = defineTool({
     proxy_url: z.string(),
     upstream: z.string().optional(),
     started_at: z.string(),
+    max_body_bytes: z.number().int(),
   }),
   effects: {
     readsFilesystem: false,
@@ -402,8 +414,9 @@ export const captureReadContract = defineTool({
   title: "Read captured traffic",
   description:
     "List the exchanges recorded by a capture session, optionally hydrating full request and " +
-    "response payloads. Reports how many exchanges were held back by the read limit, so an " +
-    "empty-looking result is never confused with no traffic.",
+    "response payloads. Reports how many exchanges were held back by the read limit and how many " +
+    "bodies the recording limit cut short, so an empty-looking or short result is never confused " +
+    "with traffic that was not there.",
   kind: "web",
   inputSchema: z.object({
     capture_id: captureIdSchema.optional().describe("Defaults to the most recent session."),
@@ -425,6 +438,8 @@ export const captureReadContract = defineTool({
         status: z.number().int().optional(),
         request_bytes: z.number().int(),
         response_bytes: z.number().int(),
+        request_body_truncated: z.boolean(),
+        response_body_truncated: z.boolean(),
         duration_ms: z.number().int(),
         request_body: z.string().optional(),
         response_body: z.string().optional(),
@@ -433,6 +448,10 @@ export const captureReadContract = defineTool({
     ),
     total_recorded: z.number().int(),
     withheld_by_limit: z.number().int(),
+    /** The per-direction recording limit this session was started with. */
+    body_limit_bytes: z.number().int(),
+    /** How many of the returned exchanges carry a body cut to that limit. */
+    bodies_truncated: z.number().int(),
   }),
   effects: {
     readsFilesystem: true,

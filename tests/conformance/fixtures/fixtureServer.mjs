@@ -165,6 +165,19 @@ const server = createServer((request, response) => {
     setTimeout(() => json(response, 200, { delayed: ms }), ms).unref();
     return;
   }
+  if (route === "/bulk") {
+    // A body whose length the caller names and whose content is predictable, so
+    // a truncated record can be told from a whole one by looking at the bytes
+    // rather than only at a counter.
+    const bytes = Number(url.searchParams.get("bytes") ?? "0");
+    const body = Buffer.alloc(bytes, 0x61);
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-length": String(body.length),
+    });
+    response.end(body);
+    return;
+  }
   if (route === "/soap") {
     const chunks = [];
     request.on("data", (chunk) => chunks.push(chunk));

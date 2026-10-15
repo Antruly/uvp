@@ -488,7 +488,8 @@ export const captureStartCommand: CommandSpec = {
   summary: "Start a capture session and print the proxy URL.",
   usage:
     "uvp capture start [UPSTREAM] [--listen PORT] [--host NAME]... [--method VERB]...\n" +
-    "                  [--path-prefix P] [--max-exchanges N] [--auto-stop MS] [--json]",
+    "                  [--path-prefix P] [--max-exchanges N] [--auto-stop MS]\n" +
+    "                  [--max-body-bytes N] [--json]",
   positionals: [
     { name: "UPSTREAM", description: "Origin to forward to. Omit for a transparent proxy." },
   ],
@@ -529,10 +530,17 @@ export const captureStartCommand: CommandSpec = {
       value: "MS",
       description: "Stop capturing after this long.",
     },
+    {
+      name: "max-body-bytes",
+      type: "number",
+      value: "N",
+      description: "Record at most this many body bytes per direction. Default 1 MiB.",
+    },
   ],
   notes: [
     "The session belongs to this uvp session, and `uvp stop --all` ends it along with any services.",
     "A capture that outlives the shell that started it is a port held by a process nobody is watching.",
+    "`--max-body-bytes` bounds what is recorded, not what is forwarded: a captured request still reaches the origin whole, and one too large to forward whole is refused with 413 rather than sent short.",
   ],
   input: (parsed) => {
     const hosts = parseCsv(asList(parsed, "host"));
@@ -547,6 +555,7 @@ export const captureStartCommand: CommandSpec = {
         : { filter: { hosts, methods, ...optional("path_prefix", pathPrefix) } }),
       ...optional("max_exchanges", asNumber(parsed, "max-exchanges")),
       ...optional("auto_stop_ms", asNumber(parsed, "auto-stop")),
+      ...optional("max_body_bytes", asNumber(parsed, "max-body-bytes")),
     };
   },
   verdict: (output) => (str(output["proxy_url"]) === "" ? EXIT_NO : undefined),

@@ -46,7 +46,7 @@ A test and debug surface for web services — not only the ones uvp generates.
 | ⬜  | WebSocket frames: send, receive, expect, close codes                     |
 | ✅  | SOAP envelopes with the raw body preserved alongside the parsed one      |
 | ⬜  | Load testing with per-sample timings retained behind the percentiles     |
-| ⬜  | Capture with an explicit, reported size limit                            |
+| ✅  | Capture with an explicit, reported size limit                            |
 | ⬜  | The native probe module (`uvcpp-probe.node`) over libuvcpp's C ABI       |
 
 The probe module exists so that a WebSocket check goes through libuvcpp's own

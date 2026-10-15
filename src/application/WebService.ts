@@ -114,7 +114,10 @@ const remember = (
     requestBody: exchange.requestBody,
     responseBody: exchange.response?.body,
     durationMs: exchange.durationMs,
-    truncated: exchange.response?.bodyTruncated ?? false,
+    // A caller's own request body is sent whole and recorded whole; only the
+    // response can arrive already cut short, by the transport's read limit.
+    requestBodyTruncated: false,
+    responseBodyTruncated: exchange.response?.bodyTruncated ?? false,
     error: exchange.error,
     captureId: exchange.captureId,
   });

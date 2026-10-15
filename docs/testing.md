@@ -50,6 +50,17 @@ and treats `timeout_ms` as one deadline for the whole call. Three tests in
 `src/application/httpClient.test.ts` assert that from the transport's side,
 including the number of connections one failed request opens.
 
+`handlers.test.ts` also holds the capture recording limit from both ends, in
+`the recording limit`. A capture has two size limits and they are not the same
+one: what it records, and what it will buffer in order to forward a body intact.
+The lane drives a 4 KiB upload through a session that records 1 KiB and reads the
+origin's echo back, so a change that capped the record by truncating the forward
+fails the same test the other way round; reads a 100 000-byte body back in full
+from a session whose limit is above it, which is the range where an undocumented
+second cap at 64 KiB used to be invisible; and posts 8 MiB + 1 to a session that
+will not forward it, asserting the `413` and that the refusal is in the capture
+as an exchange with no status rather than as traffic that happened.
+
 ## Built tests
 
 These require `npm run compile` to have run first. They exercise the artifacts

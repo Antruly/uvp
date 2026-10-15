@@ -1,7 +1,7 @@
 # uvp tool reference
 
 Generated from the tool contracts. 13 tools; catalog digest
-`6b7badb269803088a1319b534dbbd43ebd11e8e44b5dd33ff52331889673d356`.
+`b1dec59d48e15fd3e578ef4f1db4b3f6a8572979756744ddb08d1afa29f7a00e`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -208,7 +208,7 @@ Example:
 
 ## `uvp_capture_read` — Read captured traffic
 
-List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit, so an empty-looking result is never confused with no traffic.
+List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit and how many bodies the recording limit cut short, so an empty-looking or short result is never confused with traffic that was not there.
 
 - **Kind:** web
 - **Effects:** readsFilesystem

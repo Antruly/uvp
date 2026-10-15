@@ -253,8 +253,13 @@ uvp assert --exchange ex_… --assert status=200
 came from are `observed` and are kept, because a p99 nobody can trace back to a
 sample is a number, not a measurement.
 
-`uvp capture read` truncates bodies above a size limit and says so in `coverage`
-and `limitations`. The limit is reported, not applied silently.
+`uvp capture read` truncates bodies above the recording limit and says so: the
+limit is returned as `body_limit_bytes`, each exchange carries
+`request_body_truncated` and `response_body_truncated`, and a read that cut a body
+is a `partial` scope with the limit named in `limitations`. The limit is
+`max_body_bytes` on `uvp capture start` and it governs recording only — a captured
+request is still forwarded whole, and one too large to forward whole is refused
+with `413` and recorded as refused rather than sent upstream short.
 
 `uvp ws` with no `--send` performs the handshake and stops. A `101` is a success
 and is reported as one.
@@ -291,7 +296,7 @@ questions it could not answer, and it is the field most likely to change your
 mind about a result you were about to accept.
 
 **`limitations`** — truncation, sampling, timeouts. A `verified` status with
-"the body was truncated at 64 KiB" in `limitations` is a report about a prefix,
+"the body was capped at 1048576 bytes" in `limitations` is a report about a prefix,
 not about a response.
 
 `provider` is on every result so a finding is attributable. A build that

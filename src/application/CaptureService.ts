@@ -42,7 +42,22 @@ export interface CaptureStartInput {
   readonly filter: CaptureFilter;
   readonly max_exchanges: number | undefined;
   readonly auto_stop_ms: number | undefined;
+  /** The most bytes kept per direction per exchange. Reported by every read. */
+  readonly max_body_bytes: number;
 }
+
+/**
+ * The most of an incoming body the proxy will hold in order to forward it.
+ *
+ * Not the recording limit, and deliberately larger: a request is only
+ * forwardable whole, so this is the point past which the proxy cannot relay what
+ * it was given. It used to drop the remainder and send the truncated body
+ * upstream, which answered a caller's upload with a corrupt one and recorded the
+ * result as the bytes that crossed the wire. A request past it is refused with
+ * `413` and named, because a proxy that quietly rewrites a payload is worse than
+ * one that says it will not carry it.
+ */
+const FORWARD_BUFFER_LIMIT_BYTES = 8 * 1024 * 1024;
 
 export interface CaptureStartResult {
   readonly capture_id: string;
@@ -50,6 +65,8 @@ export interface CaptureStartResult {
   readonly proxy_url: string;
   readonly upstream?: string;
   readonly started_at: string;
+  /** The recording limit in force, so a caller need not read it off the input. */
+  readonly max_body_bytes: number;
 }
 
 const matches = (filter: CaptureFilter, request: IncomingMessage, url: URL): boolean => {
@@ -63,18 +80,43 @@ const matches = (filter: CaptureFilter, request: IncomingMessage, url: URL): boo
   return true;
 };
 
-/** Body bytes from an incoming request, bounded so a large upload cannot be buffered whole. */
-const readRequestBody = async (request: IncomingMessage): Promise<Buffer> => {
+/**
+ * Body bytes from an incoming request, up to the forwarding limit.
+ *
+ * `exceeded` is returned rather than inferred: the buffer stops growing at the
+ * limit, so the only way to know the request was longer is for this function to
+ * say so. Dropping the remainder and returning what fits is how a truncated
+ * upload was forwarded as if it were complete.
+ */
+const readRequestBody = async (
+  request: IncomingMessage,
+): Promise<{ readonly body: Buffer; readonly exceeded: boolean }> => {
   const chunks: Buffer[] = [];
   let bytes = 0;
-  const limit = 8 * 1024 * 1024;
+  let exceeded = false;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    const before = bytes;
     bytes += buffer.byteLength;
-    if (bytes <= limit) chunks.push(buffer);
+    if (bytes <= FORWARD_BUFFER_LIMIT_BYTES) chunks.push(buffer);
+    else if (before < FORWARD_BUFFER_LIMIT_BYTES) {
+      // The chunk that crossed the limit: keep the part of it that fits, so the
+      // refusal can name how much was offered rather than only that it was long.
+      chunks.push(buffer.subarray(0, FORWARD_BUFFER_LIMIT_BYTES - before));
+      exceeded = true;
+    } else exceeded = true;
   }
-  return Buffer.concat(chunks);
+  return { body: Buffer.concat(chunks), exceeded };
 };
+
+/** The bytes kept for a record, and whether the caller's limit cut them short. */
+const capped = (
+  body: Buffer | undefined,
+  maxBytes: number,
+): { readonly body: Buffer | undefined; readonly truncated: boolean } =>
+  body === undefined || body.byteLength <= maxBytes
+    ? { body, truncated: false }
+    : { body: body.subarray(0, maxBytes), truncated: true };
 
 export class CaptureService {
   constructor(
@@ -121,6 +163,7 @@ export class CaptureService {
         filter: input.filter,
         captureId,
         exchanges,
+        maxBodyBytes: input.max_body_bytes,
         recorder,
         onSkipped: () => {
           notRecorded += 1;
@@ -159,6 +202,7 @@ export class CaptureService {
       listenPort: input.listen_port,
       upstream: input.upstream,
       startedAt,
+      maxBodyBytes: input.max_body_bytes,
       server,
       exchanges,
       stopped: false,
@@ -182,11 +226,12 @@ export class CaptureService {
     record(recorder, {
       kind: "capture",
       subject: { capture_id: captureId, listen_port: input.listen_port, upstream: input.upstream },
-      observed: { filter: { ...input.filter } },
+      observed: { filter: { ...input.filter }, max_body_bytes: input.max_body_bytes },
       coverage: coverageComplete("capture session started"),
       sources: [endpointSource(`http://127.0.0.1:${String(input.listen_port)}`)],
       limitations: [
         "The capture proxy speaks HTTP; a CONNECT tunnel is not intercepted and its contents are not recorded.",
+        `Bodies are recorded to ${String(input.max_body_bytes)} bytes per direction, and forwarded whole regardless.`,
       ],
     });
 
@@ -196,6 +241,7 @@ export class CaptureService {
       proxy_url: `http://127.0.0.1:${String(input.listen_port)}`,
       ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
       started_at: startedAt,
+      max_body_bytes: input.max_body_bytes,
     };
   }
 
@@ -216,6 +262,8 @@ export class CaptureService {
       status?: number;
       request_bytes: number;
       response_bytes: number;
+      request_body_truncated: boolean;
+      response_body_truncated: boolean;
       duration_ms: number;
       request_body?: string;
       response_body?: string;
@@ -223,6 +271,8 @@ export class CaptureService {
     }[];
     total_recorded: number;
     withheld_by_limit: number;
+    body_limit_bytes: number;
+    bodies_truncated: number;
   }> {
     const session =
       input.capture_id === undefined
@@ -265,17 +315,28 @@ export class CaptureService {
         ...(entry.status === undefined ? {} : { status: entry.status }),
         request_bytes: entry.requestBody?.byteLength ?? 0,
         response_bytes: entry.responseBody?.byteLength ?? 0,
+        request_body_truncated: entry.requestBodyTruncated,
+        response_body_truncated: entry.responseBodyTruncated,
         duration_ms: entry.durationMs,
+        // No second cap here. Payloads used to be cut again at 64 KiB on the way
+        // out, in characters rather than bytes, which both hid the session's own
+        // limit from the caller and could split a multi-byte character in half.
         ...(input.include_payloads && entry.requestBody !== undefined
-          ? { request_body: entry.requestBody.toString("utf8").slice(0, 64 * 1024) }
+          ? { request_body: entry.requestBody.toString("utf8") }
           : {}),
         ...(input.include_payloads && entry.responseBody !== undefined
-          ? { response_body: entry.responseBody.toString("utf8").slice(0, 64 * 1024) }
+          ? { response_body: entry.responseBody.toString("utf8") }
           : {}),
         ...(entry.error === undefined ? {} : { error: entry.error }),
       })),
       total_recorded: ordered.length,
       withheld_by_limit: Math.max(0, ordered.length - start - slice.length),
+      // The limit that produced the flags above, so a caller reading a body can
+      // tell how much of it they are looking at without consulting start-up.
+      body_limit_bytes: session.maxBodyBytes,
+      bodies_truncated: slice.filter(
+        (entry) => entry.requestBodyTruncated || entry.responseBodyTruncated,
+      ).length,
     };
   }
 
@@ -287,15 +348,47 @@ export class CaptureService {
       readonly filter: CaptureFilter;
       readonly captureId: string;
       readonly exchanges: ExchangeRecord[];
+      readonly maxBodyBytes: number;
       readonly recorder: EvidenceRecorder;
       readonly onSkipped: () => void;
     },
   ): Promise<void> {
-    const { upstream, filter, captureId, exchanges, recorder, onSkipped } = context;
+    const { upstream, filter, captureId, exchanges, maxBodyBytes, recorder, onSkipped } = context;
     const incoming = new URL(request.url ?? "/", upstream.origin);
     const target = new URL(`${incoming.pathname}${incoming.search}`, upstream);
-    const requestBody = await readRequestBody(request);
+    const { body: requestBody, exceeded } = await readRequestBody(request);
     const started = Date.now();
+
+    if (exceeded) {
+      // Refused rather than truncated. The client is told, and the capture shows
+      // it, so neither side is left believing a payload crossed intact.
+      const reason =
+        `the request body exceeded the ${String(FORWARD_BUFFER_LIMIT_BYTES)} bytes this proxy ` +
+        `buffers in order to forward it whole`;
+      exchanges.push(
+        this.store.addExchange({
+          exchangeId: newId("exchange"),
+          at: this.now().toISOString(),
+          method: request.method ?? "GET",
+          url: target.toString(),
+          status: undefined,
+          statusText: undefined,
+          httpVersion: undefined,
+          requestHeaders: request.headers as Record<string, string>,
+          responseHeaders: {},
+          requestBody: capped(requestBody, maxBodyBytes).body,
+          responseBody: undefined,
+          requestBodyTruncated: true,
+          responseBodyTruncated: false,
+          durationMs: 0,
+          error: reason,
+          captureId,
+        }),
+      );
+      response.writeHead(413, { "content-type": "text/plain" });
+      response.end(`uvp: ${reason}\n`);
+      return;
+    }
 
     if (!matches(filter, request, target)) {
       // Forwarded, not recorded — and counted, so the difference is visible.
@@ -350,6 +443,8 @@ export class CaptureService {
       return undefined;
     });
 
+    const keptRequest = capped(requestBody, maxBodyBytes);
+    const keptResponse = capped(exchange?.body, maxBodyBytes);
     const record_: ExchangeRecord = {
       exchangeId: newId("exchange"),
       at: this.now().toISOString(),
@@ -360,10 +455,14 @@ export class CaptureService {
       httpVersion: exchange?.httpVersion,
       requestHeaders: headers,
       responseHeaders: exchange?.headers ?? {},
-      requestBody,
-      responseBody: exchange?.body,
+      requestBody: keptRequest.body,
+      responseBody: keptResponse.body,
+      // A response is cut short by whichever limit bit first: this session's, or
+      // the transport's own read limit, which reported the same thing one layer
+      // down and must not be lost when the recording limit is raised past it.
+      requestBodyTruncated: keptRequest.truncated,
+      responseBodyTruncated: keptResponse.truncated || (exchange?.bodyTruncated ?? false),
       durationMs: Date.now() - started,
-      truncated: exchange?.bodyTruncated ?? false,
       error,
       captureId,
     };

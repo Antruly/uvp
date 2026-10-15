@@ -32,10 +32,20 @@ export interface ExchangeRecord {
   readonly httpVersion: string | undefined;
   readonly requestHeaders: Readonly<Record<string, string>>;
   readonly responseHeaders: Readonly<Record<string, string>>;
+  /**
+   * The bytes recorded, each capped by the session's `maxBodyBytes`.
+   *
+   * The flags are per direction because the two are capped by different things:
+   * a request body is capped by this module while recording, and a response body
+   * by the transport's own read limit as well. A single `truncated` said that one
+   * of the two had been cut without saying which, and a caller reading a request
+   * volume from a truncated body would be reading a number about the wrong side.
+   */
   readonly requestBody: Buffer | undefined;
   readonly responseBody: Buffer | undefined;
+  readonly requestBodyTruncated: boolean;
+  readonly responseBodyTruncated: boolean;
   readonly durationMs: number;
-  readonly truncated: boolean;
   readonly error: string | undefined;
   readonly captureId: string | undefined;
 }
@@ -45,6 +55,8 @@ export interface CaptureSession {
   readonly listenPort: number;
   readonly upstream: string | undefined;
   readonly startedAt: string;
+  /** The most bytes kept per direction for this session, as the caller set it. */
+  readonly maxBodyBytes: number;
   readonly server: { close: (callback?: () => void) => void };
   readonly exchanges: ExchangeRecord[];
   stopped: boolean;

@@ -102,7 +102,7 @@ A claim with no source is not evidence. It is an assertion, and callers are
 entitled to treat it as one.
 
 **`limitations`** is where uvp says what this evidence does not establish. "The
-response body was truncated at 64 KiB." "Only the first 200 exchange records were
+response body was capped at 1048576 bytes." "Only the first 200 exchange records were
 retained." An empty array is an honest answer to "what are the limits?" only when
 uvp genuinely found none.
 
@@ -253,5 +253,5 @@ tell whether the subject changed or only the clock did.
 
 **Not a substitute for reading `limitations`.** Every tool that can truncate,
 sample, or time out says so there. A `verified` status with a `limitations` entry
-that says "the body was truncated at 64 KiB" is a report about a prefix, not
+that says "the body was capped at 1048576 bytes" is a report about a prefix, not
 about a response.

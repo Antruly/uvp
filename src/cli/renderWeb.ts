@@ -193,19 +193,32 @@ export const renderCaptureStart = (output: Record<string, unknown>): string[] =>
   row("capture", str(output["capture_id"])),
   row("proxy", `${str(output["proxy_url"])} → ${str(output["upstream"], "no upstream")}`),
   row("started", str(output["started_at"])),
+  row(
+    "bodies",
+    `${bytes(num(output["max_body_bytes"]) ?? 0)} recorded per direction; forwarded whole regardless`,
+  ),
   row("next", `uvp capture read --capture-id ${str(output["capture_id"])}`),
 ];
 
 export const renderCaptureRead = (output: Record<string, unknown>): string[] => {
   const exchanges = list(output["exchanges"]);
+  const limit = num(output["body_limit_bytes"]);
+  const cut = num(output["bodies_truncated"]) ?? 0;
   const lines = [
     row("capture", `${str(output["capture_id"])}  running: ${yesNo(output["running"])}`),
     row(
       "recorded",
-      `${String(num(output["total_recorded"]) ?? 0)} total, ${String(num(output["withheld_by_limit"]) ?? 0)} withheld by the read limit`,
+      `${String(num(output["total_recorded"]) ?? 0)} total, ${String(num(output["withheld_by_limit"]) ?? 0)} withheld by the read limit` +
+        (cut === 0 ? "" : `, ${String(cut)} with a body cut at ${String(limit ?? 0)} bytes`),
     ),
   ];
   if (exchanges.length === 0) return [...lines, row("exchanges", "none matched")];
+
+  // The byte counts are what was recorded, not what crossed the wire; a cut body
+  // would otherwise print a number about the limit as if it were the payload's.
+  const truncated = (entry: unknown): boolean =>
+    bool(at(entry, "request_body_truncated")) === true ||
+    bool(at(entry, "response_body_truncated")) === true;
 
   lines.push(
     "",
@@ -215,11 +228,18 @@ export const renderCaptureRead = (output: Record<string, unknown>): string[] => 
         str(at(entry, "method")),
         num(at(entry, "status")) === undefined ? "-" : String(num(at(entry, "status"))),
         String(num(at(entry, "duration_ms")) ?? 0),
-        `${String(num(at(entry, "request_bytes")) ?? 0)}/${String(num(at(entry, "response_bytes")) ?? 0)}`,
+        `${String(num(at(entry, "request_bytes")) ?? 0)}/${String(num(at(entry, "response_bytes")) ?? 0)}${truncated(entry) ? "*" : ""}`,
         oneLine(str(at(entry, "url")), 80),
       ]),
     ),
   );
+  if (cut > 0) {
+    lines.push(
+      "",
+      `* recorded bytes are a prefix: this session keeps ${String(limit ?? 0)} bytes per direction ` +
+        "and forwards whole regardless",
+    );
+  }
   if (exchanges.some((entry) => str(at(entry, "error")) !== "")) {
     for (const entry of exchanges) {
       const error = str(at(entry, "error"));

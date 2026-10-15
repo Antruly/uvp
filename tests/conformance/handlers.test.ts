@@ -626,6 +626,177 @@ describe("capture and assertion", () => {
   });
 });
 
+describe("the recording limit", () => {
+  /**
+   * The recording limit is not a transfer limit, and the difference matters.
+   *
+   * A capture that quietly cut what it forwarded would corrupt the very traffic
+   * it exists to observe; a capture that quietly cut what it recorded, without
+   * saying so, hands back a short body that reads as the body. These tests hold
+   * both halves at once, because a change that fixed one by breaking the other
+   * would pass either test alone.
+   */
+  it(
+    "caps what it records, forwards whole, and says which records it cut",
+    async () => {
+      const limit = 1024;
+      const payload = "a".repeat(4096);
+      const start = await call("uvp_capture_start", {
+        listen_port: await freePort(),
+        upstream: fixture.origin,
+        max_body_bytes: limit,
+      });
+      expectConforms("uvp_capture_start", start);
+      expect(start["max_body_bytes"]).toBe(limit);
+
+      const posted = await call("uvp_http_request", {
+        url: `${String(start["proxy_url"])}/echo`,
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: payload,
+      });
+      expectConforms("uvp_http_request", posted);
+      // The origin answered with the upload it received. If the proxy had
+      // forwarded a body cut to the recording limit, this would be short — which
+      // is exactly the failure that used to be silent.
+      const echoed = JSON.parse(String((posted["body"] as { text: string }).text)) as {
+        body: string;
+      };
+      expect(echoed.body, "the proxy forwarded a truncated request body").toHaveLength(4096);
+
+      const fetched = await call("uvp_http_request", {
+        url: `${String(start["proxy_url"])}/bulk?bytes=4096`,
+        method: "GET",
+      });
+      expectConforms("uvp_http_request", fetched);
+
+      const read = await call("uvp_capture_read", {
+        capture_id: start["capture_id"],
+        include_payloads: true,
+        stop: true,
+      });
+      expectConforms("uvp_capture_read", read);
+      expect(read["body_limit_bytes"], "the read did not name the limit it applied").toBe(limit);
+
+      const exchanges = read["exchanges"] as {
+        method: string;
+        request_bytes: number;
+        response_bytes: number;
+        request_body?: string;
+        response_body?: string;
+        request_body_truncated: boolean;
+        response_body_truncated: boolean;
+      }[];
+      expect(exchanges).toHaveLength(2);
+      const [post, get] = exchanges;
+      expect(post?.request_body_truncated).toBe(true);
+      expect(post?.request_body, "a request body past the limit was returned whole").toHaveLength(
+        limit,
+      );
+      expect(post?.request_bytes).toBe(limit);
+      expect(get?.response_body_truncated).toBe(true);
+      expect(get?.response_body, "a response body past the limit was returned whole").toHaveLength(
+        limit,
+      );
+      expect(read["bodies_truncated"]).toBe(2);
+
+      // The limit is reported as a partial scope, not as a complete read: what
+      // came back is a prefix of the traffic, and a caller who reads a body
+      // length off it would otherwise be reading a number about the limit.
+      const evidence = read["evidence"] as {
+        coverage: { scope: string; status: string; note?: string };
+      }[];
+      const coverage = evidence.find((entry) => entry.coverage.scope === "capture read")?.coverage;
+      expect(coverage?.status).toBe("partial");
+      expect(coverage?.note).toContain(String(limit));
+      expect((read["limitations"] as string[]).join(" ")).toContain(String(limit));
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "returns a recorded body whole when it is inside the limit",
+    async () => {
+      // Above the 64 KiB the read used to cut at, below the session's own limit:
+      // this is the range where a second, undocumented cap was invisible, and a
+      // capture that reported `response_bytes: 100000` beside 64 KiB of text was
+      // reporting two different bodies.
+      const bytes = 100_000;
+      const start = await call("uvp_capture_start", {
+        listen_port: await freePort(),
+        upstream: fixture.origin,
+        max_body_bytes: 256 * 1024,
+      });
+      await call("uvp_http_request", {
+        url: `${String(start["proxy_url"])}/bulk?bytes=${String(bytes)}`,
+        method: "GET",
+        timeout_ms: 20_000,
+      });
+
+      const read = await call("uvp_capture_read", {
+        capture_id: start["capture_id"],
+        include_payloads: true,
+        stop: true,
+      });
+      expectConforms("uvp_capture_read", read);
+      const [exchange] = read["exchanges"] as {
+        response_bytes: number;
+        response_body?: string;
+        response_body_truncated: boolean;
+      }[];
+      expect(exchange?.response_body_truncated).toBe(false);
+      expect(exchange?.response_body).toHaveLength(bytes);
+      expect(exchange?.response_bytes, "the returned body and the recorded size disagree").toBe(
+        bytes,
+      );
+      expect(read["bodies_truncated"]).toBe(0);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a request too long to forward whole, and records that it did",
+    async () => {
+      // Past the buffer the proxy needs in order to relay a body intact. The old
+      // behaviour dropped the remainder and sent it upstream, so the origin
+      // answered a truncated upload and the capture recorded the result as what
+      // crossed the wire. A refusal is the only honest answer left, and it has to
+      // be visible in the capture as well as to the client.
+      const start = await call("uvp_capture_start", {
+        listen_port: await freePort(),
+        upstream: fixture.origin,
+        max_body_bytes: 1024,
+      });
+      const oversized = Buffer.alloc(8 * 1024 * 1024 + 1, 0x62);
+      const response = await fetch(`${String(start["proxy_url"])}/echo`, {
+        method: "POST",
+        body: oversized,
+      });
+      const text = await response.text();
+      expect(response.status, "an unforwardable upload was not refused").toBe(413);
+      expect(text).toContain("exceeded");
+
+      const read = await call("uvp_capture_read", {
+        capture_id: start["capture_id"],
+        include_payloads: false,
+        stop: true,
+      });
+      expectConforms("uvp_capture_read", read);
+      const [exchange] = read["exchanges"] as {
+        status?: number;
+        error?: string;
+        request_bytes: number;
+        request_body_truncated: boolean;
+      }[];
+      expect(exchange?.error, "the refusal was not recorded as an exchange").toContain("exceeded");
+      expect(exchange?.status, "a refused request was recorded as having a status").toBeUndefined();
+      expect(exchange?.request_bytes).toBe(1024);
+      expect(exchange?.request_body_truncated).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
 describe("the verification workflow", () => {
   it(
     "verifies a real service end to end and reports what it established",

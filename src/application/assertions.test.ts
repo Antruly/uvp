@@ -24,7 +24,8 @@ const baseExchange: ExchangeRecord = {
   requestBody: undefined,
   responseBody: undefined,
   durationMs: 5,
-  truncated: false,
+  requestBodyTruncated: false,
+  responseBodyTruncated: false,
   error: undefined,
   captureId: undefined,
 };

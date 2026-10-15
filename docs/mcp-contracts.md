@@ -104,11 +104,15 @@ service, which is a real effect on the world even though uvp writes nothing.
 
 **`uvp_capture_start`** — Start capturing traffic.
 Begins recording exchanges for a target. Records are held by the session.
+`max_body_bytes` sets how much of each body is kept, per direction; it governs
+what is recorded, never what is forwarded.
 
 **`uvp_capture_read`** — Read captured traffic.
-Returns recorded exchanges, with bodies subject to a size limit that is always
-reported in `coverage` and `limitations`. `untrusted` because captured bodies are
-remote content.
+Returns recorded exchanges, with bodies cut to the session's `max_body_bytes`. The
+limit is returned as `body_limit_bytes`, each exchange carries
+`request_body_truncated` and `response_body_truncated`, and a read whose bodies
+were cut reports a `partial` scope naming the limit in `limitations`. `untrusted`
+because captured bodies are remote content.
 
 **`uvp_assert_exchange`** — Assert over a recorded exchange.
 Evaluates assertions against an exchange captured earlier — status, headers, a

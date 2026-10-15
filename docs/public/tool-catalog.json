@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "6b7badb269803088a1319b534dbbd43ebd11e8e44b5dd33ff52331889673d356",
+  "digest": "b1dec59d48e15fd3e578ef4f1db4b3f6a8572979756744ddb08d1afa29f7a00e",
   "tool_count": 13,
   "tools": [
     {
@@ -3391,6 +3391,12 @@
             "type": "integer",
             "minimum": 1000,
             "maximum": 9007199254740991
+          },
+          "max_body_bytes": {
+            "default": 1048576,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16777216
           }
         }
       },
@@ -3578,6 +3584,11 @@
           },
           "started_at": {
             "type": "string"
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -3589,7 +3600,8 @@
           "capture_id",
           "listen_port",
           "proxy_url",
-          "started_at"
+          "started_at",
+          "max_body_bytes"
         ],
         "additionalProperties": false
       },
@@ -3620,7 +3632,7 @@
     {
       "name": "uvp_capture_read",
       "title": "Read captured traffic",
-      "description": "List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit, so an empty-looking result is never confused with no traffic.",
+      "description": "List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit and how many bodies the recording limit cut short, so an empty-looking or short result is never confused with traffic that was not there.",
       "kind": "web",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3859,6 +3871,12 @@
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
                 },
+                "request_body_truncated": {
+                  "type": "boolean"
+                },
+                "response_body_truncated": {
+                  "type": "boolean"
+                },
                 "duration_ms": {
                   "type": "integer",
                   "minimum": -9007199254740991,
@@ -3881,6 +3899,8 @@
                 "url",
                 "request_bytes",
                 "response_bytes",
+                "request_body_truncated",
+                "response_body_truncated",
                 "duration_ms"
               ],
               "additionalProperties": false
@@ -3892,6 +3912,16 @@
             "maximum": 9007199254740991
           },
           "withheld_by_limit": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "body_limit_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "bodies_truncated": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
@@ -3907,7 +3937,9 @@
           "running",
           "exchanges",
           "total_recorded",
-          "withheld_by_limit"
+          "withheld_by_limit",
+          "body_limit_bytes",
+          "bodies_truncated"
         ],
         "additionalProperties": false
       },

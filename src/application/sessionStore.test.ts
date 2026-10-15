@@ -54,7 +54,8 @@ const exchange = (exchangeId: string, at: string = CLOCK_START): ExchangeRecord 
   requestBody: undefined,
   responseBody: undefined,
   durationMs: 3,
-  truncated: false,
+  requestBodyTruncated: false,
+  responseBodyTruncated: false,
   error: undefined,
   captureId: undefined,
 });
@@ -64,6 +65,7 @@ const capture = (captureId: string): CaptureSession => ({
   listenPort: 8080,
   upstream: undefined,
   startedAt: CLOCK_START,
+  maxBodyBytes: 1024 * 1024,
   server: { close: () => undefined },
   exchanges: [],
   stopped: false,
