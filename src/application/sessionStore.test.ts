@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionStore } from "./sessionStore.js";
+import {
+  DEFAULT_RETAINED_BYTES,
+  MAX_CAPTURE_EXCHANGES,
+  SessionStore,
+  createCaptureRetention,
+  retainCaptureExchange,
+} from "./sessionStore.js";
 import type { CaptureSession, ExchangeRecord, SupervisedRun } from "./sessionStore.js";
 import type { SupervisedProcess } from "../toolchains/local/processRunner.js";
 
@@ -66,8 +72,9 @@ const capture = (captureId: string): CaptureSession => ({
   upstream: undefined,
   startedAt: CLOCK_START,
   maxBodyBytes: 1024 * 1024,
+  maxRetainedBytes: DEFAULT_RETAINED_BYTES,
   server: { close: () => undefined },
-  exchanges: [],
+  retention: createCaptureRetention(DEFAULT_RETAINED_BYTES),
   stopped: false,
 });
 
@@ -229,6 +236,85 @@ describe("expiry against the injected clock", () => {
     for (let index = 0; index < 50; index += 1) store.addExchange(exchange(`ex_${String(index)}`));
     expect(store.withheldCount()).toBe(0);
     expect(store.exchange("ex_0")).toBeDefined();
+  });
+});
+
+describe("capture retention", () => {
+  /**
+   * The window a capture session keeps, driven directly.
+   *
+   * This is the function the proxy appends every recorded exchange through, so
+   * the bounds are tested where they are enforced rather than through a session
+   * that would need thousands of requests to reach the count ceiling. The byte
+   * budget is the caller's and is exercised end to end in the conformance lane;
+   * here both are checked for the two properties a report depends on — the caps
+   * hold, and the counts add up to what was seen.
+   */
+
+  const withBody = (exchangeId: string, bodyBytes: number): ExchangeRecord => ({
+    ...exchange(exchangeId),
+    responseBody: Buffer.alloc(bodyBytes, "a"),
+  });
+
+  /** The bytes actually held, which is what `retained_bytes` promises. */
+  const heldBytes = (retention: ReturnType<typeof createCaptureRetention>): number =>
+    retention.exchanges.reduce(
+      (total, entry) =>
+        total + (entry.requestBody?.byteLength ?? 0) + (entry.responseBody?.byteLength ?? 0),
+      0,
+    );
+
+  it("drops the oldest when the byte budget is spent, and counts them", () => {
+    const retention = createCaptureRetention(100);
+    for (let index = 0; index < 3; index += 1) {
+      retainCaptureExchange(retention, withBody(`ex_${String(index)}`, 40));
+    }
+
+    // Two 40-byte bodies fit in 100; the third would make 120, so the oldest is
+    // dropped to make room rather than the newest being refused — a capture is
+    // read to find out what just happened.
+    expect(retention.exchanges.map((entry) => entry.exchangeId)).toEqual(["ex_1", "ex_2"]);
+    expect(retention.bytes).toBe(80);
+    expect(retention.bytes).toBe(heldBytes(retention));
+    expect(retention.withheld).toBe(1);
+    expect(retention.recorded).toBe(3);
+    // The identity a read reports: everything seen is held, withheld, or both.
+    expect(retention.exchanges.length + retention.withheld).toBe(retention.recorded);
+  });
+
+  it("keeps one exchange when a single record is larger than the budget", () => {
+    // A caller who sets a budget below `maxBodyBytes` would otherwise capture
+    // nothing at all and be told only that something had been dropped. The
+    // budget is then exceeded, which is why the read reports the held bytes
+    // beside the limit instead of leaving the caller to assume.
+    const retention = createCaptureRetention(10);
+    retainCaptureExchange(retention, withBody("ex_0", 100));
+    expect(retention.exchanges).toHaveLength(1);
+    expect(retention.bytes).toBe(100);
+    expect(retention.withheld).toBe(0);
+
+    retainCaptureExchange(retention, withBody("ex_1", 100));
+    expect(retention.exchanges.map((entry) => entry.exchangeId)).toEqual(["ex_1"]);
+    expect(retention.withheld).toBe(1);
+    expect(retention.bytes).toBe(100);
+  });
+
+  it("drops the oldest past the count ceiling, whatever the bodies weigh", () => {
+    // The budget bounds the bytes and says nothing about the record count: a
+    // session of empty responses spends none of it and would otherwise grow for
+    // as long as the traffic lasts.
+    const retention = createCaptureRetention(DEFAULT_RETAINED_BYTES);
+    const over = MAX_CAPTURE_EXCHANGES + 3;
+    for (let index = 0; index < over; index += 1) {
+      retainCaptureExchange(retention, withBody(`ex_${String(index)}`, 0));
+    }
+    expect(retention.exchanges).toHaveLength(MAX_CAPTURE_EXCHANGES);
+    expect(retention.withheld).toBe(3);
+    expect(retention.recorded).toBe(over);
+    expect(retention.bytes).toBe(0);
+    // The oldest went, so the window still ends at the exchange just recorded.
+    expect(retention.exchanges.at(-1)?.exchangeId).toBe(`ex_${String(over - 1)}`);
+    expect(retention.exchanges.at(0)?.exchangeId).toBe("ex_3");
   });
 });
 

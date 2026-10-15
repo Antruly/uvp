@@ -50,6 +50,91 @@ export interface ExchangeRecord {
   readonly captureId: string | undefined;
 }
 
+/**
+ * The most exchanges one capture session will hold.
+ *
+ * A ceiling on the record count, not on their size: it is what bounds a session
+ * whose traffic is all tiny — a few thousand empty responses are still a few
+ * thousand objects with headers on them. The byte budget below is the bound that
+ * matters for the rest, and the two are enforced together.
+ */
+export const MAX_CAPTURE_EXCHANGES = 5_000;
+
+/**
+ * The default budget for the recorded bodies one capture session holds.
+ *
+ * Bodies are capped per exchange by `maxBodyBytes`, which bounds one record and
+ * says nothing about how many of them accumulate: at the 1 MiB default recording
+ * limit, an hour of traffic is a process holding gigabytes it never mentions.
+ * This is the bound on the total, and it is the caller's to set because the right
+ * value depends on what is being captured — a page of JSON and a page of images
+ * are not the same session.
+ */
+export const DEFAULT_RETAINED_BYTES = 32 * 1024 * 1024;
+
+/**
+ * What a capture session holds, and what it has dropped to stay inside its caps.
+ *
+ * `exchanges` is bounded and holds the most recent ones; `recorded` counts every
+ * exchange the session saw, held or not, so a read can say "there was more"
+ * rather than presenting the window as the whole truth. `bytes` is the recorded
+ * body bytes currently held, which is what the byte budget is spent on.
+ */
+export interface CaptureRetention {
+  readonly exchanges: ExchangeRecord[];
+  /** Recorded by this session, held or not. */
+  recorded: number;
+  /** Recorded and no longer held, because a cap dropped it. */
+  withheld: number;
+  /** Recorded body bytes currently held, either direction. */
+  bytes: number;
+  /** The byte budget `bytes` is kept within, as the caller set it. */
+  readonly byteBudget: number;
+}
+
+export const createCaptureRetention = (byteBudget: number): CaptureRetention => ({
+  exchanges: [],
+  recorded: 0,
+  withheld: 0,
+  bytes: 0,
+  byteBudget,
+});
+
+/** The bytes of an exchange that count against the budget: the bodies kept. */
+const retainedBytesOf = (record: ExchangeRecord): number =>
+  (record.requestBody?.byteLength ?? 0) + (record.responseBody?.byteLength ?? 0);
+
+/**
+ * Keep one exchange, dropping the oldest until both caps are met.
+ *
+ * The oldest are dropped rather than the newest, because a capture is read to
+ * find out what just happened.
+ *
+ * One record is always kept, even when it alone exceeds the byte budget — a
+ * caller who sets a budget below `maxBodyBytes` would otherwise capture nothing
+ * and be told only that something was dropped. That keeps the budget from being
+ * a hard bound on one record, which is why `retained_bytes` is reported beside
+ * it: the caller can see the exception rather than assume it away.
+ */
+export const retainCaptureExchange = (
+  retention: CaptureRetention,
+  record: ExchangeRecord,
+): ExchangeRecord => {
+  retention.exchanges.push(record);
+  retention.recorded += 1;
+  retention.bytes += retainedBytesOf(record);
+  while (
+    retention.exchanges.length > MAX_CAPTURE_EXCHANGES ||
+    (retention.bytes > retention.byteBudget && retention.exchanges.length > 1)
+  ) {
+    const evicted = retention.exchanges.shift();
+    if (evicted === undefined) break;
+    retention.bytes -= retainedBytesOf(evicted);
+    retention.withheld += 1;
+  }
+  return record;
+};
+
 export interface CaptureSession {
   readonly captureId: string;
   readonly listenPort: number;
@@ -57,12 +142,21 @@ export interface CaptureSession {
   readonly startedAt: string;
   /** The most bytes kept per direction for this session, as the caller set it. */
   readonly maxBodyBytes: number;
+  /** The budget for the bodies this session holds in total. */
+  readonly maxRetainedBytes: number;
   readonly server: { close: (callback?: () => void) => void };
-  readonly exchanges: ExchangeRecord[];
+  readonly retention: CaptureRetention;
   stopped: boolean;
 }
 
-const MAX_EXCHANGES = 5_000;
+/**
+ * The most exchanges the session-wide store keeps, across every capture.
+ *
+ * Distinct from `MAX_CAPTURE_EXCHANGES`, which bounds one capture session's own
+ * list: this one bounds the flat log that evidence references and
+ * `uvp_assert_exchange` read from.
+ */
+const MAX_STORED_EXCHANGES = 5_000;
 const MAX_CAPTURES = 16;
 const EXCHANGE_TTL_MS = 60 * 60 * 1000;
 
@@ -158,7 +252,7 @@ export class SessionStore {
 
   #pruneExchanges(): void {
     const cutoff = this.now().getTime() - EXCHANGE_TTL_MS;
-    while (this.#exchangeOrder.length > MAX_EXCHANGES) {
+    while (this.#exchangeOrder.length > MAX_STORED_EXCHANGES) {
       const evicted = this.#exchangeOrder.shift();
       if (evicted === undefined) break;
       this.#exchanges.delete(evicted);

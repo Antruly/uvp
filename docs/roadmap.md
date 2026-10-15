@@ -97,7 +97,7 @@ implicit.
 | ⬜  | Reproducible builds for the packaged tarball                                                                                                                                          |
 | ⬜  | An SBOM in the release artifacts                                                                                                                                                      |
 | ⬜  | Fuzzing the CMake output parser and the HTTP response parser                                                                                                                          |
-| ⬜  | A cap on capture size enforced by the session, not only reported                                                                                                                      |
+| ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                      |
 
 ## Not planned
 

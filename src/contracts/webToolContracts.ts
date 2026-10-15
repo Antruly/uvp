@@ -417,6 +417,15 @@ export const captureStartContract = defineTool({
       .min(1)
       .max(16 * 1024 * 1024)
       .default(1024 * 1024),
+    /**
+     * The most recorded body bytes this session holds in total.
+     *
+     * `max_body_bytes` bounds one exchange and says nothing about how many of
+     * them accumulate, so without this a long capture is a process holding
+     * gigabytes it never reports. Past the budget the oldest exchanges are
+     * dropped and counted, and a read reports the count.
+     */
+    max_retained_bytes: z.number().int().min(1).optional(),
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
@@ -447,9 +456,9 @@ export const captureReadContract = defineTool({
   title: "Read captured traffic",
   description:
     "List the exchanges recorded by a capture session, optionally hydrating full request and " +
-    "response payloads. Reports how many exchanges were held back by the read limit and how many " +
-    "bodies the recording limit cut short, so an empty-looking or short result is never confused " +
-    "with traffic that was not there.",
+    "response payloads. Reports how many exchanges were held back by the read limit, how many the " +
+    "session's own retention caps dropped, and how many bodies the recording limit cut short — so " +
+    "an empty-looking or short result is never confused with traffic that was not there.",
   kind: "web",
   inputSchema: z.object({
     capture_id: captureIdSchema.optional().describe("Defaults to the most recent session."),
@@ -479,10 +488,24 @@ export const captureReadContract = defineTool({
         error: z.string().optional(),
       }),
     ),
+    /** Every exchange this session recorded, in the page, held back, or dropped. */
     total_recorded: z.number().int(),
+    /** Held back by this read's `limit`. */
     withheld_by_limit: z.number().int(),
+    /** Dropped by the session's retention caps, so no longer readable at all. */
+    withheld_by_retention: z.number().int(),
+    /**
+     * True when `since_id` is not an exchange this session still holds — it was
+     * dropped by the retention caps, or never belonged to this capture. The page
+     * then starts at the oldest exchange retained rather than at that id.
+     */
+    since_id_unknown: z.boolean(),
     /** The per-direction recording limit this session was started with. */
     body_limit_bytes: z.number().int(),
+    /** The budget for all recorded bodies this session holds. */
+    retained_limit_bytes: z.number().int(),
+    /** The recorded body bytes actually held, either direction. */
+    retained_bytes: z.number().int(),
     /** How many of the returned exchanges carry a body cut to that limit. */
     bodies_truncated: z.number().int(),
   }),

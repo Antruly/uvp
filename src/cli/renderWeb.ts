@@ -218,11 +218,13 @@ export const renderCaptureRead = (output: Record<string, unknown>): string[] => 
   const exchanges = list(output["exchanges"]);
   const limit = num(output["body_limit_bytes"]);
   const cut = num(output["bodies_truncated"]) ?? 0;
+  const dropped = num(output["withheld_by_retention"]) ?? 0;
   const lines = [
     row("capture", `${str(output["capture_id"])}  running: ${yesNo(output["running"])}`),
     row(
       "recorded",
       `${String(num(output["total_recorded"]) ?? 0)} total, ${String(num(output["withheld_by_limit"]) ?? 0)} withheld by the read limit` +
+        (dropped === 0 ? "" : `, ${String(dropped)} dropped by the session's retention caps`) +
         (cut === 0 ? "" : `, ${String(cut)} with a body cut at ${String(limit ?? 0)} bytes`),
     ),
   ];

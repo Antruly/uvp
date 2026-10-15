@@ -4,7 +4,13 @@ import { Buffer } from "node:buffer";
 
 import { UvpFailure } from "../domain/errors.js";
 import { newId } from "../domain/identity.js";
-import type { ExchangeRecord, SessionStore } from "./sessionStore.js";
+import {
+  DEFAULT_RETAINED_BYTES,
+  MAX_CAPTURE_EXCHANGES,
+  createCaptureRetention,
+  retainCaptureExchange,
+} from "./sessionStore.js";
+import type { CaptureRetention, ExchangeRecord, SessionStore } from "./sessionStore.js";
 import { performRequest } from "./httpClient.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import { coverageComplete, coveragePartial, endpointSource, record } from "./evidenceHelpers.js";
@@ -44,6 +50,8 @@ export interface CaptureStartInput {
   readonly auto_stop_ms: number | undefined;
   /** The most bytes kept per direction per exchange. Reported by every read. */
   readonly max_body_bytes: number;
+  /** The most recorded body bytes this session holds in total. */
+  readonly max_retained_bytes: number | undefined;
 }
 
 /**
@@ -153,7 +161,10 @@ export class CaptureService {
 
     const captureId = newId("capture");
     const startedAt = this.now().toISOString();
-    const exchanges: ExchangeRecord[] = [];
+    const maxRetainedBytes = input.max_retained_bytes ?? DEFAULT_RETAINED_BYTES;
+    // Built before the server, because the request handler needs it and the
+    // session that reports it does not exist until the listener is bound.
+    const retention = createCaptureRetention(maxRetainedBytes);
     let notRecorded = 0;
     let autoStop: NodeJS.Timeout | undefined;
 
@@ -162,7 +173,7 @@ export class CaptureService {
         upstream,
         filter: input.filter,
         captureId,
-        exchanges,
+        retention,
         maxBodyBytes: input.max_body_bytes,
         recorder,
         onSkipped: () => {
@@ -203,15 +214,16 @@ export class CaptureService {
       upstream: input.upstream,
       startedAt,
       maxBodyBytes: input.max_body_bytes,
+      maxRetainedBytes,
       server,
-      exchanges,
+      retention,
       stopped: false,
     });
 
     if (input.max_exchanges !== undefined || input.auto_stop_ms !== undefined) {
       autoStop = setInterval(() => {
         const reached =
-          input.max_exchanges !== undefined && exchanges.length >= input.max_exchanges;
+          input.max_exchanges !== undefined && retention.recorded >= input.max_exchanges;
         const expired =
           input.auto_stop_ms !== undefined &&
           Date.now() - Date.parse(startedAt) >= input.auto_stop_ms;
@@ -226,12 +238,21 @@ export class CaptureService {
     record(recorder, {
       kind: "capture",
       subject: { capture_id: captureId, listen_port: input.listen_port, upstream: input.upstream },
-      observed: { filter: { ...input.filter }, max_body_bytes: input.max_body_bytes },
+      observed: {
+        filter: { ...input.filter },
+        max_body_bytes: input.max_body_bytes,
+        max_retained_bytes: maxRetainedBytes,
+      },
       coverage: coverageComplete("capture session started"),
       sources: [endpointSource(`http://127.0.0.1:${String(input.listen_port)}`)],
       limitations: [
         "The capture proxy speaks HTTP; a CONNECT tunnel is not intercepted and its contents are not recorded.",
         `Bodies are recorded to ${String(input.max_body_bytes)} bytes per direction, and forwarded whole regardless.`,
+        // The cap that ends a session's usefulness, stated at the start rather
+        // than discovered in a read: past it, the oldest exchanges are gone.
+        `This session holds the most recent ${String(MAX_CAPTURE_EXCHANGES)} exchanges, and at most ` +
+          `${String(maxRetainedBytes)} bytes of recorded bodies across them. Older ones are dropped ` +
+          "and counted, not silently overwritten.",
       ],
     });
 
@@ -271,7 +292,11 @@ export class CaptureService {
     }[];
     total_recorded: number;
     withheld_by_limit: number;
+    withheld_by_retention: number;
+    since_id_unknown: boolean;
     body_limit_bytes: number;
+    retained_limit_bytes: number;
+    retained_bytes: number;
     bodies_truncated: number;
   }> {
     const session =
@@ -292,11 +317,18 @@ export class CaptureService {
       });
     }
 
-    const ordered = session.exchanges;
-    const start =
+    const { retention } = session;
+    const ordered = retention.exchanges;
+    // A cursor this session no longer holds is reported rather than treated as
+    // "start at the beginning": an id that aged out of the retention window and
+    // an id that never existed both land here, and answering either one with the
+    // oldest retained exchange is a guess a caller would read as continuity.
+    const cursor =
       input.since_id === undefined
-        ? 0
-        : Math.max(0, ordered.findIndex((entry) => entry.exchangeId === input.since_id) + 1);
+        ? undefined
+        : ordered.findIndex((entry) => entry.exchangeId === input.since_id);
+    const sinceIdUnknown = input.since_id !== undefined && cursor === -1;
+    const start = cursor === undefined || cursor < 0 ? 0 : cursor + 1;
     const slice = ordered.slice(start, start + input.limit);
 
     if (input.stop && !session.stopped) {
@@ -329,11 +361,18 @@ export class CaptureService {
           : {}),
         ...(entry.error === undefined ? {} : { error: entry.error }),
       })),
-      total_recorded: ordered.length,
+      // Every recorded exchange is either in this page, counted in
+      // `withheld_by_limit`, or gone from the session — so the three numbers add
+      // up to the total, and a caller can check that rather than trust it.
+      total_recorded: retention.recorded,
       withheld_by_limit: Math.max(0, ordered.length - start - slice.length),
+      withheld_by_retention: retention.withheld,
+      since_id_unknown: sinceIdUnknown,
       // The limit that produced the flags above, so a caller reading a body can
       // tell how much of it they are looking at without consulting start-up.
       body_limit_bytes: session.maxBodyBytes,
+      retained_limit_bytes: session.maxRetainedBytes,
+      retained_bytes: retention.bytes,
       bodies_truncated: slice.filter(
         (entry) => entry.requestBodyTruncated || entry.responseBodyTruncated,
       ).length,
@@ -347,13 +386,13 @@ export class CaptureService {
       readonly upstream: URL;
       readonly filter: CaptureFilter;
       readonly captureId: string;
-      readonly exchanges: ExchangeRecord[];
+      readonly retention: CaptureRetention;
       readonly maxBodyBytes: number;
       readonly recorder: EvidenceRecorder;
       readonly onSkipped: () => void;
     },
   ): Promise<void> {
-    const { upstream, filter, captureId, exchanges, maxBodyBytes, recorder, onSkipped } = context;
+    const { upstream, filter, captureId, retention, maxBodyBytes, recorder, onSkipped } = context;
     const incoming = new URL(request.url ?? "/", upstream.origin);
     const target = new URL(`${incoming.pathname}${incoming.search}`, upstream);
     const { body: requestBody, exceeded } = await readRequestBody(request);
@@ -365,7 +404,8 @@ export class CaptureService {
       const reason =
         `the request body exceeded the ${String(FORWARD_BUFFER_LIMIT_BYTES)} bytes this proxy ` +
         `buffers in order to forward it whole`;
-      exchanges.push(
+      retainCaptureExchange(
+        retention,
         this.store.addExchange({
           exchangeId: newId("exchange"),
           at: this.now().toISOString(),
@@ -466,8 +506,7 @@ export class CaptureService {
       error,
       captureId,
     };
-    exchanges.push(record_);
-    this.store.addExchange(record_);
+    retainCaptureExchange(retention, this.store.addExchange(record_));
 
     if (error !== undefined) {
       record(recorder, {

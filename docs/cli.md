@@ -265,6 +265,18 @@ is a `partial` scope with the limit named in `limitations`. The limit is
 request is still forwarded whole, and one too large to forward whole is refused
 with `413` and recorded as refused rather than sent upstream short.
 
+A capture session also holds a bounded window. `max_body_bytes` bounds one
+exchange and says nothing about how many accumulate, so `--max-retained-bytes`
+(default 32 MiB) bounds the recorded bodies the whole session keeps, and a count
+ceiling bounds a session whose traffic is all tiny. Past either, the oldest
+exchanges are dropped — a capture is read to find out what just happened — and
+`uvp capture read` reports `withheld_by_retention`, with `retained_bytes` and
+`retained_limit_bytes` beside it so the bound can be checked rather than assumed.
+`total_recorded` is every exchange the session saw, so the page, the read limit,
+and the retention caps add up to it. A `since_id` the session no longer holds
+sets `since_id_unknown` and starts the page at the oldest exchange it does keep,
+rather than answering a dropped cursor with an implicit "from the beginning".
+
 `uvp ws` with no `--send` performs the handshake and stops. A `101` is a success
 and is reported as one, separately from the frame log, so "the upgrade was
 rejected" and "it opened and then said nothing" are different results.

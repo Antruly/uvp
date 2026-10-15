@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "42037f65b62c621bc7d3a414c3f5f5cf1a961ad861bcd61c68512de9e2717266",
+  "digest": "40e9fecc6107e594e28eefe3717bbf80f0bdee31ed8c771244ada2adfcf08cca",
   "tool_count": 13,
   "tools": [
     {
@@ -3465,6 +3465,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 16777216
+          },
+          "max_retained_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         }
       },
@@ -3700,7 +3705,7 @@
     {
       "name": "uvp_capture_read",
       "title": "Read captured traffic",
-      "description": "List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit and how many bodies the recording limit cut short, so an empty-looking or short result is never confused with traffic that was not there.",
+      "description": "List the exchanges recorded by a capture session, optionally hydrating full request and response payloads. Reports how many exchanges were held back by the read limit, how many the session's own retention caps dropped, and how many bodies the recording limit cut short — so an empty-looking or short result is never confused with traffic that was not there.",
       "kind": "web",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3984,7 +3989,25 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           },
+          "withheld_by_retention": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "since_id_unknown": {
+            "type": "boolean"
+          },
           "body_limit_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "retained_limit_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "retained_bytes": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
@@ -4006,7 +4029,11 @@
           "exchanges",
           "total_recorded",
           "withheld_by_limit",
+          "withheld_by_retention",
+          "since_id_unknown",
           "body_limit_bytes",
+          "retained_limit_bytes",
+          "retained_bytes",
           "bodies_truncated"
         ],
         "additionalProperties": false

@@ -991,6 +991,136 @@ describe("the recording limit", () => {
   );
 });
 
+describe("the retention caps", () => {
+  /**
+   * A capture session keeps a bounded window, and the bound is the caller's.
+   *
+   * `max_body_bytes` limits one exchange and says nothing about how many of them
+   * accumulate: at the 1 MiB default recording limit, an hour of traffic is a
+   * process holding gigabytes it never mentions. These tests drive the session
+   * past its budget with small bodies, so what is checked is the bound and the
+   * reporting of it rather than the amount of traffic needed to reach a default.
+   */
+
+  const perBody = 8 * 1024;
+  const budget = 20 * 1024;
+
+  /** A session that holds two of these responses and no more. */
+  const startBounded = async (): Promise<Record<string, unknown>> =>
+    await call("uvp_capture_start", {
+      listen_port: await freePort(),
+      upstream: fixture.origin,
+      max_body_bytes: perBody,
+      max_retained_bytes: budget,
+    });
+
+  const bulk = async (proxyUrl: string): Promise<void> => {
+    await call("uvp_http_request", {
+      url: `${proxyUrl}/bulk?bytes=${String(perBody)}`,
+      method: "GET",
+      timeout_ms: 20_000,
+    });
+  };
+
+  it(
+    "holds a bounded window and reports every exchange the bound dropped",
+    async () => {
+      const start = await startBounded();
+      expectConforms("uvp_capture_start", start);
+
+      for (let index = 0; index < 5; index += 1) await bulk(String(start["proxy_url"]));
+
+      const read = await call("uvp_capture_read", {
+        capture_id: start["capture_id"],
+        stop: true,
+      });
+      expectConforms("uvp_capture_read", read);
+
+      // Five exchanges were recorded; two 8 KiB responses fit in a 20 KiB budget
+      // and the third would not, so the oldest three are gone. The byte budget is
+      // the bound that binds here — the count ceiling is thousands away.
+      expect(read["total_recorded"], "the session did not count what it saw").toBe(5);
+      expect(read["exchanges"]).toHaveLength(2);
+      expect(read["withheld_by_retention"]).toBe(3);
+      expect(read["retained_limit_bytes"]).toBe(budget);
+      expect(
+        read["retained_bytes"],
+        "the session held more than the budget allows",
+      ).toBeLessThanOrEqual(budget);
+
+      // The counts a caller would add up to decide whether the page is the whole
+      // truth. If they do not reconcile, one of them is describing something else.
+      expect(
+        (read["exchanges"] as unknown[]).length +
+          (read["withheld_by_limit"] as number) +
+          (read["withheld_by_retention"] as number),
+        "the returned, withheld, and dropped counts do not add up to the total",
+      ).toBe(read["total_recorded"]);
+
+      // A page that is short because the session dropped the rest must not read
+      // as a complete answer, and the note has to say which of the two it was.
+      const coverage = (
+        read["evidence"] as { coverage: { scope: string; status: string; note?: string } }[]
+      ).find((entry) => entry.coverage.scope === "capture read")?.coverage;
+      expect(coverage?.status).toBe("partial");
+      expect(coverage?.note).toContain("retention");
+      expect((read["limitations"] as string[]).join(" ")).toContain(
+        `${String(budget)} bytes of recorded bodies`,
+      );
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reports a cursor the retention window has dropped instead of restarting silently",
+    async () => {
+      const start = await startBounded();
+      await bulk(String(start["proxy_url"]));
+
+      // The first exchange, read back while it is still held, so the test has an
+      // id the session is about to lose.
+      const first = await call("uvp_capture_read", { capture_id: start["capture_id"] });
+      expectConforms("uvp_capture_read", first);
+      const dropped = (first["exchanges"] as { exchange_id: string }[])[0]?.exchange_id;
+      expect(dropped).toBeDefined();
+
+      for (let index = 0; index < 4; index += 1) await bulk(String(start["proxy_url"]));
+
+      const read = await call("uvp_capture_read", {
+        capture_id: start["capture_id"],
+        since_id: dropped,
+        stop: true,
+      });
+      expectConforms("uvp_capture_read", read);
+
+      // Answering this with "here is everything from the beginning" would read as
+      // continuity from a position that no longer exists — and the exchanges in
+      // that page are ones the caller has already seen.
+      expect(read["since_id_unknown"]).toBe(true);
+      expect((read["exchanges"] as unknown[]).length).toBe(2);
+      expect((read["limitations"] as string[]).join(" ")).toContain("since_id");
+      const coverage = (
+        read["evidence"] as { coverage: { scope: string; status: string; note?: string } }[]
+      ).find((entry) => entry.coverage.scope === "capture read")?.coverage;
+      expect(coverage?.status).toBe("partial");
+
+      // The positive control: a cursor the session still holds is not reported as
+      // unknown, and the page starts after it. Without this the flag could be a
+      // constant and every assertion above would still pass.
+      const held = (read["exchanges"] as { exchange_id: string }[])[0]?.exchange_id;
+      const after = await call("uvp_capture_read", {
+        capture_id: start["capture_id"],
+        since_id: held,
+        stop: true,
+      });
+      expectConforms("uvp_capture_read", after);
+      expect(after["since_id_unknown"]).toBe(false);
+      expect((after["exchanges"] as unknown[]).length).toBe(1);
+    },
+    TIMEOUT,
+  );
+});
+
 describe("the verification workflow", () => {
   it(
     "verifies a real service end to end and reports what it established",

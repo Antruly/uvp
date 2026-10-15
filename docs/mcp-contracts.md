@@ -117,8 +117,13 @@ what is recorded, never what is forwarded.
 Returns recorded exchanges, with bodies cut to the session's `max_body_bytes`. The
 limit is returned as `body_limit_bytes`, each exchange carries
 `request_body_truncated` and `response_body_truncated`, and a read whose bodies
-were cut reports a `partial` scope naming the limit in `limitations`. `untrusted`
-because captured bodies are remote content.
+were cut reports a `partial` scope naming the limit in `limitations`. The session
+also holds a bounded window — `max_retained_bytes` bounds the recorded bodies it
+keeps, and a count ceiling bounds how many exchanges — so a read reports
+`withheld_by_retention` for the exchanges that fell out of it, `retained_bytes`
+and `retained_limit_bytes` for the bound itself, and `since_id_unknown` when the
+cursor given is no longer held. `untrusted` because captured bodies are remote
+content.
 
 **`uvp_assert_exchange`** — Assert over a recorded exchange.
 Evaluates assertions against an exchange captured earlier — status, headers, a

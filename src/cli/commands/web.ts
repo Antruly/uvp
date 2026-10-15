@@ -505,7 +505,7 @@ export const captureStartCommand: CommandSpec = {
   usage:
     "uvp capture start [UPSTREAM] [--listen PORT] [--host NAME]... [--method VERB]...\n" +
     "                  [--path-prefix P] [--max-exchanges N] [--auto-stop MS]\n" +
-    "                  [--max-body-bytes N] [--json]",
+    "                  [--max-body-bytes N] [--max-retained-bytes N] [--json]",
   positionals: [
     { name: "UPSTREAM", description: "Origin to forward to. Omit for a transparent proxy." },
   ],
@@ -552,11 +552,18 @@ export const captureStartCommand: CommandSpec = {
       value: "N",
       description: "Record at most this many body bytes per direction. Default 1 MiB.",
     },
+    {
+      name: "max-retained-bytes",
+      type: "number",
+      value: "N",
+      description: "Hold at most this many recorded body bytes across the session. Default 32 MiB.",
+    },
   ],
   notes: [
     "The session belongs to this uvp session, and `uvp stop --all` ends it along with any services.",
     "A capture that outlives the shell that started it is a port held by a process nobody is watching.",
     "`--max-body-bytes` bounds what is recorded, not what is forwarded: a captured request still reaches the origin whole, and one too large to forward whole is refused with 413 rather than sent short.",
+    "`--max-retained-bytes` bounds the whole session, not one exchange: past it the oldest exchanges are dropped so the window keeps moving, and `uvp capture read` reports how many went.",
   ],
   input: (parsed) => {
     const hosts = parseCsv(asList(parsed, "host"));
@@ -572,6 +579,7 @@ export const captureStartCommand: CommandSpec = {
       ...optional("max_exchanges", asNumber(parsed, "max-exchanges")),
       ...optional("auto_stop_ms", asNumber(parsed, "auto-stop")),
       ...optional("max_body_bytes", asNumber(parsed, "max-body-bytes")),
+      ...optional("max_retained_bytes", asNumber(parsed, "max-retained-bytes")),
     };
   },
   verdict: (output) => (str(output["proxy_url"]) === "" ? EXIT_NO : undefined),
@@ -608,6 +616,10 @@ export const captureReadCommand: CommandSpec = {
   notes: [
     "`withheld_by_limit` counts the exchanges the limit held back. An empty list beside a non-zero",
     "count means the limit was too small — not that no traffic was seen.",
+    "`withheld_by_retention` counts the exchanges the session dropped to stay inside its retention",
+    "caps, which are gone rather than merely unlisted — a gap in the page is not an idle period.",
+    "`since_id_unknown` means the cursor is not an exchange the session still holds, so the page",
+    "starts at the oldest it does.",
   ],
   input: (parsed) => ({
     ...optional("capture_id", asString(parsed, "capture-id")),
