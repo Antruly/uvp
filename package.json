@@ -47,7 +47,10 @@
     "docs/public/tool-catalog.json",
     "docs/error-contract.schema.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "licenses",
+    "sbom.cdx.json"
   ],
   "scripts": {
     "compile": "node scripts/clean-build-output.mjs && tsc -p tsconfig.build.json",
@@ -89,8 +92,10 @@
     "metadata:check": "node scripts/generate-package-metadata.mjs --check",
     "licenses:generate": "node scripts/licenses.mjs",
     "licenses:check": "node scripts/licenses.mjs --check",
-    "docs:generate": "node scripts/generate-package-metadata.mjs && npm run artifacts:tool-catalog && npm run artifacts:skills && npm run artifacts:error-schema && npm run licenses:generate",
-    "docs:check": "node scripts/generate-mcp-tool-catalog.mjs --check && node scripts/generate-package-metadata.mjs --check && node scripts/generate-skill-metadata.mjs --check && node scripts/generate-error-schema.mjs --check && npm run licenses:check && node scripts/check-doc-facts.mjs",
+    "sbom:generate": "node scripts/sbom.mjs",
+    "sbom:check": "node scripts/sbom.mjs --check",
+    "docs:generate": "node scripts/generate-package-metadata.mjs && npm run artifacts:tool-catalog && npm run artifacts:skills && npm run artifacts:error-schema && npm run licenses:generate && npm run sbom:generate",
+    "docs:check": "node scripts/generate-mcp-tool-catalog.mjs --check && node scripts/generate-package-metadata.mjs --check && node scripts/generate-skill-metadata.mjs --check && node scripts/generate-error-schema.mjs --check && npm run licenses:check && npm run sbom:check && node scripts/check-doc-facts.mjs",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",

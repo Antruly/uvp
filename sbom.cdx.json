@@ -1,0 +1,215 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "tools": [
+      {
+        "vendor": "uvp",
+        "name": "scripts/sbom.mjs",
+        "version": "0.1.0"
+      }
+    ],
+    "component": {
+      "bom-ref": "uvp-agents@0.1.0",
+      "type": "library",
+      "name": "uvp-agents",
+      "version": "0.1.0",
+      "scope": "required",
+      "description": "Build, run, and verify libuvcpp-powered C++ web services from your terminal or agent with one CLI and MCP server.",
+      "purl": "pkg:npm/uvp-agents@0.1.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/Antruly/uvp.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/Antruly/uvp#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/Antruly/uvp/issues"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "uvp:source",
+        "value": "package-lock.json"
+      },
+      {
+        "name": "uvp:lockfile-version",
+        "value": "3"
+      },
+      {
+        "name": "uvp:lockfile-sha512",
+        "value": "3bd2cc2e81af14f40cd6ff394de1f955857df31121cad0412adb0bf90b644b1c0cd730069e86c9df795bf68e29faf1b06f5d2b596eab56410920b6b49a8e06e8"
+      },
+      {
+        "name": "uvp:closure",
+        "value": "production"
+      }
+    ]
+  },
+  "components": [
+    {
+      "bom-ref": "@modelcontextprotocol/core@2.3.1",
+      "type": "library",
+      "name": "@modelcontextprotocol/core",
+      "version": "2.3.1",
+      "scope": "required",
+      "purl": "pkg:npm/%40modelcontextprotocol/core@2.3.1",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmmirror.com/@modelcontextprotocol/core/-/core-2.3.1.tgz"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "95a5662213c6a568bbac6f6afb452281b9513741f0b3f62395beaa2c5b55aabc9754b91ce21fb237ccfbdf53ce0f62e700642515eeffb578549bb062d1807dd6"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@modelcontextprotocol/server@2.3.1",
+      "type": "library",
+      "name": "@modelcontextprotocol/server",
+      "version": "2.3.1",
+      "scope": "required",
+      "purl": "pkg:npm/%40modelcontextprotocol/server@2.3.1",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmmirror.com/@modelcontextprotocol/server/-/server-2.3.1.tgz"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "7b9f4c7d6b92b2c8fa0e843de89093a9d5b50174f9fd7b674e5d1659de8c53529ae37e1f154186a2c08b25b18dc920e11c6bf1416a1158ad77ec55d816460d5b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "canonicalize@3.0.0",
+      "type": "library",
+      "name": "canonicalize",
+      "version": "3.0.0",
+      "scope": "required",
+      "purl": "pkg:npm/canonicalize@3.0.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmmirror.com/canonicalize/-/canonicalize-3.0.0.tgz"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c982df1f20cc21747246ab0a0512d7d36deb8852e95d8d9839f76da8a5d9459cbdaac7ce27d53ee05f5864becc1332f9fb388ddb1da7941bd8fd5a22dc40658c"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "zod@4.4.3",
+      "type": "library",
+      "name": "zod",
+      "version": "4.4.3",
+      "scope": "required",
+      "purl": "pkg:npm/zod@4.4.3",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmmirror.com/zod/-/zod-4.4.3.tgz"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cad10d163209165d94c1882575eda37215b61f09b818914b0e249759d4eb25004837d15cca9ee7e0387124489634024c575fc1a967d6fe4920ef55037072724d"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "uvp-agents@0.1.0",
+      "dependsOn": [
+        "@modelcontextprotocol/server@2.3.1",
+        "canonicalize@3.0.0",
+        "zod@4.4.3"
+      ]
+    },
+    {
+      "ref": "@modelcontextprotocol/core@2.3.1",
+      "dependsOn": [
+        "zod@4.4.3"
+      ]
+    },
+    {
+      "ref": "@modelcontextprotocol/server@2.3.1",
+      "dependsOn": [
+        "@modelcontextprotocol/core@2.3.1",
+        "zod@4.4.3"
+      ]
+    },
+    {
+      "ref": "canonicalize@3.0.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "zod@4.4.3",
+      "dependsOn": []
+    }
+  ],
+  "serialNumber": "urn:uuid:56591366-f05c-583e-97fe-7b0358817a50"
+}

@@ -56,6 +56,26 @@ disagreeing is how a registry listing points at a version that does not exist.
 fails on a diff. Hand-editing it produces a build that is green locally and red
 in CI.
 
+`sbom.cdx.json` carries the version in four places, and only two of them are
+values `extra-files` can write:
+
+| Where                        | Shape                        |
+| ---------------------------- | ---------------------------- |
+| `metadata.tools[0].version`  | `"0.1.0"`                    |
+| `metadata.component.version` | `"0.1.0"`                    |
+| `metadata.component.bom-ref` | `"uvp-agents@0.1.0"`         |
+| `metadata.component.purl`    | `"pkg:npm/uvp-agents@0.1.0"` |
+
+A `jsonpath` entry replaces the whole value at its path, so it can update the
+first two and cannot update the last two without destroying them. That is why
+`sbom.cdx.json` is not in `extra-files`: the release PR has to run
+`npm run docs:generate` after the bump, which rewrites all four from
+`package.json` and re-derives the `serialNumber` from the result. Nothing is
+silently stale if that step is skipped — `docs:check` runs on every pull request
+and compares the file byte for byte, so the release PR is red until it is
+regenerated. The lane that drives release-please does not exist yet, so this is a
+requirement on it rather than a description of it.
+
 ## Changelog sections
 
 Commits are grouped by type. Everything is shown except `chore`:
@@ -104,10 +124,18 @@ saying so.
 | npm package        | `uvp-agents`                                                 |
 | MCP registry entry | `io.github.Antruly/uvp`                                      |
 | Tool catalog       | `docs/public/tool-catalog.json`, also shipped in the package |
+| Bill of materials  | `sbom.cdx.json`, also shipped in the package                 |
 | Documentation site | GitHub Pages, from `docs/.vitepress/dist/`                   |
 
 The tool catalog is generated from the contracts, so it describes the version it
 was built from and not the version someone remembered to update it for.
+
+`sbom.cdx.json` is CycloneDX 1.5 over the production dependency closure, written
+by `npm run sbom:generate` and covered by `npm run sbom:check`. It ships in the
+tarball alongside `THIRD_PARTY_NOTICES.md` and `licenses/npm-dependencies.json`,
+which are the two documents it agrees with and neither of which used to be in
+`files[]`. See [the bill of materials](roadmap.md#sbom) for what it establishes
+and what it does not.
 
 ## Pre-release checks
 
@@ -167,6 +195,15 @@ stand-in for a different checkout and it is a stand-in. The npm version is held
 by `packageManager` in `package.json`, and the check is a check about _this_
 toolchain's packing until someone runs it elsewhere.
 
+The same run also checks that the tarball delivers every path `files[]` names,
+because reproducibility says the tarball is a fact about its contents and says
+nothing about whether they are the right ones. An entry naming a path that no
+longer exists is ignored by npm in silence, so a package can promise a file it
+does not contain and pass every other check here; `THIRD_PARTY_NOTICES.md` was in
+that state until this release path was written down. The opposite mistake — a file
+that should ship and is not listed — remains a reviewer's, checked by the
+`files[]` item in the maintainer checklist below.
+
 ## Maintainer checklist
 
 Before merging a release PR:
@@ -176,6 +213,9 @@ Before merging a release PR:
 - [ ] Every breaking change is marked and has a migration note.
 - [ ] `files[]` in `package.json` still covers everything the package needs at
       runtime.
+- [ ] Every generated file is regenerated after the version bump — `npm run
+      docs:generate` — including `sbom.cdx.json`, whose root component and
+      `serialNumber` both change with the version.
 - [ ] The packaged install was run, not assumed.
 - [ ] `uvp --version` reports the new version after a packaged install.
 - [ ] The release PR's `Human owner:` line is filled in. See the

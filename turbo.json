@@ -126,6 +126,7 @@
         "scripts/generate-skill-metadata.mjs",
         "scripts/generate-error-schema.mjs",
         "scripts/licenses.mjs",
+        "scripts/sbom.mjs",
         "scripts/check-doc-facts.mjs",
         "scripts/lib/*.mjs",
         "src/contracts/**/*.ts",
@@ -140,6 +141,7 @@
         "CONTRIBUTING.md",
         "THIRD_PARTY_NOTICES.md",
         "licenses/**",
+        "sbom.cdx.json",
         {
           "mode": "dependencyOutputs",
           "globs": ["skills/**", "docs/public/tool-catalog.json", "docs/error-contract.schema.json"]

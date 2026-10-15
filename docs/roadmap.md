@@ -406,10 +406,10 @@ implicit.
 | ✅  | Every third-party `uses:` under `.github/` is pinned to a commit SHA with the release named beside it, and `npm run verify:actions` fails one that is not — or that pins the same action at two SHAs. Each SHA was resolved with `gh api repos/<owner>/<repo>/git/ref/tags/v4`, never from memory, and each `# vX.Y.Z` label read from the tag list. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ✅  | The packaged tarball is a fact about its contents: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — and fails if any digest differs. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ✅  | The packaged tarball is a fact about its contents and a promise about them: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — fails if any digest differs, and fails when a path `package.json`'s `files[]` names is not delivered. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. It also found that no tarball had ever contained `THIRD_PARTY_NOTICES.md`, which tells a redistributor to keep it. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                               |
 | ✅  | A published docs page was an empty shell: `docs/roadmap.md` quoted a GitHub workflow expression in an inline code span, Vue read its braces as an interpolation, the render threw, and VitePress logged the error and **exited 0** — so CI stayed green while the roadmap page shipped with no content in it, 16 KB against 73 KB for `testing.html`. The expression is escaped now, and `npm run verify:docs-interpolation` fails the next one, asking `docs/.vitepress/config.ts` which files are pages rather than restating its `srcExclude`. See [below](#docs-interpolation)                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ✅  | The documentation told a reader to run six commands that do not exist, and the licence inventory it pointed at for the dependency set was stale in the commit that imported it — 24 packages and 5 direct dependencies recorded against a `package.json` declaring 3. Nothing read either, because nothing ran the generator. Both are checked now, and each new rule is measured against known text before it is trusted. See [below](#dependency-inventory)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ⬜  | An SBOM in the release artifacts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ✅  | An SBOM in the release artifacts: `sbom.cdx.json` is CycloneDX 1.5 over the production npm closure, written by `npm run sbom:generate`, compared byte for byte by `npm run sbom:check` inside `docs:check`, and shipped in the tarball along with `THIRD_PARTY_NOTICES.md` and `licenses/npm-dependencies.json`, neither of which any tarball had contained. `npm sbom` was measured before it was rejected: under `--omit dev` it omits `zod`, a declared dependency a user installs; without it, it describes ~300 dev tools; and reading a tree describes this host's stale `node_modules`. The closure walk is shared with the licence file now, so the two cannot disagree. See [below](#sbom)                                                                                                                                                                                                                                                                                                                                               |
 | ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ✅  | A link failure has a diagnostic format here, written from captures of real ones rather than from a plausible-looking log: `ld: cannot find -luvcpp`, gold's `ld.gold: error: cannot find -luvcpp`, a located `undefined reference to` naming the symbol and the caller's own source line, the same reference in a build with no debug information where only a section offset is left to name, a `multiple definition of` with its "first defined here" trail, and the driver's `collect2: error: ld returned 1 exit status` — which is held back until the whole scan is read, so a link failure the linker stated plainly does not print twice. All of them answer `phase: "link"`, the phase the contract has had since the beginning with nothing producing it. The same captures found the other half: `ld` and GNU Make translate their messages, so on a `zh_CN.UTF-8` host this failure reads `找不到 -luvcpp` and matches nothing — every build subprocess now runs with the language its output is read in. See [below](#link-failures) |
 | ⬜  | `decodeBody` answers `decoded_as_text: true` with text that is not the response's bytes when a peer declares a text content type and sends something that is not UTF-8: `Buffer.from([0x48, 0x69, 0xff])` becomes `"Hi\uFFFD"`, which re-encodes to three different bytes, and no field in the output says so. The WebSocket half of the repository names the same condition (`text_omitted: "invalid-utf8"`). Not fixed alongside, because "refuse to call it text when a re-encode differs" also refuses every body truncated mid-character — the ordinary case for a body cut to `max_body_bytes`, and not the peer's doing — so the two have to be told apart first. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                    |
@@ -1529,13 +1529,157 @@ without it, which is why all three packs pass `--ignore-scripts`: a copy of the
 tarball's contents has no `node_modules` for `husky` to run in, and holding that
 constant keeps one thing varying at a time.
 
+**The check had a second claim to make, and it was found by fixing this one.** A
+path named in `files[]` that no longer exists is ignored by npm in silence: the
+tarball packs reproducibly, contains everything else, and simply lacks the file
+the package promised. `THIRD_PARTY_NOTICES.md` was in exactly that state — the
+document instructs a redistributor to keep it and the `LICENSE` alongside, and no
+tarball had ever contained it — as was `licenses/npm-dependencies.json`. So the
+same run now requires every `files[]` entry to be delivered: a file entry by
+appearing in the listing, a directory entry by delivering something beneath it,
+and an entry naming nothing in the repository a failure that prints the path.
+Probed by adding an entry for a file npm does not pack (`package-lock.json`), by
+adding an entry for a path that does not exist, and by adding an empty directory;
+the first two named the entry, and the empty directory failed on delivering
+nothing. The opposite direction — a file that should ship and is not listed — is
+not decidable here, because no script knows which paths belong in the package, so
+it stays a reviewer's question and is written down as one.
+
 **What is not established, and what a pass therefore does not say.** Another
 machine, another npm version, another filesystem: the unpacked copy is the
 closest local stand-in for a different checkout and it is a stand-in, not a second
 host. So the honest reading of a green run is "packaging is a function of the
-contents on this toolchain", not "anyone can reproduce this digest". Nothing else
-in the release path is pinned either — no SBOM, and no lane that installs the
-tarball on a second platform; both remain rows above.
+contents on this toolchain", not "anyone can reproduce this digest". No lane
+installs the tarball on a second platform, which remains a row above; what the
+tarball _contains_ is no longer only a count, and is described
+[below](#sbom).
+
+### The bill of materials {#sbom}
+
+A release artifact should carry a machine-readable inventory of what is in it.
+This repository had two descriptions of its dependencies and neither could be read
+by a tool: a hand-written table in `THIRD_PARTY_NOTICES.md` and a generated
+`licenses/npm-dependencies.json` whose shape is this project's own. Nothing
+produced CycloneDX or SPDX, so nothing could be handed to a scanner.
+
+**The obvious implementation is `npm sbom`, and it was measured before it was
+used.** On npm 11.19.0, with this repository's lockfile:
+
+| Invocation                          | Components            | Root `dependsOn`         |
+| ----------------------------------- | --------------------- | ------------------------ |
+| `--omit dev` (reads `node_modules`) | 20, from a stale tree | `server`, `canonicalize` |
+| `--omit dev --package-lock-only`    | 3                     | `server`, `canonicalize` |
+| `--package-lock-only`, no omit      | ~300 dev tools        | 17                       |
+
+Three separate problems, each enough on its own:
+
+- **`--omit dev` drops `zod`.** `zod` 4.4.3 is in `package.json#dependencies`, its
+  lockfile entry carries no `dev` flag, `@modelcontextprotocol/server` and
+  `@modelcontextprotocol/core` both declare `zod: ^4.2.0`, and the installed
+  `node_modules/.package-lock.json` agrees. It is absent from `components`, from
+  every `dependsOn` edge, and from `dependencies` alike. An artifact bill of
+  materials that omits a dependency the user installs is the one error this file
+  could make that actively misleads. Why that flag drops it is **not**
+  established — a minimal reproduction was not built, and the only correlate
+  measured is that `zod` is the sole production package that dev-only packages
+  also need.
+- **Without `--omit dev`** it describes the build machine: every linter, test
+  runner and docs tool, ~300 packages, none of which a user receives.
+- **Reading a tree at all** describes this host's `node_modules`, which is stale
+  here: it still lists `@modelcontextprotocol/client`, a package `npm ls` itself
+  reports as `extraneous` and the lockfile no longer resolves.
+
+There is a fourth, which decides the shape of the code rather than the choice of
+producer: an npm without the subcommand — 9.2.0 at `/usr/bin/npm` on this host —
+prints `Unknown command: "sbom"` **on stdout and exits 0**. So a generator that
+shelled out would have to parse the output to know a document was produced, which
+means it was already reading the document and not the exit status.
+
+**So the producer is this repository's, and it shares the walk.** The closure
+moved to `scripts/lib/productionClosure.mjs`, which both `scripts/licenses.mjs`
+and `scripts/sbom.mjs` read. Two generators describing one set of packages with
+two walkers is two answers waiting to disagree, and the disagreement would be
+invisible: both files would still parse. The extraction is checked by the licence
+file regenerating byte-identically, which it does.
+
+**What the file says.** CycloneDX 1.5, in the field shapes `npm sbom` emits rather
+than shapes invented here, so a consumer sees nothing unusual: a `metadata`
+component for the root, one `components` entry per package with its `purl`,
+distribution URL, SHA-512 and licence, and a `dependencies` edge list. Four
+components, three of them direct. `purl` percent-encodes a scope's `@` and leaves
+the `/` alone, which is the detail a hand-written encoder gets wrong; it is
+asserted against a known input rather than checked by eye.
+
+**Two fields make it reproducible.** `npm sbom` differs between runs in exactly
+two places — `serialNumber` and `metadata.timestamp`. A committed generated file
+that differs from itself cannot be checked by comparison, so neither is copied:
+`metadata.timestamp` is omitted, and `serialNumber` is derived from the document's
+own bytes (RFC 4122 §4.3 name-based, version 5, over the standard URL namespace).
+The same closure always mints the same UUID; a changed closure always mints a
+different one. Three consecutive runs produced the same SHA-256, measured rather
+than asserted. What says _which_ tree the file describes is
+`metadata.properties`, which records the lockfile's own SHA-512 and its
+`lockfileVersion`.
+
+**It found a packaging gap on the way.** `THIRD_PARTY_NOTICES.md` tells a
+redistributor to keep the file and the `LICENSE` alongside it, and the file was
+not in `files[]`, so no tarball had ever contained it. `licenses/npm-dependencies.json`
+was missing for the same reason. Both now ship, measured with `npm pack --dry-run`
+rather than assumed: 84 entries, all three present.
+
+**The version coupling is a requirement on a lane that does not exist.**
+`sbom.cdx.json` carries the version in four places, and two of them —
+`metadata.component.bom-ref` and `.purl` — are compound strings that
+release-please's `extra-files` `jsonpath` updater cannot write, since it replaces
+the whole value at its path. So the file is deliberately absent from
+`extra-files`, and the release PR is required to regenerate it. That is safe
+rather than fragile: `docs:check` runs on every pull request and compares the file
+byte for byte, so a version bump that skips `npm run docs:generate` is a red pull
+request, not a released artifact describing a version it is not.
+
+**Verified one mutation at a time:** a component dropped from the document, an
+edge dropped so a component hangs off the graph, a duplicated `bom-ref`, a
+`specVersion` that no longer matches the claim, a purl rule broken, the version
+nibble of the derived UUID forced to 4, a manifest with no `name`, a lockfile with
+no `packages` map, a component with no version, an empty closure, and `--check`
+against a deliberately stale committed file. Each failed with a message naming the
+disagreement, and an added stray top-level key still passed, which is the control
+that says the guards are not simply refusing everything.
+
+**That probing found a defect in the guard itself**, which is the part worth
+recording. The first version of the structural check read the `components` array
+the document was built _from_ rather than `document.components`, so the mutation
+that dropped a component from the document passed a check that was supposed to
+catch exactly that. The guard now reads the document it guards, and the mutation
+that found it is in the list above. Writing the rules also surfaced a second
+defect before anything was committed: `npm sbom --omit dev --package-lock-only`
+takes 0.2 s here, so asking the tool and printing where it disagrees costs nothing
+in generate mode — and the divergence is printed rather than asserted, because on
+a host without the subcommand the answer is "not read", not "agreement".
+
+**Schema validity was measured once, by hand, and is not a gate.** The document
+validates against the published CycloneDX 1.5 JSON schema: `ajv-cli` in draft-07
+mode, the three schema files fetched from `cyclonedx.org`, exit 0. It is not wired
+into the gate because a JSON Schema validator is not a dependency of this
+repository and the schema would have to be fetched, which no other check does. So
+the in-repo checks are named as what they are — structural invariants a change is
+likely to break, with `bom-ref` uniqueness and a dependency graph whose every
+reference resolves among them — and a green gate says the document still has the
+shape it was validated with, not that it is still schema-valid.
+
+**What this does not establish.** The closure is the production npm dependencies
+and nothing else: libuvcpp is deliberately absent, because uvp does not bundle,
+link or redistribute it — the generated projects link an installation the user
+supplies, which is `THIRD_PARTY_NOTICES.md`'s subject rather than this file's.
+Edges are followed through `dependencies` alone, because
+`optionalDependencies` are platform-conditional and the lockfile lists every
+platform's build of a native package; a package that declares them is named in a
+`properties` entry instead of being guessed at, and no package in the closure does
+today. A package requested under an alias (`npm:other@1`) is recorded under the
+name it installed at, which is read from the lockfile location, and no alias is
+present today. The file describes what installing the package brings, not what
+those packages do at runtime, and it is not a vulnerability report: nothing here
+compares a component against an advisory database.
 
 ### A published page Vue rendered empty {#docs-interpolation}
 

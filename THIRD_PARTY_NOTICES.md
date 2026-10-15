@@ -85,3 +85,12 @@ the resolved lockfile, and this file explains the intent behind the choices.
 CI runs — also checks the table above against `package.json` and
 `package-lock.json`: a dependency added or removed without a row here is a build
 failure rather than something a reviewer has to notice.
+
+For a machine-readable inventory in a format other tools read, `sbom.cdx.json` is
+CycloneDX 1.5 over the same closure, written by `npm run sbom:generate`. It covers
+the npm package. It does not cover libuvcpp, which uvp neither bundles nor
+redistributes, and it is an inventory rather than a vulnerability report.
+
+All three files ship with the package, which is what makes the paragraph above
+actionable: `THIRD_PARTY_NOTICES.md`, `licenses/npm-dependencies.json` and
+`sbom.cdx.json` are in `files[]` in `package.json`.

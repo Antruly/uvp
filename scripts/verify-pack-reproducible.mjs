@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -92,6 +92,22 @@ import { REPO_ROOT } from "./lib/paths.mjs";
  * lie this file exists to prevent. The unbuilt-tree test is made against the
  * tarball's own listing rather than a guessed filename, so a renamed output does
  * not quietly turn the check off.
+ *
+ * ## What `files[]` promises, and the one direction this checks
+ *
+ * Reproducibility says the tarball is a fact about its contents; it says nothing
+ * about whether those contents are the right ones. A `files[]` entry naming a
+ * path that no longer exists ships nothing and fails nothing — npm ignores it —
+ * which is how `THIRD_PARTY_NOTICES.md` came to tell a redistributor to keep a
+ * file that no tarball had ever contained.
+ *
+ * So every entry in `files[]` is required to be delivered: a file entry must
+ * appear in the listing, a directory entry must deliver something beneath it, and
+ * an entry naming nothing in the repository is a failure with the path printed.
+ * That is the direction that can be decided here. The other direction — a file
+ * that should ship and is not listed — is a policy question about a path no
+ * script can know belongs in the package, so it stays a reviewer's, and the
+ * page that names the release artifacts is where it is written down.
  */
 
 const run = promisify(execFile);
@@ -132,6 +148,56 @@ const entriesOf = async (tarball) => {
 const unpack = async (tarball, directory) => {
   await mkdir(directory, { recursive: true });
   await run("tar", ["xzf", tarball, "-C", directory, "--strip-components=1"]);
+};
+
+/**
+ * Fail when a path `files[]` names is not delivered by the tarball.
+ *
+ * A directory entry promises a subtree and a file entry promises itself, which is
+ * the distinction npm makes and the reason each entry is stat'ed rather than
+ * guessed at by its spelling. An entry that names nothing in the repository is
+ * its own failure: it ships nothing, fails nothing, and reads as a package that
+ * contains something it does not.
+ */
+const requireFilesDelivered = async (root, entries) => {
+  const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const declared = manifest.files ?? [];
+  if (declared.length === 0) {
+    throw new Error(
+      "package.json declares no `files[]`, so npm's defaults decide the tarball and nothing here can check them.",
+    );
+  }
+
+  const packaged = entries.map((entry) => entry.replace(/^package\//u, ""));
+  const missing = [];
+  for (const name of declared) {
+    const target = name.replace(/\/+$/u, "");
+    let stats;
+    try {
+      stats = await stat(path.join(root, target));
+    } catch {
+      missing.push(`\`${name}\` is not in the repository, so no tarball can contain it`);
+      continue;
+    }
+    const delivered = stats.isDirectory()
+      ? packaged.some((entry) => entry.startsWith(`${target}/`))
+      : packaged.includes(target);
+    if (!delivered)
+      missing.push(`\`${name}\` is declared in \`files[]\` and absent from the tarball`);
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      [
+        `package.json's \`files[]\` promises ${String(declared.length)} path(s) and the tarball delivers fewer:`,
+        ...missing.map((line) => `  - ${line}`),
+        "A redistributor reading the notices file, or a scanner reading the bill of materials, would be handed a package that does not contain it.",
+      ].join("\n"),
+    );
+  }
+  console.log(
+    `pack contents: all ${String(declared.length)} path(s) in \`files[]\` are delivered by ${String(entries.length)} entries`,
+  );
 };
 
 const short = (digest) => digest.slice(0, 12);
@@ -197,6 +263,11 @@ const main = async () => {
         ].join(" "),
       );
     }
+
+    // The other half of "the tarball is right": reproducibility says it is a fact
+    // about its contents, and this says those contents include what the package
+    // promises to ship.
+    await requireFilesDelivered(REPO_ROOT, entries);
 
     // Seconds later, into a different directory: neither the moment nor the
     // destination is an input.

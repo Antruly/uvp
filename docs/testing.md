@@ -706,13 +706,32 @@ question without a second implementation of npm's file selection. It needs
 [the roadmap](roadmap.md#pack-reproducibility) for what it does and does not
 establish.
 
+The same script checks the other half of the same claim: every path
+`package.json`'s `files[]` names has to be delivered by the tarball — a file entry
+by appearing in it, a directory entry by delivering something beneath it — and an
+entry naming nothing in the repository is a failure with the path printed. npm
+ignores such an entry in silence, which is how `THIRD_PARTY_NOTICES.md` came to
+tell a redistributor to keep a file that no tarball had ever contained. The
+opposite direction — a file that should ship and is not listed — is a policy
+question rather than a decidable one, and stays a reviewer's.
+
 **Generated files.** The tool catalog, package metadata, skill metadata, error
-schema, and the licence inventory under `licenses/` are generated from source. CI
-regenerates them and fails on a diff, so a stale generated file is a build
-failure rather than a review comment. The licence inventory is the one whose
-input is `package-lock.json` rather than `src/`, and it had drifted by twenty
+schema, the licence inventory under `licenses/` and `sbom.cdx.json` are generated
+from source. CI regenerates them and fails on a diff, so a stale generated file is
+a build failure rather than a review comment. The licence inventory is the one
+whose input is `package-lock.json` rather than `src/`, and it had drifted by twenty
 packages — the script existed and nothing ran it. See
 [the roadmap](roadmap.md#dependency-inventory) for what that cost.
+
+`sbom.cdx.json` reads the same lockfile and shares one closure walk with the
+licence inventory, in `scripts/lib/productionClosure.mjs`, so "what ships" is one
+interpretation rather than two. It is CycloneDX 1.5, and its own generator carries
+two kinds of guard: the rules that could stop matching (purl encoding, the UUID
+derivation, the integrity decoder) are run against inputs whose answers are known,
+and the document's structural invariants — a unique `bom-ref` per component, a
+dependency graph in which every reference resolves, no component the graph does not
+name — are asserted before it is written. Neither is schema validation; see
+[the roadmap](roadmap.md#sbom) for what was validated by hand and is not a gate.
 
 **Instructions, not only facts.** `scripts/check-doc-facts.mjs` also reads the
 pages as instructions: every `npm run <name>` a page tells a reader to run has to

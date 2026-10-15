@@ -13,6 +13,7 @@
     "package-lock.json",
     "third_party/**",
     "licenses/**",
+    "sbom.cdx.json",
     "tests/fixtures/**",
     "skills/**",
     "src/generatedPackageMetadata.ts",

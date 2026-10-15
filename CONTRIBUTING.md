@@ -181,8 +181,8 @@ npm run docs:generate
 ```
 
 That one command regenerates every derived file — the package metadata, the tool
-catalog, the shipped skills, the error-contract schema and the licence
-inventory — and `npm run docs:check` fails when any of them is stale.
+catalog, the shipped skills, the error-contract schema, the licence inventory and
+the bill of materials — and `npm run docs:check` fails when any of them is stale.
 
 ### Working on the C++ side
 
@@ -225,9 +225,16 @@ hand — edit `src/contracts/` and regenerate.
 | `skills/`                         | `npm run artifacts:skills`       |
 | `docs/error-contract.schema.json` | `npm run artifacts:error-schema` |
 | `licenses/npm-dependencies.json`  | `npm run licenses:generate`      |
+| `sbom.cdx.json`                   | `npm run sbom:generate`          |
 
-`npm run docs:check`, `npm run tool-catalog:check` and `npm run licenses:check`
-fail when a generated file is stale, so CI catches a manual edit.
+The licence inventory and the bill of materials describe the same set of
+packages, so they share one walk over `package-lock.json` —
+`scripts/lib/productionClosure.mjs`. Change it once, in one place; a second walk
+is a second answer waiting to disagree.
+
+`npm run docs:check`, `npm run tool-catalog:check`, `npm run licenses:check` and
+`npm run sbom:check` fail when a generated file is stale, so CI catches a manual
+edit.
 
 ## Validation
 
