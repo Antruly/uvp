@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -41,7 +42,8 @@ const requireIn = (text, needle, { file, why }) => {
  * contracts page, and the CLI page. All three are checked against the contracts,
  * which is the only place either is defined.
  */
-const DOC_PAGES_WITH_TOOLS = ["README.md", "docs/mcp-contracts.md"];
+const README_PAGES = ["README.md", "docs/readme/README_zh.md"];
+const DOC_PAGES_WITH_TOOLS = [...README_PAGES, "docs/mcp-contracts.md"];
 
 for (const file of DOC_PAGES_WITH_TOOLS) {
   const text = await read(file);
@@ -50,22 +52,72 @@ for (const file of DOC_PAGES_WITH_TOOLS) {
   }
 }
 
+/**
+ * Identifiers are not translated.
+ *
+ * The Chinese README is a translation of the English one, and what survives
+ * translation is exactly the part a reader copies into a shell: tool names,
+ * template ids, feature names, the libuvcpp floor. A rename that lands in one
+ * README and not the other leaves a reader running a command that does not
+ * exist, and it is the one kind of drift between two translations that is
+ * checkable without reading Chinese. The tool *count* is checked in the English
+ * README only — the translation gives that number as prose about the templates.
+ */
+for (const file of README_PAGES) {
+  const text = await read(file);
+  for (const template of TEMPLATE_IDS) {
+    requireIn(text, template, { file, why: "every template must be listed" });
+  }
+  for (const feature of UVP_FEATURES) {
+    requireIn(text, feature, { file, why: "every feature must be listed" });
+  }
+  requireIn(text, LIBUVCPP_BASELINE, { file, why: "the libuvcpp baseline must be stated" });
+}
+
 {
   const readme = await read("README.md");
   requireIn(readme, String(TOOL_CONTRACTS.length), {
     file: "README.md",
     why: `the README states the tool count, which is currently ${TOOL_CONTRACTS.length}`,
   });
-  for (const template of TEMPLATE_IDS) {
-    requireIn(readme, template, { file: "README.md", why: "every template must be listed" });
+}
+
+/**
+ * A status claim names the lane that backs it.
+ *
+ * The Current status section is the summary a new user reads first, and it has
+ * gone stale here before: the CLI and the MCP server were built and verified by
+ * boundary lanes while the section still listed both as "in progress", which is
+ * how a reader ends up not trying the thing that already works.
+ *
+ * Prose about status is not checkable — "in progress" means whatever the
+ * sentence around it means, and a checker that guessed at it would produce the
+ * false failures this file exists to avoid. So it checks the part that is
+ * mechanical: the section names the file that would fail if the claim stopped
+ * being true, and that file is there. Move or rename a lane and the docs gate
+ * fails, instead of the README going on to assert something nothing checks.
+ */
+const STATUS_EVIDENCE = [
+  "tests/boundary/cli/cliContract.test.ts",
+  "tests/boundary/mcp/mcpSurface.test.ts",
+];
+
+for (const file of README_PAGES) {
+  const text = await read(file);
+  for (const evidence of STATUS_EVIDENCE) {
+    requireIn(text, evidence, {
+      file,
+      why: "the status section names the lane that verifies the surface it calls built",
+    });
   }
-  for (const feature of UVP_FEATURES) {
-    requireIn(readme, feature, { file: "README.md", why: "every feature must be listed" });
+}
+
+for (const evidence of STATUS_EVIDENCE) {
+  if (!existsSync(path.join(REPO_ROOT, evidence))) {
+    failures.push(
+      `${evidence} is named in both READMEs as the evidence for a status claim, and is not there.`,
+    );
   }
-  requireIn(readme, LIBUVCPP_BASELINE, {
-    file: "README.md",
-    why: "the libuvcpp baseline must be stated",
-  });
 }
 
 /**

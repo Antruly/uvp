@@ -3,6 +3,12 @@
 Releases are cut by release-please from conventional commits. No one edits a
 version by hand, and no one tags by hand.
 
+This page describes how a release is meant to be cut, and the parts of it that
+exist are the configuration (`release-please-config.json`), the changelog rules,
+and the gate on pull request titles. The workflow that would run release-please
+does not exist yet, so no release has been cut — see
+[Pre-release checks](#pre-release-checks).
+
 ## The flow
 
 1. A pull request merges to `main` with a conventional-commit title.
@@ -105,7 +111,11 @@ was built from and not the version someone remembered to update it for.
 
 ## Pre-release checks
 
-The `release` lane runs before publish and will not publish otherwise:
+These are the pre-release checks. Nothing runs them on your behalf yet: the
+configuration below is in place but the workflow that would drive it is not
+written, so no release has been cut and every step here is a thing a maintainer
+does by hand. The intent is a lane that fails closed — nothing publishes if any
+of this fails:
 
 ```bash
 npm ci

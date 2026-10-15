@@ -160,12 +160,23 @@ uvp 尚未发布 1.0，正在积极建设中。说清楚这意味着什么，比
 package 时走 `find_package(uvcpp 1.7.0 CONFIG)`，不存在时回退到 `pkg-config`
 —— 因为预编译发布包只带后者、不带前者。两条路径都会强制校验版本下限。
 
-**进行中。** CLI 与 MCP 适配层，以及 provider 抽象 —— 它将允许构建发生在容器里
-或通过 SSH 进行，而不仅限于本机。provider 的**端口（port）**已经定义，
-local provider 已实现；其余 provider 尚未编写。
+CLI 与 MCP 服务端都已经建好，而且两者都是作为**进程**被检验，而不是作为模块：
+`tests/boundary/cli/cliContract.test.ts` 运行 CLI，检查它打印出什么、以什么码退出；
+`tests/boundary/mcp/mcpSurface.test.ts` 用 stdio 协议与服务端对话。CI 随后会把打包好的
+tarball 装进一个空 prefix，再从安装后的副本执行 CLI 的首批命令和 MCP 握手 ——
+`files[]` 里漏了文件，就是在这里暴露出来的。
 
-**尚未开始。** 发布自动化、容器与远程工具链 provider，
-以及那个让生成的服务能通过 libuvcpp 的 C ABI 暴露自身埋点的 C++ 原生探测模块。
+**进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
+对任何服务都能用，不只对 uvp 生成的。它唯一还缺的是原生探测模块
+（`uvcpp-probe.node`），那个模块会让 WebSocket 检查走 libuvcpp 自己的协议栈，
+而不是走一个碰巧说同一种协议的 Node 客户端。工具链 provider 的
+**端口（port）**已经定义，`local` provider 已实现；容器与远程 SSH provider 尚未编写。
+
+**尚未开始。** 发布自动化：`release-please-config.json` 和针对 PR 标题的
+传统提交（Conventional Commits）门禁都已经存在，但还没有任何工作流去跑它们，
+所以至今没有切过版本，包只能从 clone 或 tarball 安装。同样还没有的，
+是路线图里列出的加固项 —— Windows 通道、把 GitHub Actions 固定到 SHA、
+可复现的 tarball、SBOM。
 
 计划中的内容见[路线图](../roadmap.md)，已有的测试通道见[测试指南](../testing.md)。
 

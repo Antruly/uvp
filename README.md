@@ -171,14 +171,27 @@ where a CMake package exists and via `pkg-config` where it does not, because the
 prebuilt release archives ship the latter and not the former. The version floor
 is enforced on both routes.
 
-**In progress.** The CLI and MCP adapters, and the provider abstraction that
-would let a build run in a container or over SSH rather than only on the local
-machine. The provider _port_ is defined and the local provider implements it;
-the other providers are not written.
+The CLI and the MCP server are both built, and both are exercised as processes
+rather than as modules: `tests/boundary/cli/cliContract.test.ts` runs the CLI and
+checks what it prints and what it exits with, and
+`tests/boundary/mcp/mcpSurface.test.ts` speaks the stdio protocol to the server.
+CI then installs the packed tarball into an empty prefix and runs the CLI's first
+commands and the MCP handshake from the installed copy, which is where a file
+missing from `files[]` shows up.
 
-**Not started.** Release automation, the container and remote toolchain
-providers, and the C++ native probe module that would let a generated service
-expose its own instrumentation over libuvcpp's C ABI.
+**In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
+test, capture, assertions — works against any service, not only ones uvp
+generates. What it still lacks is the native probe module (`uvcpp-probe.node`),
+which would drive a WebSocket check through libuvcpp's own stack rather than
+through a Node client that happens to speak the same protocol. The toolchain
+provider _port_ is defined and the `local` provider implements it; the container
+and remote-SSH providers are not written.
+
+**Not started.** Release automation: `release-please-config.json` and the
+conventional-commit gate on pull request titles exist, but nothing runs them yet,
+so no version has been cut and the package is installed from a clone or a
+tarball. Also ahead: the hardening items the roadmap tracks — a Windows lane,
+SHA-pinned actions, a reproducible tarball, an SBOM.
 
 See the [roadmap](docs/roadmap.md) for what is planned and the
 [testing guide](docs/testing.md) for which lanes exist.
