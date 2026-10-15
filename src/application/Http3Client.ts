@@ -363,10 +363,18 @@ const http3Failure = (
             ? `uvp's native probe cannot make HTTP/3 requests on this host: ${outcome.reason}.`
             : `Whether the native probe can make HTTP/3 requests on this host could not be determined: ${outcome.reason}.`,
         remediation: {
+          // Both the switches and the fallbacks, because "this host has no probe"
+          // and "this host has a probe whose libuvcpp had no HTTP/3" arrive here as
+          // the same state with different remedies, and which one it is lives in
+          // `reason` — the probe's own sentence when it was the probe that
+          // answered. Naming only `npm run build:native-probe` would send the second
+          // caller round a loop that rebuilds the same binary, since the missing
+          // part is in the install that build is pointed at.
           action:
-            "Build the probe with `npm run build:native-probe` — it needs a C++ toolchain and a " +
-            "libuvcpp built with UVCPP_ENABLE_CAPI=ON — point UVP_NATIVE_PROBE at one you have, or " +
-            "ask over HTTP/1.1 or HTTP/2 instead.",
+            "Build the probe against a libuvcpp with UVCPP_ENABLE_CAPI=ON, UVCPP_ENABLE_HTTP3=ON " +
+            "and UVCPP_ENABLE_QUIC=ON (`npm run build:native-probe`) — an install without the " +
+            "HTTP/3 C ABI gives a probe with the WebSocket exchange only — point UVP_NATIVE_PROBE " +
+            "at a probe you have, or ask over HTTP/1.1 or HTTP/2 instead.",
         },
         details: {
           state: outcome.state,

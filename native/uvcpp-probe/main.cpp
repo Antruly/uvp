@@ -19,6 +19,13 @@
  *
  * One process, one request, one report. A caller that wants both runs it twice.
  *
+ * The HTTP/3 half is built only against an install that has the HTTP/3 C ABI, so
+ * which exchanges a given binary has is a property of *the build* and not of this
+ * source. `--version` reports both answers: `exchanges`, the list it can run, and
+ * `unavailable_exchanges`, the reason for a name it cannot — because the remedy
+ * for a missing exchange is sometimes a different libuvcpp rather than a rebuild,
+ * and a caller cannot tell those apart from a list with a gap in it.
+ *
  * Four shape decisions, all of them about being able to trust what comes back:
  *
  *   - **It is a process, not an addon.** A native addon would run inside the MCP
@@ -65,8 +72,10 @@
 /** Run one WebSocket exchange. Defined in `websocket_exchange.cpp`. */
 namespace probe {
 int runWebSocket(const json& request);
+#ifdef UVCPP_PROBE_HTTP3_EXCHANGE
 /** Run one HTTP/3 exchange. Defined in `http3_exchange.cpp`. */
 int runHttp3(const json& request);
+#endif
 }  // namespace probe
 
 namespace probe {
@@ -162,14 +171,74 @@ int fail(int code, const std::string& message) {
   return code;
 }
 
-/** The exchanges this build can run, in the order the header comment lists them. */
+/** The exchanges this build can run, in the order the header comment lists them.
+ *
+ *  `http3` is here only when the translation unit that implements it was compiled,
+ *  which the build decides from the install it was pointed at. A build that could
+ *  not compile it must not list it: an exchange named here and dispatched to
+ *  nothing is the same defect as a report about a transport nobody used. */
+#ifdef UVCPP_PROBE_HTTP3_EXCHANGE
 constexpr const char* kExchanges[] = {"websocket", "http3"};
+#else
+constexpr const char* kExchanges[] = {"websocket"};
+#endif
 
 /** A list of names as a JSON array. A loop rather than `json::array(a, b)`, which
  *  is not a range constructor — nlohmann's `array()` takes an initializer list. */
 json namesJson(const char* const* names, size_t count) {
   json out = json::array();
   for (size_t index = 0; index < count; ++index) out.push_back(names[index]);
+  return out;
+}
+
+/**
+ * Why this build has no exchange of that name, for the ones it knows it lacks.
+ *
+ * The exchange list already says *that* an exchange is missing, and a caller that
+ * saw only the list would do the reasonable thing and rebuild the probe — which
+ * cannot work here, because what is missing is in the libuvcpp install rather than
+ * in this program. So the reason travels with the list: a caller needs to be told
+ * to change the install, not to repeat a build that will produce the same binary.
+ *
+ * It says what this binary knows and no more. What it knows is that it was not
+ * compiled with the http3 translation unit, because the build's own compile check
+ * against the install did not find the HTTP/3 C ABI — an install configured with
+ * `-DUVCPP_ENABLE_HTTP3=OFF`, or one that does not ship those headers. It does not
+ * know why that check failed: it cannot see the include directory of the install it
+ * was built against, and by the time it runs, the library beside it may not even be
+ * the one it was compiled against. So the sentence names the build-time fact and
+ * the likely cause, and lets the caller check the install rather than asserting
+ * what is on its disk.
+ *
+ * Empty for `websocket` (always built) and for a probe built against an install
+ * that has HTTP/3 (which has nothing to explain).
+ */
+std::string unavailableReason(const std::string& exchange) {
+#ifndef UVCPP_PROBE_HTTP3_EXCHANGE
+  if (exchange == "http3") {
+    return "this probe was built without the http3 exchange: the libuvcpp install it was "
+           "compiled against did not expose the HTTP/3 C ABI, which is what an install "
+           "configured with -DUVCPP_ENABLE_HTTP3=OFF (or one whose HTTP/3 headers were not "
+           "installed) looks like; build libuvcpp with -DUVCPP_ENABLE_HTTP3=ON and "
+           "-DUVCPP_ENABLE_QUIC=ON, then rebuild this probe against that install";
+  }
+#endif
+  (void)exchange;
+  return "";
+}
+
+/**
+ * The reasons above as the JSON object `--version` reports, keyed by exchange.
+ *
+ * Written even when it is empty, so that a caller can tell "this build has
+ * nothing unavailable" from a build that is too old to answer the question —
+ * `exchanges` alone could not, because a missing name and an unexplained name
+ * look the same in a list.
+ */
+json unavailableExchangesJson() {
+  json out = json::object();
+  const std::string reason = unavailableReason("http3");
+  if (!reason.empty()) out["http3"] = reason;
   return out;
 }
 
@@ -187,7 +256,8 @@ int main(int argc, char** argv) {
                {"header_abi_version", static_cast<int>(UVCPP_C_ABI_VERSION)},
                {"library_version",
                 uvcpp_c_version_string() == nullptr ? "" : uvcpp_c_version_string()},
-               {"exchanges", namesJson(kExchanges, sizeof(kExchanges) / sizeof(kExchanges[0]))}}));
+               {"exchanges", namesJson(kExchanges, sizeof(kExchanges) / sizeof(kExchanges[0]))},
+               {"unavailable_exchanges", unavailableExchangesJson()}}));
     return uvcpp_c_abi_version() == UVCPP_C_ABI_VERSION ? kExitOk : kExitCannotRun;
   }
 
@@ -211,9 +281,18 @@ int main(int argc, char** argv) {
 
   const std::string exchange = request.value("exchange", "websocket");
   if (exchange == "websocket") return runWebSocket(request);
+#ifdef UVCPP_PROBE_HTTP3_EXCHANGE
   if (exchange == "http3") return runHttp3(request);
+#endif
   // Refused rather than answered with a run of a different exchange: a caller that
   // asked for a transport this build cannot drive must not be handed a report about
   // another one, since nothing in that report would say so.
+  //
+  // The refusal repeats what `--version` says about a known-missing exchange, so a
+  // caller that skipped the availability check gets the same sentence rather than a
+  // second, vaguer one. It is the same sentence, from the same function — a copy
+  // here would be a second description of one fact.
+  const std::string reason = unavailableReason(exchange);
+  if (!reason.empty()) return fail(kExitBadRequest, reason);
   return fail(kExitBadRequest, "this probe does not have an exchange named " + exchange);
 }

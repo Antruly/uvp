@@ -192,6 +192,56 @@ describe("deciding whether the HTTP/3 probe can be used here", () => {
     }
   });
 
+  it("repeats the build's own reason when the probe was built without the exchange", async () => {
+    // The probe knows something this layer cannot: it asked a compiler, at build
+    // time, whether the install had the HTTP/3 C ABI, and it carries the answer.
+    // When it has one, that sentence is the finding — `npm run build:native-probe`
+    // is the wrong remedy for an install built without HTTP3, because repeating the
+    // build produces the same binary.
+    const said =
+      "this probe was built without the http3 exchange: the libuvcpp install it was compiled " +
+      "against did not expose the HTTP/3 C ABI";
+    const { runner } = runnerWith({
+      stdout: JSON.stringify({
+        probe: "uvcpp-capi",
+        abi_version: 1,
+        header_abi_version: 1,
+        library_version: "1.7.0",
+        exchanges: ["websocket"],
+        unavailable_exchanges: { http3: said },
+      }),
+    });
+    const availability = await runner.availability(SIGNAL);
+    expect(availability.state).toBe("unavailable");
+    if (availability.state === "unavailable") {
+      expect(availability.reason).toContain(said);
+      expect(availability.reason).not.toContain("build:native-probe");
+    }
+  });
+
+  it("keeps the generic sentence when the probe answered the list and gave no reason", async () => {
+    // An empty `unavailable_exchanges` is a probe that was asked and has nothing to
+    // explain, which is a different answer from a probe too old to have the field:
+    // the first falls back to the sentence about rebuilding, the second to the one
+    // about an exchange the build predates. Both are covered, because an
+    // implementation that read an empty object as "no answer" would collapse them.
+    const { runner } = runnerWith({
+      stdout: JSON.stringify({
+        probe: "uvcpp-capi",
+        abi_version: 1,
+        header_abi_version: 1,
+        library_version: "1.7.0",
+        exchanges: ["websocket"],
+        unavailable_exchanges: {},
+      }),
+    });
+    const availability = await runner.availability(SIGNAL);
+    expect(availability.state).toBe("unavailable");
+    if (availability.state === "unavailable") {
+      expect(availability.reason).toContain("can run websocket but not http3");
+    }
+  });
+
   it("does not run a probe at all when the stack is not available", async () => {
     const calls: RunProcessOptions[] = [];
     const runner = new NativeHttp3ProbeRunner({

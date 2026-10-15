@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { EXIT_OK, EXIT_WRONG } from "../../src/cli/exitCodes.js";
 import { NativeProbeRunner } from "../../src/toolchains/native/NativeProbeRunner.js";
+import { NativeHttp3ProbeRunner } from "../../src/toolchains/native/NativeHttp3ProbeRunner.js";
 import {
   buildWorkspace,
   cleanup,
@@ -75,6 +76,27 @@ const guard =
     : availability.state === "available"
       ? ""
       : `the native probe could not be located (${probeReason}) — build it with \`npm run build:native-probe\` against a libuvcpp installed with UVCPP_ENABLE_CAPI=ON`;
+
+/**
+ * The HTTP/3 half of the same question, asked of the exchange rather than the file.
+ *
+ * The file-level guard above answers "is there a probe binary". This answers "does
+ * this build of it have the http3 exchange", and those stopped being the same
+ * question when `native/uvcpp-probe` began compiling that half only against an
+ * install with the HTTP/3 C ABI: on a host whose libuvcpp was configured without
+ * HTTP3 the probe is complete for WebSocket and can never run h3, and the honest
+ * ending for the test below is a skip naming why rather than a failure that reads
+ * as a defect in uvp. The words are the probe's own — it is the only thing that
+ * asked a compiler about the install it was built against.
+ */
+const http3Availability = await new NativeHttp3ProbeRunner().availability(
+  new AbortController().signal,
+);
+
+const http3Guard =
+  http3Availability.state === "available"
+    ? ""
+    : `the native probe cannot run the http3 exchange (${http3Availability.state}: ${http3Availability.reason})`;
 
 /** The located binary, as a value. `describe.skipIf` is not a narrowing TS can see. */
 const probe = (): string => {
@@ -422,8 +444,10 @@ describe.skipIf(guard !== "")(
       TIMEOUT,
     );
 
-    it(
-      "completes an HTTP/3 exchange with a generated service, both legs answering alike",
+    it.skipIf(http3Guard !== "")(
+      http3Guard === ""
+        ? "completes an HTTP/3 exchange with a generated service, both legs answering alike"
+        : `completes an HTTP/3 exchange with a generated service — skipped: ${http3Guard}`,
       overQuic,
       // Larger than the file's default: this test pays for a template build that
       // compiles TLS, the QUIC stack and the h3 route table — several times the

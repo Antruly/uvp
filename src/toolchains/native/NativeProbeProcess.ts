@@ -426,9 +426,32 @@ export abstract class NativeProbeProcess {
       ? listed.filter((entry): entry is string => typeof entry === "string")
       : [];
     if (names.includes(this.exchange.name)) return undefined;
+    // The probe's own account of why it lacks the exchange comes first, because the
+    // remedy differs. `npm run build:native-probe` is the wrong instruction when what
+    // is missing is in the libuvcpp install — repeating the build produces the same
+    // binary — and only the build that produced this one knows which of the two it
+    // was, since it asked the compiler. The generic sentence below is what is left
+    // for a probe that reports its exchange list and no reason.
+    const ownReason = this.exchangeReason(report);
+    if (ownReason !== undefined) return ownReason;
     return names.length === 0
       ? `it was built before the ${this.exchange.name} exchange existed and does not report which exchanges it has; rebuild it with \`npm run build:native-probe\``
       : `it can run ${names.join(", ")} but not ${this.exchange.name}; rebuild it with \`npm run build:native-probe\``;
+  }
+
+  /**
+   * What `--version` said about why this exchange is not in the build, if anything.
+   *
+   * `unavailable_exchanges` is keyed by exchange name, and the field is written even
+   * when it is empty, so its presence and its content are two different answers: an
+   * absent field is a probe too old to be asked, and an empty object is a probe that
+   * has nothing missing. Only the second of those is read here as "no reason given".
+   */
+  private exchangeReason(report: RawReport): string | undefined {
+    const reasons = asObject(report["unavailable_exchanges"]);
+    if (reasons === undefined) return undefined;
+    const said = asString(reasons[this.exchange.name]);
+    return said === undefined || said === "" ? undefined : said;
   }
 
   /** Run a child, or turn "it would not start" into a sentence. */
