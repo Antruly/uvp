@@ -437,6 +437,29 @@ describe("the web primitives", () => {
   );
 
   it(
+    "sends a caller-supplied envelope verbatim rather than rebuilding one",
+    async () => {
+      // The input that decides what goes on the wire. Without this, a client
+      // that ignored `raw_envelope` and built an envelope from the (empty)
+      // parameters would pass every other SOAP assertion here — the call still
+      // succeeds, the response still parses, and the bytes a caller carefully
+      // wrote are gone. The fixture returns what it received inside CDATA, so
+      // the comparison is against the exact string, not a reconstruction.
+      const envelope =
+        '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">' +
+        '<soap:Body><Add xmlns="http://uvp.test/calc"><a>7</a><b>35</b></Add></soap:Body></soap:Envelope>';
+      const output = await call("uvp_soap_call", {
+        endpoint: `${fixture.origin}/soap/echo`,
+        soap_version: "1.1",
+        raw_envelope: envelope,
+      });
+      expectConforms("uvp_soap_call", output);
+      expect((output["body"] as { text?: string }).text).toContain(`<![CDATA[${envelope}]]>`);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "reports a successful SOAP call as success, with the envelope",
     async () => {
       const output = await call("uvp_soap_call", {

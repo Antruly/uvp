@@ -142,6 +142,29 @@ const server = createServer((request, response) => {
     setTimeout(() => json(response, 200, { slow: true }), 30_000).unref();
     return;
   }
+  if (route === "/redirect") {
+    // `to` defaults to /hello, so the common case is a hop that lands somewhere
+    // with a body to assert on.
+    const target = url.searchParams.get("to") ?? "/hello";
+    response.writeHead(302, { location: target, "content-length": "0" });
+    response.end();
+    return;
+  }
+  if (route === "/redirect-loop") {
+    // Points at itself: how many hops were taken is then the only difference
+    // between a client that stops and one that does not.
+    response.writeHead(302, { location: "/redirect-loop", "content-length": "0" });
+    response.end();
+    return;
+  }
+  if (route === "/delayed") {
+    // A route whose response is late by a stated amount, so a timing breakdown
+    // can be checked against a number the fixture chose rather than against
+    // whatever this host happened to do.
+    const ms = Number(url.searchParams.get("ms") ?? "0");
+    setTimeout(() => json(response, 200, { delayed: ms }), ms).unref();
+    return;
+  }
   if (route === "/soap") {
     const chunks = [];
     request.on("data", (chunk) => chunks.push(chunk));
@@ -156,6 +179,24 @@ const server = createServer((request, response) => {
       });
       response.end(response_);
       void body;
+    });
+    return;
+  }
+  if (route === "/soap/echo") {
+    // Answers with an envelope carrying the request body back verbatim, in a
+    // CDATA section so no escaping stands between the bytes sent and the bytes
+    // read back. This is how a caller can tell that a hand-written envelope
+    // went out unaltered rather than being rebuilt from parameters.
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      const received = Buffer.concat(chunks).toString("utf8");
+      const body = soapEnvelope(`<Echo><![CDATA[${received}]]></Echo>`);
+      response.writeHead(200, {
+        "content-type": "text/xml; charset=utf-8",
+        "content-length": Buffer.byteLength(body),
+      });
+      response.end(body);
     });
     return;
   }

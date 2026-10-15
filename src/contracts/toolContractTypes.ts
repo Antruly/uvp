@@ -133,7 +133,18 @@ export const defineTool = <Input extends z.ZodType, Output extends z.ZodType>(
   };
 };
 
-/** Tokens in a tool description that suggest undisclosed behaviour. */
+/**
+ * Tokens in a tool description that suggest undisclosed behaviour.
+ *
+ * Only the `writesFilesystem` vocabulary is scanned, by
+ * `toolContracts.test.ts`. The other two are here as the reading of what the
+ * words implicate, and are deliberately not applied: "call", "send", and
+ * "request" appear in descriptions of tools that touch no host — a SOAP call to
+ * loopback, an assertion over an exchange the session already recorded — so a
+ * keyword rule would fire on the wrong contracts. `network` is pinned there by
+ * an exact set instead. `spawnsProcess` has no cross-contract check; the
+ * declaration is read by a client, not by code.
+ */
 export const EFFECT_WORDS = {
   writesFilesystem: ["write", "create", "scaffold", "generate", "save", "delete", "remove"],
   network: ["request", "connect", "fetch", "send", "call", "probe", "listen", "proxy"],

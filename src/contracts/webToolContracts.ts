@@ -44,10 +44,26 @@ export const httpRequestContract = defineTool({
       .enum(["auto", "1.1", "2", "3"])
       .default("auto")
       .describe("Requested protocol version; `auto` negotiates. The result reports what was used."),
-    follow_redirects: z.boolean().default(false),
-    max_redirects: z.number().int().min(0).max(20).default(5),
+    follow_redirects: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Follow 3xx responses. Off, a redirect is returned as the answer, with its Location.",
+      ),
+    max_redirects: z
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .default(5)
+      .describe("Hops to follow before the last 3xx is returned as the result."),
     verify_tls: z.boolean().default(true),
-    timeout_ms: z.number().int().min(1).default(30_000),
+    timeout_ms: z
+      .number()
+      .int()
+      .min(1)
+      .default(30_000)
+      .describe("Deadline for the whole call, redirect hops included."),
     /** Return at most this many body bytes; the remainder is reported as truncated. */
     max_body_bytes: z.number().int().min(1).default(1_048_576),
   }),

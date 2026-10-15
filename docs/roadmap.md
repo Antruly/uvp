@@ -21,9 +21,9 @@ end to end on real libuvcpp.
 | ✅  | Feature-to-switch mapping verified by building, not by reading                                   |
 | ✅  | The three-state assessment: `satisfied`, `unmet`, `undetermined`                                 |
 | ✅  | 13 tool contracts, shared by the CLI and MCP surfaces                                            |
-| 🔄  | The services behind them: `DoctorService`, `WebService`, `CaptureService`, `VerificationService` |
-| 🔄  | The adapters: MCP registrar, CLI registrar, entrypoints                                          |
-| ⬜  | Packaged install (`npm pack` → install → run) in CI                                              |
+| ✅  | The services behind them: `DoctorService`, `WebService`, `CaptureService`, `VerificationService` |
+| ✅  | The adapters: MCP registrar, CLI registrar, entrypoints                                          |
+| ✅  | Packaged install (`npm pack` → install → run) in CI                                              |
 
 The verified pass, run against a real 1.7.0 build:
 
@@ -42,9 +42,9 @@ A test and debug surface for web services — not only the ones uvp generates.
 |     |                                                                          |
 | --- | ------------------------------------------------------------------------ |
 | ✅  | Contracts for request, WebSocket probe, SOAP call, load, capture, assert |
-| 🔄  | HTTP with redirect policy, timeouts, and byte-accurate timing            |
+| ✅  | HTTP with redirect policy, timeouts, and byte-accurate timing            |
 | ⬜  | WebSocket frames: send, receive, expect, close codes                     |
-| ⬜  | SOAP envelopes with the raw body preserved alongside the parsed one      |
+| ✅  | SOAP envelopes with the raw body preserved alongside the parsed one      |
 | ⬜  | Load testing with per-sample timings retained behind the percentiles     |
 | ⬜  | Capture with an explicit, reported size limit                            |
 | ⬜  | The native probe module (`uvcpp-probe.node`) over libuvcpp's C ABI       |

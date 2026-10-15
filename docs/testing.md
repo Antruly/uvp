@@ -8,17 +8,47 @@ tests** against **built tests**.
 
 These import from `src/` directly and run with no build step.
 
-| Project       | Covers                                                                          |
-| ------------- | ------------------------------------------------------------------------------- |
-| `domain`      | Evidence, unknown, errors, result algebra, identity, features                   |
-| `services`    | Application workflows against fake providers                                    |
-| `adapters`    | Contract schemas, CLI registration, MCP registration                            |
-| `composition` | Wiring: the right provider reaches the right service                            |
-| `conformance` | Rules that span files — layering, generated-file freshness, effect declarations |
+| Project       | Covers                                                                        |
+| ------------- | ----------------------------------------------------------------------------- |
+| `domain`      | Evidence, unknown, errors, result algebra, identity, features                 |
+| `services`    | Application workflows against fake providers                                  |
+| `adapters`    | Contract schemas, CLI registration, MCP registration                          |
+| `composition` | Wiring: the right provider reaches the right service                          |
+| `conformance` | Handler output against its own contract, HTTP behaviour, and cross-file rules |
 
 `services` is the project Stryker mutates. It is where the interesting logic
 lives and where a mutation is likely to be a real behavioural difference rather
 than a formatting change.
+
+## The conformance project
+
+Three questions, all asked offline against a local fixture process.
+
+`handlers.test.ts` calls every tool through its handler and parses the result
+against the contract that describes it. The contract is the single source of
+truth for the MCP server, the CLI, the generated catalog, and the shipped skill,
+and that claim is worth nothing unless the implementations behind it obey it.
+
+`rules.test.ts` covers what no single file owns: the layering rules, generated
+file freshness, and effect declarations.
+
+`httpBehaviour.test.ts` asks whether the switches in `uvp_http_request` do
+anything. A client that ignored `follow_redirects`, `max_redirects`, and
+`timeout_ms`, and whose timings nobody read, satisfied every other test in this
+repository. It pins redirects as reported rather than followed, a loop stopped at
+`max_redirects` and returned as a result, a deadline that distinguishes a wedged
+service from a refused one, and a `ttfb_ms` that cannot be below the delay the
+fixture itself imposed.
+
+Writing it found a real defect, which is the point of putting the claims in one
+place: on the default `http_version=auto`, a request that timed out was retried
+over HTTP/2, and the retry's "Protocol error" was what reached the caller — so
+`timeout` was **unreachable at the default settings** and a wedged service was
+reported as an unreachable endpoint. `src/application/httpClient.ts` now
+classifies each failure where it happens, retries only on a protocol mismatch,
+and treats `timeout_ms` as one deadline for the whole call. Three tests in
+`src/application/httpClient.test.ts` assert that from the transport's side,
+including the number of connections one failed request opens.
 
 ## Built tests
 
@@ -286,9 +316,13 @@ error schema are generated from source. CI regenerates them and fails on a diff,
 so a stale generated file is a build failure rather than a review comment.
 
 **Effect declarations.** A tool description containing "write", "create",
-"scaffold", "request", "probe", "build", "run" and the like while the matching
-effect is declared `false` is flagged. The description is usually written first
-and the effects block filled in second, which is exactly how they drift.
+"scaffold", "generate", "save", "delete", or "remove" while `writesFilesystem`
+is declared `false` is flagged. The description is usually written first and the
+effects block filled in second, which is exactly how they drift. The write
+vocabulary is the only one scanned, because it is the only one where a mention
+is reliably a claim; `network` is pinned by an exact list of the tools that
+contact a caller-named host instead, since "call" and "send" also describe a SOAP
+call to loopback and an assertion over an exchange already recorded.
 
 **Examples.** Every `examples[]` entry must satisfy its own `inputSchema`.
 

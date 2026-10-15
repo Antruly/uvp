@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { UvpFailure } from "../domain/errors.js";
 import { newId, sha256 } from "../domain/identity.js";
-import { decodeBody, performRequest } from "./httpClient.js";
+import { decodeBody, performRequest, transportFailureKind } from "./httpClient.js";
 import type { HttpExchange, HttpTiming } from "./httpClient.js";
 import { evaluateAssertions, percentile } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
@@ -225,7 +225,9 @@ export class WebService {
       timeoutMs: input.timeout_ms,
     }).catch((cause: unknown) => {
       const message = cause instanceof Error ? cause.message : String(cause);
-      const timedOut = /timed out/iu.test(message);
+      // The transport classified the failure where it saw it; matching the
+      // message here instead made the two disagree the moment either changed.
+      const timedOut = transportFailureKind(cause) === "timeout";
       throw new UvpFailure({
         code: timedOut ? "timeout" : "endpoint_unreachable",
         message: `${input.method} ${input.url} did not complete: ${message}`,
@@ -669,7 +671,7 @@ export class WebService {
         } catch (cause) {
           failed += 1;
           const message = cause instanceof Error ? cause.message : String(cause);
-          const kind = /timed out/iu.test(message) ? "timeout" : "transport";
+          const kind = transportFailureKind(cause) === "timeout" ? "timeout" : "transport";
           const entry = errorCounts.get(kind);
           if (entry === undefined) errorCounts.set(kind, { count: 1, sample: message });
           else entry.count += 1;

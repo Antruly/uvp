@@ -23,8 +23,86 @@ export interface HttpRequestSpec {
   readonly followRedirects: boolean;
   readonly maxRedirects: number;
   readonly verifyTls: boolean;
+  /**
+   * How long the whole call may take — the redirect chain included, since the
+   * caller asked one question and every hop is part of answering it.
+   */
   readonly timeoutMs: number;
 }
+
+/**
+ * What a transport failure was, decided where it was seen.
+ *
+ * Node reports a socket failure as an errno on an `Error`; this module reports
+ * its own deadline as a plain one. Both describe the exchange, and both are
+ * known to the code that saw them fail — so the kind is attached there and read
+ * by callers, rather than recovered downstream by matching text.
+ *
+ * It is not only wording. `auto` retries over HTTP/2 when the peer did not speak
+ * HTTP/1.1, and must not retry anything else; and `uvp_http_request` reports a
+ * deadline as `timeout` and a refused connection as `endpoint_unreachable`. Three
+ * separate regexes over the message once answered the same question three ways,
+ * and every one of them changed meaning the moment a message did.
+ */
+export type TransportFailureKind = "timeout" | "unreachable" | "protocol" | "tls";
+
+export class TransportFailure extends Error {
+  readonly kind: TransportFailureKind;
+
+  constructor(kind: TransportFailureKind, message: string) {
+    super(message);
+    this.name = "TransportFailure";
+    this.kind = kind;
+  }
+}
+
+/** Errnos that mean the peer was never reached, or left mid-conversation. */
+const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+  "EPROTO",
+]);
+
+/** Certificate failures, which are reported as themselves and not as a refusal. */
+const TLS_CODES: ReadonlySet<string> = new Set([
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "CERT_HAS_EXPIRED",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "ERR_SSL_WRONG_VERSION_NUMBER",
+]);
+
+/**
+ * The kind of a failure Node raised, from the errno it attached.
+ *
+ * Anything unrecognised is `unreachable` — the bucket that says "the exchange
+ * did not complete, and it was not the protocol or the clock". Guessing a more
+ * specific kind from a code this module does not know would be inventing a
+ * classification, which is the error the whole evidence model exists to avoid.
+ */
+const kindOfNodeError = (error: NodeJS.ErrnoException): TransportFailureKind => {
+  const code = error.code ?? "";
+  if (code === "ETIMEDOUT") return "timeout";
+  if (TLS_CODES.has(code) || code.startsWith("ERR_TLS") || code.startsWith("ERR_SSL")) return "tls";
+  // `HPE_*` is Node's HTTP parser refusing bytes; `ERR_HTTP2*` is the h2 stack
+  // doing the same. Both mean the peer is speaking something else.
+  if (code.startsWith("HPE_") || code.startsWith("ERR_HTTP2")) return "protocol";
+  if (UNREACHABLE_CODES.has(code)) return "unreachable";
+  return "unreachable";
+};
+
+/** The kind of anything a caller caught, including a value that is not an `Error`. */
+export const transportFailureKind = (cause: unknown): TransportFailureKind => {
+  if (cause instanceof TransportFailure) return cause.kind;
+  if (cause instanceof Error) return kindOfNodeError(cause as NodeJS.ErrnoException);
+  return "unreachable";
+};
 
 export interface HttpTiming {
   readonly dnsMs: number | undefined;
@@ -138,10 +216,26 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     let firstByteAt: number | undefined;
     let settled = false;
 
+    // One deadline for the attempt, not an inactivity timer. A service that
+    // trickles a byte every few seconds resets an inactivity timer forever, so
+    // the caller's `timeout_ms` would never fire on the connection it was set
+    // for. The body is buffered whole before this resolves, so there is no
+    // streaming case that a total deadline would cut short.
+    const timer = setTimeout(() => {
+      req.destroy(
+        new TransportFailure("timeout", `Request timed out after ${String(spec.timeoutMs)} ms`),
+      );
+    }, spec.timeoutMs);
+
     const fail = (error: Error): void => {
       if (settled) return;
       settled = true;
-      reject(error);
+      clearTimeout(timer);
+      reject(
+        error instanceof TransportFailure
+          ? error
+          : new TransportFailure(kindOfNodeError(error as NodeJS.ErrnoException), error.message),
+      );
     };
 
     const req = requestFn(options, (res) => {
@@ -158,6 +252,7 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       res.on("end", () => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         const socket = res.socket as unknown as Parameters<typeof peerCertificateInfo>[0];
         resolve({
           status: res.statusCode ?? 0,
@@ -191,9 +286,6 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       });
     });
     req.on("error", fail);
-    req.setTimeout(spec.timeoutMs, () => {
-      req.destroy(new Error(`Request timed out after ${String(spec.timeoutMs)} ms`));
-    });
     if (spec.body !== undefined) req.write(spec.body);
     req.end();
   });
@@ -208,17 +300,26 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     const connectOptions = secure ? { rejectUnauthorized: spec.verifyTls } : {};
     const client: ClientHttp2Session = http2Connect(authority, connectOptions);
     let settled = false;
+
     const fail = (error: Error): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       client.close();
-      reject(error);
+      reject(
+        error instanceof TransportFailure
+          ? error
+          : new TransportFailure(kindOfNodeError(error as NodeJS.ErrnoException), error.message),
+      );
     };
 
+    // Same rule as the HTTP/1.1 path: the deadline covers the attempt, so a
+    // session that keeps the socket warm is still cut off when it expires.
+    const timer = setTimeout(() => {
+      fail(new TransportFailure("timeout", `Request timed out after ${String(spec.timeoutMs)} ms`));
+    }, spec.timeoutMs);
+
     client.once("error", fail);
-    client.setTimeout(spec.timeoutMs, () => {
-      fail(new Error(`Request timed out after ${String(spec.timeoutMs)} ms`));
-    });
 
     const stream = client.request({
       ":method": spec.method,
@@ -265,7 +366,12 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       // HTTP/1.1 cannot reach this state, because it resolves from inside the
       // response callback; this is the h2 shape of the same rule.
       if (!responded) {
-        fail(new Error(`${authority} closed the connection before sending a response.`));
+        fail(
+          new TransportFailure(
+            "unreachable",
+            `${authority} closed the connection before sending a response.`,
+          ),
+        );
         return;
       }
       settled = true;
@@ -299,6 +405,10 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
  * Redirects are not followed by default. A debugging tool that silently
  * rewrites the request is hiding the exchange the user asked about; when
  * following is requested, every hop is reported.
+ *
+ * The deadline is the caller's, and it covers the call: every hop and every
+ * protocol attempt draws on the same budget, so `timeoutMs` bounds how long the
+ * call can take rather than how long each socket may sit idle.
  */
 export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchange> => {
   const redirects: { status: number; location: string }[] = [];
@@ -308,19 +418,36 @@ export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchang
   // earlier version mutated local variables that nothing read, which made the
   // request go out as POST while the report said GET.
   let currentSpec = spec;
+  const deadline = Date.now() + spec.timeoutMs;
+  const expired = (): TransportFailure =>
+    new TransportFailure("timeout", `Request timed out after ${String(spec.timeoutMs)} ms`);
 
   for (let hop = 0; ; hop += 1) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw expired();
+    const attempt: HttpRequestSpec = { ...currentSpec, timeoutMs: remaining };
     const send = async (): Promise<SingleShotResult> => {
-      if (currentSpec.httpVersion === "2") return performHttp2(currentSpec, currentUrl);
-      if (currentSpec.httpVersion === "1.1") return performHttp1(currentSpec, currentUrl);
-      // `auto`: try HTTP/1.1, then upgrade to HTTP/2 on a cleartext h2c hint or
-      // a TLS ALPN result. Falling back is reported through `httpVersion`.
-      return performHttp1(currentSpec, currentUrl);
+      // `auto` starts on HTTP/1.1 and falls back to HTTP/2 in the catch below.
+      if (attempt.httpVersion === "2") return performHttp2(attempt, currentUrl);
+      return performHttp1(attempt, currentUrl);
     };
 
     const result = await send().catch(async (error: unknown) => {
-      if (currentSpec.httpVersion !== "auto") throw error;
-      return performHttp2(currentSpec, currentUrl);
+      // HTTP/2 is a fallback for a *protocol* mismatch, not a general retry.
+      // Only a peer that answered something this client could not parse is
+      // evidence for it; anything else — a deadline, a refused connection, a
+      // certificate — would be repeated over a different protocol and then
+      // reported under whichever message came last. That is how a request that
+      // timed out on the default configuration came back as an unreachable
+      // endpoint: the deadline fired on HTTP/1.1, the error was discarded, and
+      // h2's "Protocol error" from a plain HTTP/1.1 server was what the caller
+      // was told.
+      if (attempt.httpVersion !== "auto" || transportFailureKind(error) !== "protocol") {
+        throw error;
+      }
+      const left = deadline - Date.now();
+      if (left <= 0) throw expired();
+      return performHttp2({ ...attempt, timeoutMs: left }, currentUrl);
     });
 
     const location = result.headers["location"];

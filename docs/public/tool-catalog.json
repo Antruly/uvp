@@ -1777,10 +1777,12 @@
           },
           "follow_redirects": {
             "default": false,
+            "description": "Follow 3xx responses. Off, a redirect is returned as the answer, with its Location.",
             "type": "boolean"
           },
           "max_redirects": {
             "default": 5,
+            "description": "Hops to follow before the last 3xx is returned as the result.",
             "type": "integer",
             "minimum": 0,
             "maximum": 20
@@ -1791,6 +1793,7 @@
           },
           "timeout_ms": {
             "default": 30000,
+            "description": "Deadline for the whole call, redirect hops included.",
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
