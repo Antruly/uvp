@@ -102,9 +102,17 @@ and `UVCPP_DB_RUNTIME_LOAD`. The reader was right and the sentence was wrong.
 ### `container/` — what is in and what is not
 
 `src/toolchains/container/ContainerToolchainProvider.ts` is written, and it is a
-second subject of the conformance suite. On this machine it reports 5 passing and
-7 skipped, each skip naming the provider's own reason: there is no container
-runtime here, and uvp does not pull an image, so the image is absent too.
+second subject of the conformance suite. Given a container runtime and an image
+that is present locally, **all twelve obligations pass**, including the four that
+need a build: the suite compiles a generated `hello-http` workspace inside the
+image, fails a hand-written one, and interrupts a third. On a host with either
+missing, five pass and seven skip, each skip naming the provider's own reason.
+The image is built by `npm run build:conformance-image` — see
+[testing.md](testing.md#the-container-lanes-image) for what it needs and why the
+lane refuses to fetch one. The build obligations themselves are supplied by
+`tests/conformance/workspaceSubstrate.ts`, which this lane and the `local` one
+share; two subjects asked the same question through two copies of the question
+are not being asked the same question.
 
 **In:** runtime discovery in preference order (`docker`, `podman`, `nerdctl`);
 refusing an image that is not present without contacting a registry; reporting an
@@ -112,32 +120,58 @@ image that is present but will not run as `image_runnable` rather than as a
 missing compiler; reading the image's compilers and build systems in one container
 start; finding a libuvcpp inside the image with the layouts `local` uses, and
 reading `uvcpp_version.h` from the directory the config header was actually found
-in; building with the workspace bind-mounted at the same absolute path.
+in; building with the workspace bind-mounted at the same absolute path; and
+creating the build directory before mounting it.
 
-**Not in, and not for want of code:** the provider is not reachable from the CLI
-or the MCP surface. Nothing constructs it outside tests, so there is no
+**Not in, and not for want of code:** the provider is still not reachable from the
+CLI or the MCP surface. Nothing constructs it outside tests, so there is no
 `uvp build --toolchain container` and no tool contract declaring what starting a
-container would do to the machine. That wiring is its own change, and it stays
-open until three questions have answers rather than plausible defaults:
+container would do to the machine. The three questions this section used to list
+are down to one:
 
-- **Authority.** Which flag or manifest key names the image, and whether naming
-  one is enough to make uvp start a container on the user's behalf. The `effects`
-  block of whatever contract carries this has to declare it, and "runs a process
-  on this host" is a different declaration from "contacts a network endpoint".
-- **Verification.** This host has no container runtime, so a wired-up path would
-  ship a user-facing feature nobody has executed. The provider's _command
-  construction_ is checked offline through its `run` seam, and those checks are
-  labelled as boundary evidence rather than runtime evidence; the wiring deserves
-  the same treatment only once a runtime exists to run it against.
-- **The build obligations.** The four that need a substrate still skip for the
-  container, including the one test that would establish a real workspace
-  compiles inside an image. The substrate needs a generated workspace and a
-  libuvcpp _inside_ the image, and writing that fixture before it can be run
-  would be a fixture nobody has seen work.
+- **Authority.** Still open. Which flag or manifest key names the image, and
+  whether naming one is enough to make uvp start a container on the user's
+  behalf. The `effects` block of whatever contract carries this has to declare
+  it, and "runs a process on this host" is a different declaration from "contacts
+  a network endpoint".
+- **Verification.** Answered for the provider, and not by argument: a real podman
+  started a real image and real cmake compiled a generated workspace in it, and
+  the binary it produced was checked on the host. What remains unverified is the
+  _wiring_, which does not exist yet, and which still deserves the same treatment
+  once it does.
+- **The build obligations.** Done. They ran, and the first run found a defect —
+  see below.
 
-Until then the honest description of `container/` is: implemented, conformant in
-the five ways a host without a runtime can check, and unexercised in the ways that
-need one.
+**Two things a real run established that reading the code did not.**
+
+- **The build directory had to be created, and was not.** `uvp init` names
+  `<root>/build/<name>` as the binary and never creates `<root>/build`; `local`
+  never notices because `cmake -B <dir>` creates the directory as it configures.
+  The container mounts that directory, and a bind mount of a path that does not
+  exist is a hard error, not an empty directory:
+
+  ```
+  podman run --mount type=bind,source=<root>/build,target=<root>/build …
+  Error: statfs <root>/build: no such file or directory     (exit 125)
+  ```
+
+  cmake never ran. Three of the four build obligations failed on this, having
+  never failed anywhere before, because no provider had reached the same
+  directory by a route that could not create it. The provider now creates the
+  directory it is about to mount.
+
+- **A container-built artifact does not run on this host.** The binary the
+  container produces carries `RUNPATH=/opt/libuvcpp/lib` — an in-image path,
+  written by the generated project's own CMake against the prefix the container's
+  search returned. On a host with no libuvcpp at that path, `ldd` reports
+  `libuvcpp.so => not found`. This is not a defect in the provider and it is not
+  fixed by one: it is what "compiled against an image's library" means. It
+  matters because `uvp build` reports artifacts, and an artifact that cannot be
+  executed where it was written back to is a limitation a caller should be told.
+
+Until the wiring lands, the honest description of `container/` is: implemented,
+conformant in all twelve ways when a runtime and an image are present and in the
+five that need neither when they are not, and reachable from nothing.
 
 ## Milestone 3 — depth
 

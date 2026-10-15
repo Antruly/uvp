@@ -1,0 +1,59 @@
+# The image the container lane's build obligations run in.
+#
+# Built by `scripts/build-conformance-image.mjs`, never by a test lane: the lane
+# accepts only an image that is *already present* on the host. See that script
+# for why, and for the base image the caller names.
+#
+# The base is an argument rather than a literal so that the same file builds from
+# a different distribution without being edited — and so that a host whose
+# registry access goes through a mirror can say so on the command line instead of
+# in a commit. It is deliberately not defaulted to a floating tag: a lane whose
+# base moves under it is a lane whose failures belong to somebody else's release.
+
+ARG BASE_IMAGE=docker.io/library/debian:12-slim
+FROM ${BASE_IMAGE}
+
+# The three things the obligations ask an image for, and one that is easy to miss.
+#
+# A C++ compiler and CMake are what "builds C++" means. `pkg-config` is not
+# decoration: the 1.7.0 release archives ship `lib/pkgconfig/uvcpp.pc` and **no**
+# CMake package config, so the generated project's fallback discovery route is
+# the only one that works against them — and it needs `pkg-config` to run.
+# `build-essential` brings `make`, which is what CMake's default generator drives.
+#
+# Debian 12 is not an arbitrary choice either. The prebuilt archive's
+# `libuvcpp.so` asks for `GLIBC_2.34` and `GLIBCXX_3.4.30`, which is glibc 2.36
+# and GCC 12 here; bookworm has both, and an older base would fail at link time
+# with an error about a version nobody named.
+# The apt host is an argument for the same reason the base is, and it was earned
+# rather than imagined: on the machine this image was first built on,
+# `deb.debian.org` answered at 21.9 KB/s while a mirror of the same archive
+# answered at 7.5 MB/s, so the distribution's own host made the layer take hours
+# where the mirror made it take seconds. That is a property of a route, and a
+# route belongs on the command line.
+#
+# Only the *host* is substituted, and it is substituted in whatever the base
+# image's own sources say. A suite name or a path written here would be this file
+# asserting a distribution, which is the thing `BASE_IMAGE` exists to avoid
+# saying.
+ARG APT_HOST=deb.debian.org
+
+RUN if [ "${APT_HOST}" != "deb.debian.org" ]; then \
+      find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
+        -exec sed -i "s|deb\.debian\.org|${APT_HOST}|g; s|security\.debian\.org|${APT_HOST}|g" {} + ; \
+    fi \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends build-essential cmake pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+# libuvcpp at one of the prefixes `ContainerToolchainProvider` searches.
+#
+# `include/` and `lib/` are what an install prefix *is*; the archive's
+# `bindings/csharp/` and its markdown are release packaging that no build reads.
+#
+# No `CMAKE_PREFIX_PATH` or `PKG_CONFIG_PATH` is set here, and that is the point.
+# The provider discovers the prefix and passes it into the build, so an image that
+# pre-set it would hide whether that hand-off works — the search would still find
+# the header, and the build would still succeed for a reason the provider is not
+# responsible for.
+COPY libuvcpp/ /opt/libuvcpp/

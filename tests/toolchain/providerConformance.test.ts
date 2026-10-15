@@ -1,14 +1,14 @@
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterAll, beforeAll } from "vitest";
 
-import type { BuildOutcome, BuildRequest } from "../../src/application/ToolchainProvider.js";
 import { LocalToolchainProvider } from "../../src/toolchains/local/LocalToolchainProvider.js";
 import { describeProviderConformance, liveSignal } from "../conformance/providerContract.js";
-import type { ProviderSubject, ProviderSubstrate } from "../conformance/providerContract.js";
-import { cleanup, createWorkspace, scratch } from "../support/realLibuvcpp.js";
+import type { ProviderSubject } from "../conformance/providerContract.js";
+import { createWorkspaceSubstrate } from "../conformance/workspaceSubstrate.js";
+import { cleanup } from "../support/realLibuvcpp.js";
 
 /**
  * The provider contract, run against the provider that actually compiles C++.
@@ -20,6 +20,10 @@ import { cleanup, createWorkspace, scratch } from "../support/realLibuvcpp.js";
  * other end — the real `LocalToolchainProvider`, a real CMake, the libuvcpp
  * installed on this machine, and a generated workspace that has to compile — and
  * it is why the suite is a conformance suite rather than a unit test of the fake.
+ *
+ * What the build obligations are made of lives in
+ * `tests/conformance/workspaceSubstrate.ts`, shared with the container lane so
+ * that "the substrate" is one thing rather than two copies of one thing.
  *
  * ## What the substrate costs, and what its absence costs
  *
@@ -61,99 +65,17 @@ const substrateGap = [
   .filter((reason) => reason !== "")
   .join("; ");
 
-const requestFor = (root: string, buildDir: string, signal: AbortSignal): BuildRequest => ({
-  workspacePath: root,
-  buildDir,
-  buildType: "Debug",
-  clean: false,
-  timeoutMs: 180_000,
-  configureOnly: false,
-  // Named rather than discovered, which is the path `uvp build` takes: the
-  // caller looked the library up and says which one the workspace is to be
-  // judged against. Leaving it out would send the closed loop through discovery
-  // instead, and the discovery guard is already the subject of the pre-aborted
-  // build check below.
-  ...(libuvcpp.installPrefix === undefined ? {} : { libuvcppPrefix: libuvcpp.installPrefix }),
-  signal,
+// The prefix is named rather than left for the provider to discover: `uvp build`
+// takes the same path, and this file has just looked the library up. The comment
+// in `workspaceSubstrate.ts` says why that matters.
+const { substrate, requestFor, prepare } = createWorkspaceSubstrate({
+  provider,
+  libuvcppPrefix: libuvcpp.installPrefix,
+  templatePort: TEMPLATE_PORT,
+  slowBuildPort: SLOW_BUILD_PORT,
+  where: "on this host",
+  gap: substrateGap,
 });
-
-/**
- * A CMake project that configures and then does not compile.
- *
- * Written by hand rather than by breaking a generated workspace: it needs no
- * libuvcpp at all, so the failure is exactly one thing — a source file the
- * compiler rejects — and the diagnostics the obligation reads come from the
- * compiler rather than from a missing package.
- */
-const writeBrokenWorkspace = (): { readonly root: string; readonly buildDir: string } => {
-  const root = join(scratch(), "does-not-compile");
-  mkdirSync(join(root, "src"), { recursive: true });
-  writeFileSync(
-    join(root, "CMakeLists.txt"),
-    [
-      "cmake_minimum_required(VERSION 3.16)",
-      "project(provider-conformance CXX)",
-      "add_executable(conformance src/main.cpp)",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(join(root, "src", "main.cpp"), "int main() { return undefined_symbol_here(); }\n");
-  return { root, buildDir: join(root, "build") };
-};
-
-let slowWorkspace: { readonly root: string; readonly buildDir: string } | undefined;
-
-/** The generated workspace whose build the successful obligations read. */
-let generated: Promise<{ readonly root: string; readonly buildDir: string }> | undefined;
-
-const helloHttp = async (): Promise<{ readonly root: string; readonly buildDir: string }> =>
-  (generated ??= createWorkspace("hello-http", TEMPLATE_PORT));
-
-let successful:
-  | Promise<{
-      readonly request: BuildRequest;
-      readonly outcome: BuildOutcome;
-    }>
-  | undefined;
-
-const substrate: ProviderSubstrate = {
-  // Asked for once and kept: two obligations read two fields of one build, and a
-  // real compile costs seconds. A second build here would buy nothing.
-  successfulBuild: async () => {
-    successful ??= (async () => {
-      const workspace = await helloHttp();
-      const request = requestFor(workspace.root, workspace.buildDir, liveSignal());
-      const outcome = await provider.createClient().build(request);
-      if (!outcome.succeeded) {
-        throw new Error(
-          `the generated hello-http workspace did not build: ${JSON.stringify(outcome.diagnostics).slice(0, 1_000)}`,
-        );
-      }
-      return { request, outcome };
-    })();
-    return await successful;
-  },
-  // A workspace nothing has built yet, so the call is a real configure and
-  // compile rather than a "nothing to do" that could finish before the abort
-  // lands — a cache hit would make the mid-flight check pass by completing.
-  startSlowBuild: async (signal) => {
-    const workspace = slowWorkspace;
-    if (workspace === undefined) {
-      throw new Error(
-        "the slow build's workspace was never generated, though the substrate exists",
-      );
-    }
-    return await provider
-      .createClient()
-      .build(requestFor(workspace.root, workspace.buildDir, signal));
-  },
-  runFailingBuild: async () => {
-    const broken = writeBrokenWorkspace();
-    return await provider
-      .createClient()
-      .build(requestFor(broken.root, broken.buildDir, liveSignal()));
-  },
-};
 
 const subject: ProviderSubject = {
   name: "the local provider",
@@ -167,7 +89,7 @@ const subject: ProviderSubject = {
       join(realpathSync(tmpdir()), "uvp-local-conformance", "nothing-here", "build"),
       signal,
     ),
-  substrate: substrateGap === "" ? substrate : undefined,
+  substrate,
   substrateGap,
   // Empty, and not because a libuvcpp is installed — there may be none. A local
   // provider searches this machine's filesystem, and that search answers whether
@@ -178,11 +100,7 @@ const subject: ProviderSubject = {
 };
 
 beforeAll(async () => {
-  // The slow build's workspace is generated here rather than inside the call the
-  // suite times: generating one runs `uvp init`, and an abort that landed during
-  // it would be testing the pre-abort path while looking like the mid-flight one.
-  if (substrateGap !== "") return;
-  slowWorkspace = await createWorkspace("hello-http", SLOW_BUILD_PORT);
+  await prepare();
 });
 
 afterAll(() => {

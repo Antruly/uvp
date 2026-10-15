@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+
 import type {
   BuildDiagnostic,
   BuildOutcome,
@@ -624,7 +626,11 @@ class ContainerToolchainClient implements ToolchainClient {
           "--rm",
           // `--mount` rather than `-v` because it is the form that fails loudly
           // if the source does not exist, instead of silently creating an empty
-          // directory where the workspace should have been.
+          // directory where the workspace should have been. That is what the
+          // caller's `workspacePath` gets: a name that is wrong is a name that
+          // stops the build. The build directory is mounted the same way and is
+          // the one path created rather than required — see the `mkdir` above for
+          // why, and for what it looked like when it was not there.
           ...mountArgs([request.workspacePath, request.buildDir]),
           "--workdir",
           request.workspacePath,
@@ -646,6 +652,23 @@ class ContainerToolchainClient implements ToolchainClient {
       env["CMAKE_PREFIX_PATH"] = libuvcppPrefix;
       env["PKG_CONFIG_PATH"] = `${libuvcppPrefix}/lib/pkgconfig:${libuvcppPrefix}/lib64/pkgconfig`;
     }
+
+    // The build directory is one of the two paths mounted below, and a bind mount
+    // of a path that does not exist is a hard error rather than an empty
+    // directory — observed rather than assumed, on the first real run of this
+    // provider against a freshly generated workspace:
+    //
+    //     podman run --mount type=bind,source=<root>/build,target=<root>/build …
+    //     Error: statfs <root>/build: no such file or directory     (exit 125)
+    //
+    // cmake never ran. `local` cannot fail this way, because `cmake -B <dir>`
+    // creates the directory as part of configuring, so the requirement was
+    // invisible until a provider reached the same directory by a different route.
+    // It belongs here and not in the caller: the port hands a client a `buildDir`
+    // and asks for a build in it, and "make the thing you were told to build in"
+    // is part of doing that. A caller that names a path a file already occupies
+    // still fails loudly, which is the right outcome for that.
+    await mkdir(request.buildDir, { recursive: true });
 
     const configureStart = Date.now();
     const configure = await runIn(

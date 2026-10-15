@@ -71,6 +71,7 @@
     "test:toolchain": "node scripts/run-tests.mjs built --only toolchain",
     "test:packaged-mcp": "node scripts/test-packaged-mcp.mjs",
     "build:native-probe": "node scripts/build-native-probe.mjs",
+    "build:conformance-image": "node scripts/build-conformance-image.mjs",
     "test:watch": "node scripts/run-tests.mjs source --watch",
     "test:coverage": "vitest run --coverage.enabled --coverage.provider=v8",
     "test:mutation": "stryker run",

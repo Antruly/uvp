@@ -72,6 +72,39 @@ instead and those three skip. Collapsing the two would either skip the
 `found: false` shape on every host without libuvcpp, or claim a search had
 answered when it had not.
 
+### The container lane's image
+
+`tests/toolchain/containerConformance.test.ts` needs three things before any of
+its seven toolchain-shaped obligations can run: a container runtime, an image
+that is already present on this host, and a libuvcpp _inside_ that image.
+`npm run build:conformance-image` builds the third from the libuvcpp that uvp's
+own discovery finds and prints the command line to run the lane with. It is a
+script and not part of a lane because the lane must not fetch anything: uvp never
+pulls an image, and a lane that pulled its own fixture would be testing a network
+as much as a toolchain.
+
+That is not a hypothetical. On the host this lane was first run on, every
+registry route measured either an error or single-digit KB/s, while the same host
+reached a mirror of the Debian archive at 13.7 MB/s — so the base came from that
+mirror and was imported locally, and the image's apt host became a `--apt-host`
+argument for the same reason. Which route a host has is a fact about the host,
+which is why both are arguments rather than constants, and why the lane names its
+image instead of acquiring one.
+
+With a runtime and the image present, the lane reports twelve passing. Without
+them it reports five passing and seven skipped, each skip naming the provider's
+own reason. Neither number is a claim about docker or podman in general: it is a
+claim about the image that was named.
+
+The two real-provider lanes share their build substrate —
+`tests/conformance/workspaceSubstrate.ts`: generate a workspace, build it, fail a
+hand-written one, generate a second that nothing has built yet. A conformance
+suite whose two subjects are asked the same question through two copies of the
+question is not asking the same question, and `jscpd` found the copy: 34 lines
+and 145 tokens that were identical down to the comments. What stays with each
+lane is what is actually about that provider — where its libuvcpp came from, how
+its absence is worded, and which prefix its requests carry.
+
 The reason the obligations are data is `providerContractFaults.test.ts`. For each
 one, `providerSubjects.ts` builds a provider that breaks _exactly_ that clause,
 and the test requires two things: that the named obligation rejects it, and that
@@ -107,15 +140,15 @@ These require `npm run compile` to have run first. They exercise the artifacts
 that ship: the CLI as a process, the MCP server as a process, the packaged
 tarball.
 
-| Project            | Covers                                                                               |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `boundary`         | Import-surface rules across built output                                             |
-| `cli-boundary`     | The CLI driven as a subprocess                                                       |
-| `process-boundary` | Process supervision: start, readiness, stop, orphans                                 |
-| `mcp-boundary`     | The MCP server over real stdio                                                       |
-| `toolchain`        | Real CMake and real libuvcpp: five templates, a failing build, the provider contract |
-| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                 |
-| `process-global`   | What a call leaves in the process it ran in, and whose session it is                 |
+| Project            | Covers                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| `boundary`         | Import-surface rules across built output                                               |
+| `cli-boundary`     | The CLI driven as a subprocess                                                         |
+| `process-boundary` | Process supervision: start, readiness, stop, orphans                                   |
+| `mcp-boundary`     | The MCP server over real stdio                                                         |
+| `toolchain`        | Real CMake and real libuvcpp: five templates, a failing build, both provider contracts |
+| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                   |
+| `process-global`   | What a call leaves in the process it ran in, and whose session it is                   |
 
 `toolchain` is serial (`maxWorkers: 1`, `fileParallelism: false`) because it
 configures and compiles real CMake projects, and two of those at once on one

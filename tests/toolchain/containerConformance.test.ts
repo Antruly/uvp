@@ -2,11 +2,14 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { BuildRequest } from "../../src/application/ToolchainProvider.js";
+import { afterAll, beforeAll } from "vitest";
+
 import { toUvpError } from "../../src/domain/errors.js";
 import { ContainerToolchainProvider } from "../../src/toolchains/container/ContainerToolchainProvider.js";
 import { describeProviderConformance, liveSignal } from "../conformance/providerContract.js";
 import type { ProviderSubject } from "../conformance/providerContract.js";
+import { createWorkspaceSubstrate } from "../conformance/workspaceSubstrate.js";
+import { cleanup } from "../support/realLibuvcpp.js";
 
 /**
  * The provider contract, run against the provider whose toolchain is an image.
@@ -20,14 +23,21 @@ import type { ProviderSubject } from "../conformance/providerContract.js";
  * has an analogue for. Running the obligations against it is what shows they are
  * a contract rather than a description of `local`.
  *
- * ## What a run on this machine establishes, and what it does not
+ * What the build obligations are made of lives in
+ * `tests/conformance/workspaceSubstrate.ts`, shared with the `local` lane — which
+ * is the point of a conformance suite put another way: two subjects whose
+ * substrate is one file are being asked the same question, and two subjects whose
+ * substrate is two files that happen to look alike are not.
  *
- * This host has no container runtime. The obligations that need a toolchain —
- * the three about the shape of a libuvcpp search, and the four that run a build
- * — are therefore skipped **by name**, with the reason taken from the provider's
- * own report rather than assembled here. What still runs is the half that needs
- * nothing but the provider: an identity, a read-only inspection, the gap it names
- * when it cannot work, and the refusal to answer a call the caller withdrew.
+ * ## What the substrate costs, and what its absence costs
+ *
+ * Seven obligations need the toolchain, and here that means three things at once:
+ * a runtime, an image that is present locally, and a libuvcpp *inside* that
+ * image. When all three hold they run; otherwise they are skipped **by name**,
+ * with the reasons taken from the provider's own report rather than assembled
+ * here. The remaining five need nothing but the provider: an identity, a
+ * read-only inspection, the gap it names when it cannot work, and the refusal to
+ * answer a call the caller withdrew.
  *
  * That last one is not decoration. A build that arrived cancelled used to resolve
  * its runtime with a *fresh* signal and answer `toolchain_unavailable` — a
@@ -47,26 +57,26 @@ import type { ProviderSubject } from "../conformance/providerContract.js";
  * the obligation cannot: `subject.create()` is called once per obligation *so
  * that* no state carries between them.
  *
- * **Nothing here establishes anything about docker, podman, or an image.** The
- * commands it would run have been read; they have not been observed running. See
- * `ContainerToolchainProvider.test.ts` for what a command line can be checked
- * against offline, and do not read a green run here as runtime evidence.
+ * ## Where the image comes from
  *
- * ## Making this file exercise more
- *
- * Set `UVP_TEST_IMAGE` to an image reference that is *already present* on the
- * host and, with a runtime installed, the skipped obligations run. uvp never
- * pulls an image, and this file does not either: a lane that fetched its own
- * fixture would be testing a network as much as a toolchain, and would work on a
- * machine no user has.
+ * `UVP_TEST_IMAGE` names it, and it must be **already present** on the host. uvp
+ * never pulls an image and neither does this file: a lane that fetched its own
+ * fixture would be testing a network as much as a toolchain, and would pass on a
+ * machine that happens to reach a registry while failing on one that does not.
+ * `scripts/build-conformance-image.mjs` builds one from the libuvcpp install that
+ * uvp's own discovery finds, and prints the command line to run this file with.
  */
 
 const IMAGE = process.env["UVP_TEST_IMAGE"] ?? "uvp-conformance-image:local";
 
+/** Compiled into a generated workspace but never bound: nothing starts a service here. */
+const TEMPLATE_PORT = 8131;
+const SLOW_BUILD_PORT = 8132;
+
 const provider = new ContainerToolchainProvider({ image: IMAGE });
 
 /**
- * The two gaps, in the provider's own words.
+ * The gaps, in the provider's own words.
  *
  * Read from the provider rather than assembled from a guess about this host,
  * because the reasons a container lane cannot run are the provider's to name —
@@ -80,57 +90,79 @@ const gapWords = (): string =>
     ? "the provider reported no gap"
     : availability.missing.map((gap) => gap.id).join(", ");
 
-const substrateGap = availability.available
-  ? ""
-  : `the container toolchain reports itself unavailable (${gapWords()})`;
-
 /**
- * Whether the provider can examine its own toolchain, established by asking it.
+ * The libuvcpp search, kept in whichever of its two shapes it took.
  *
- * Not inferred from `available`, which is a claim about compilers and CMake: an
- * image that runs but has neither is unavailable *and* perfectly searchable, and
- * gating the libuvcpp obligations on the wrong one would skip them on a machine
- * that could have answered them.
+ * A provider that cannot run its image *throws* here rather than answering
+ * `found: false`, because `LibuvcppBuild` has no way to say "not looked". This
+ * file has to keep that distinction: an image that was searched and held no
+ * libuvcpp is a different situation from one that was never searched, and only
+ * the first of them may be reported as "there is no libuvcpp in it".
  */
-const searchFailure = await provider.findLibuvcpp(undefined, liveSignal()).then(
-  () => undefined,
-  (cause: unknown) => toUvpError(cause),
+const searched = await provider.findLibuvcpp(undefined, liveSignal()).then(
+  (libuvcpp) => ({ libuvcpp }),
+  (cause: unknown) => ({ failure: toUvpError(cause) }),
 );
 
-const toolchainGap =
-  searchFailure === undefined
-    ? ""
-    : `the provider cannot examine the libuvcpp inside ${IMAGE} (${searchFailure.message})`;
+const install = "libuvcpp" in searched && searched.libuvcpp.found ? searched.libuvcpp : undefined;
 
-const requestFor = (signal: AbortSignal): BuildRequest => ({
-  workspacePath: join(realpathSync(tmpdir()), "uvp-container-conformance", "nothing-here"),
-  buildDir: join(realpathSync(tmpdir()), "uvp-container-conformance", "nothing-here", "build"),
-  buildType: "Debug",
-  clean: false,
-  timeoutMs: 180_000,
-  configureOnly: false,
-  signal,
+const substrateGap = [
+  availability.available
+    ? ""
+    : `the container toolchain reports itself unavailable (${gapWords()})`,
+  "failure" in searched
+    ? `the libuvcpp inside ${IMAGE} could not be examined (${searched.failure.message})`
+    : install === undefined
+      ? `no libuvcpp was found inside ${IMAGE}, so a generated workspace cannot be built there`
+      : "",
+]
+  .filter((reason) => reason !== "")
+  .join("; ");
+
+const toolchainGap =
+  "failure" in searched
+    ? `the provider cannot examine the libuvcpp inside ${IMAGE} (${searched.failure.message})`
+    : "";
+
+const { substrate, requestFor, prepare } = createWorkspaceSubstrate({
+  provider,
+  // The prefix is an **in-image** path, and passing it is the whole point of the
+  // search having run: it reaches the build as `CMAKE_PREFIX_PATH` and
+  // `PKG_CONFIG_PATH` in the container's environment, which is what makes the
+  // generated project's fallback discovery route work against a release archive
+  // that ships no CMake package config. Left out, the build would depend on the
+  // image having been built with those variables pre-set — which
+  // `scripts/container/Containerfile` deliberately does not do.
+  libuvcppPrefix: install?.installPrefix,
+  templatePort: TEMPLATE_PORT,
+  slowBuildPort: SLOW_BUILD_PORT,
+  where: `inside ${IMAGE}`,
+  gap: substrateGap,
 });
 
 const subject: ProviderSubject = {
   name: `the container provider (${IMAGE})`,
   create: () => new ContainerToolchainProvider({ image: IMAGE }),
-  request: requestFor,
-  /**
-   * Absent on purpose, even on a host where the four build obligations could
-   * run, and this is the one piece of the file that is a judgement rather than a
-   * reading.
-   *
-   * A substrate for `local` is a generated workspace and a real compile. For a
-   * container it is the same thing *plus* a libuvcpp inside the image, at a path
-   * inside the image, found by a search that has to work there — and this host
-   * has no runtime, so none of that has been run even once. Writing it now would
-   * be a fixture nobody has seen work, in a file whose entire purpose is to prove
-   * that checks can fail. It goes in with the first run that can execute it.
-   */
-  substrate: undefined,
+  // A path nothing needs to exist at. Only the pre-abort obligation calls this,
+  // and a call that starts nothing cannot be shown to have started nothing by
+  // pointing at a workspace that was really there.
+  request: (signal) =>
+    requestFor(
+      join(realpathSync(tmpdir()), "uvp-container-conformance", "nothing-here"),
+      join(realpathSync(tmpdir()), "uvp-container-conformance", "nothing-here", "build"),
+      signal,
+    ),
+  substrate,
   substrateGap,
   toolchainGap,
 };
+
+beforeAll(async () => {
+  await prepare();
+});
+
+afterAll(() => {
+  cleanup();
+});
 
 describeProviderConformance(subject);
