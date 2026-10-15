@@ -22,15 +22,13 @@ than a formatting change.
 
 ## The conformance project
 
-Three questions, all asked offline against a local fixture process.
+Two files, each asking one question, both asked offline against a local fixture
+process.
 
 `handlers.test.ts` calls every tool through its handler and parses the result
 against the contract that describes it. The contract is the single source of
 truth for the MCP server, the CLI, the generated catalog, and the shipped skill,
 and that claim is worth nothing unless the implementations behind it obey it.
-
-`rules.test.ts` covers what no single file owns: the layering rules, generated
-file freshness, and effect declarations.
 
 `httpBehaviour.test.ts` asks whether the switches in `uvp_http_request` do
 anything. A client that ignored `follow_redirects`, `max_redirects`, and
@@ -49,6 +47,17 @@ classifies each failure where it happens, retries only on a protocol mismatch,
 and treats `timeout_ms` as one deadline for the whole call. Three tests in
 `src/application/httpClient.test.ts` assert that from the transport's side,
 including the number of connections one failed request opens.
+
+The rules that no single file owns are checked, and none of them here — worth
+knowing before going to look for them. The layering rules are enforced twice:
+`.oxlintrc.json` over `src/`, and `tests/boundary/importSurface.test.ts` over the
+built output, because a re-export or a changed `rootDir` can satisfy the first
+and violate the second. Generated files are checked by the `--check` scripts
+behind `npm run docs:check`, which regenerate each one and fail on a difference.
+Effect declarations are checked by `src/contracts/toolContracts.test.ts`, whose
+write vocabulary and exact `network` list are described below. This section
+previously described a `rules.test.ts` in this directory; no such file has ever
+existed, and the four places above are where that coverage actually lives.
 
 `handlers.test.ts` also holds the capture recording limit from both ends, in
 `the recording limit`. A capture has two size limits and they are not the same
