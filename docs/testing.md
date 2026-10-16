@@ -60,7 +60,7 @@ rather than a coincidence:
 
 ## The conformance project
 
-Five files, each asking one question, none of them needing a compiler.
+Seven files, each asking one question, none of them needing a compiler.
 
 `handlers.test.ts` calls every tool through its handler and parses the result
 against the contract that describes it. The contract is the single source of
@@ -101,11 +101,31 @@ different fixture.
 
 A failure here prints what both fixture children were doing when the request died
 — `running`, `exited with code 0`, `killed by SIGKILL`, with the last line the
-child said — because this is the only lane that has produced an unexplained
-failure (`TransportFailure: socket hang up`, twice, both inside a full gate) and
-the fixture's own exit is the one end of that request a run can answer for itself.
-The diagnostic is logged and the error rethrown unchanged. See
-[the roadmap](roadmap.md#socket-hang-up).
+child said — because this lane is where the socket hang-ups appeared: four times,
+twice inside a full gate and twice standalone. The fixture's own exit is the one end
+of that request a run can answer for itself, and the diagnostic is logged with the
+error rethrown unchanged. The mechanism is settled — a reserved port handed out
+twice, against the client's keep-alive pool, which is what the
+[roadmap section](roadmap.md#socket-hang-up) reconstructs and the reservation's test
+now pins.
+
+`bundleDiff.test.ts` is the one lane whose subject is another tool's file. It runs
+`uvp_verify` twice against the scripted toolchain, writes each result to disk the
+way `uvp verify --json` does, and compares the two files through the handler a
+caller would reach. Two passes of one service differ in bundle id, exchange id, run
+id, elapsed time and endpoint, and the comparison has to ignore all five — one that
+reported a difference there would make the tool useless rather than wrong. Every
+refusal it checks comes from a real file on disk, including a report whose digest
+was edited by hand, which is what a reader meets when a caller edits one.
+
+`portReservation.test.ts` is the lane's own infrastructure, tested where it broke.
+`freePort` hands out numbers from a window below the ephemeral range, and its
+promise is that a number it handed out is spent: a client's keep-alive pool holds a
+socket keyed by `host:port` for the life of the process, so a second server on a
+re-handed number is reached through the stale socket. It draws a batch rather than
+calling twice, because a collision is a draw and not a certainty — eighty draws
+fail against the reservation as it was before the fix in 99.8% of runs, and the
+window is 512 wide, which is what bounds the batch.
 
 `providerConformance.test.ts` and `providerContractFaults.test.ts` are the two
 halves of one question: does a toolchain satisfy the port it is injected through?
