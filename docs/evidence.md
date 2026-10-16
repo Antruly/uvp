@@ -136,12 +136,38 @@ from a remote toolchain is indistinguishable from a local one, and comparing the
 across a fleet produces a conclusion that is not supported.
 
 **`evidence`** holds references, not full records, so a result stays small and
-the bundle holds the detail. Each ref carries `evidence_id`, `kind`,
-`observed_at`, `digest`, `coverage`, `sources`, and `limitations`.
+the reader gets the id, the digest, the coverage and the sources without the
+record's body. Which of the record's fields that leaves out, and what it means
+for a reader, is [its own section](#what-is-not-inlined).
 
 **`unknowns`** holds the questions that could not be answered. This array being
 non-empty is not a failure. It is the report being honest about its own limits,
 and a report that is never empty here is a report that is not looking.
+
+## What is not inlined
+
+The evidence record above has nine fields. The reference a tool result carries
+has seven, and the three of the record's it drops are **`subject`, `observed` and
+`derived`** — what the entry is about, what was seen, and what was concluded from
+it. What it has instead is `digest`, which is computed _from_ those three fields
+and from `coverage` (`kind` too), so the fingerprint is over content the reader
+cannot see.
+
+That is not an abbreviation a reader can resolve. Every tool result and every
+saved bundle carries `recorder.evidence.map(toEvidenceRef)`; the full records
+exist inside the handler that built them and nowhere else. So when this page says
+an entry is evidence for a conclusion, what a reader actually has is the digest,
+the coverage, the sources, and whatever the tool restated at the top level of its
+output. In the worked example below that is enough, because `exchanges[]`
+restates the status, the protocol and the assertion counters. For a tool whose
+conclusion is not restated there, the digest is what establishes that two runs
+agree and the coverage is what establishes how much was examined — and neither
+says what was seen.
+
+This is an open question rather than a settled design. Making the recorded detail
+reachable changes what every tool's output carries — an evidence-algebra
+decision, which is the kind that gets a design discussion before it gets code —
+so this page describes the shape as it is and the roadmap carries the row.
 
 ## Verification status
 
@@ -173,75 +199,138 @@ uvp verify ./svc --port 8080 \
   --assert 'json:$.value=first'
 ```
 
-The bundle that comes back, abbreviated:
+The bundle that comes back, abbreviated — the ids, timestamps and digests are
+real, the source paths cut down, and two of its four entries shown:
 
 ```json
 {
-  "bundle_id": "vb_…",
-  "goal": "GET /items/1 returns 200 with value=first",
+  "tool": "uvp_verify",
+  "provider": { "id": "local", "platform": "linux-x64" },
+  "goal": "GET /items/1 returns the first stored item",
+  "workspace_id": "wsp_a6fa2a9ede2308343175fb",
+  "bundle_id": "bun_527182bd8c1c4de0a06c79",
   "status": "verified",
-  "evidence_ids": ["ev_…", "ev_…", "ev_…"],
-  "unknown_ids": [],
-  "members": [
+  "build": { "succeeded": true, "exit_code": 0 },
+  "service": {
+    "run_id": "run_5192723ba4724c0c8737e1",
+    "ready": true,
+    "endpoint": "http://127.0.0.1:8401/"
+  },
+  "exchanges": [
     {
-      "kind": "exchange",
-      "subject": { "method": "GET", "url": "http://127.0.0.1:8080/items/1" },
-      "observed": { "status_code": 200, "body_bytes": 24, "elapsed_ms": 3 },
-      "derived": {},
-      "coverage": { "scope": "response body", "status": "complete", "examined": 24, "total": 24 },
-      "sources": [{ "kind": "endpoint", "ref": "GET http://127.0.0.1:8080/items/1" }],
+      "name": "GET /items/1",
+      "exchange_id": "exc_e03796d8289146bb9c28f3",
+      "status": 200,
+      "http_version": "1.1",
+      "elapsed_ms": 2,
+      "assertions_passed": 2,
+      "assertions_failed": 0,
+      "failures": []
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "ev_3cc1e12130af4e1bb5d9e9",
+      "kind": "build",
+      "observed_at": "2026-10-16T05:03:50.363Z",
+      "digest": "60e21a7cb00ab2fe0ea3ca7480d5ed604771565baa8ad4f7bdccd814d23ade6a",
+      "coverage": { "scope": "build", "status": "complete" },
+      "sources": [{ "kind": "command", "ref": "cmake -S … -B … -DCMAKE_BUILD_TYPE=Debug" }],
       "limitations": []
     },
     {
+      "evidence_id": "ev_4950c1cf03ca411d9521c5",
       "kind": "assertion",
-      "subject": { "assertion": "status=200" },
-      "observed": { "actual_status": 200 },
-      "derived": { "passed": true },
-      "coverage": { "scope": "assertions", "status": "complete", "examined": 2, "total": 2 },
-      "sources": [{ "kind": "endpoint", "ref": "GET http://127.0.0.1:8080/items/1" }],
+      "observed_at": "2026-10-16T05:03:50.375Z",
+      "digest": "28228a72a1822e5d18cb44a78cb4baa256fee3760ee10b637a9482469c758c05",
+      "coverage": { "scope": "GET /items/1 assertions", "status": "complete" },
+      "sources": [{ "kind": "endpoint", "ref": "http://127.0.0.1:8401/items/1" }],
       "limitations": []
     }
-  ]
+  ],
+  "unknowns": [],
+  "limitations": [
+    "The service was stopped after the pass; the evidence describes a process that no longer exists."
+  ],
+  "unverified": []
 }
 ```
 
-Read it like this: `observed.status_code` is a fact — uvp read it off the wire.
-`derived.passed` is arithmetic over that fact. `coverage.examined = 2` with
-`total = 2` is why the status is `verified` rather than `partial`, and
-`unknown_ids: []` says no question went unanswered.
+Read it like this: `exchanges[0].status = 200` is a fact — uvp read it off the
+wire, over the protocol `http_version` names. `assertions_passed = 2` is
+arithmetic over that fact. `coverage.examined = 2` with `total = 2` is why the
+status is `verified` rather than `partial`, and `unknowns: []` says no question
+went unanswered.
 
-Now the version where the second assertion did not run because the process exited
-after the first:
+An evidence entry is a **reference**: id, kind, when, a semantic `digest`, the
+coverage it covers, and the sources behind it. The recorded `subject`,
+`observed` and `derived` of that entry are not inlined here — see
+[the open question](#what-is-not-inlined) about that — so what a reader of a
+result checks a conclusion against is the `digest`, the `coverage`, and the
+tool's own top-level fields, which are what `exchanges[]` carries above.
+
+Now the version where the second assertion could not be evaluated — the same
+pass with a second assertion whose JSONPath the engine refuses — shown the same
+way, with the two entries above left out:
 
 ```json
 {
   "status": "partial",
-  "unknown_ids": ["uk_…"],
-  "members": [
+  "exchanges": [
     {
+      "name": "GET /items/1",
+      "status": 200,
+      "assertions_passed": 1,
+      "assertions_failed": 0,
+      "failures": []
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "ev_8d63e28954ec415293b61d",
       "kind": "assertion",
+      "digest": "f6c9a32c5e155605b83ce5b718db0db995d41deb24dfb7b8a48a702a44f5604a",
       "coverage": {
-        "scope": "assertions",
+        "scope": "GET /items/1 assertions",
         "status": "partial",
         "examined": 1,
         "total": 2,
-        "note": "process exited before the second assertion was evaluated"
-      }
+        "note": "1 of 2 assertion(s) could not be evaluated against this exchange; each one names its own reason"
+      },
+      "sources": [{ "kind": "endpoint", "ref": "http://127.0.0.1:8401/items/1" }],
+      "limitations": []
     }
   ],
   "unknowns": [
     {
-      "unknown_id": "uk_…",
-      "question": "does json:$.value equal \"first\"?",
-      "reason": "the service exited before the assertion could be evaluated",
-      "blocked_by": "process exit"
+      "unknown_id": "unk_1a86b323dfd347c2802947",
+      "question": "Does `body_json_path_equals` on `message` (\"Hello\") hold for GET /items/1 (GET /items/1)?",
+      "reason": "not_attempted",
+      "blocked_by": "unsupported JSONPath: path must start with $"
+    }
+  ],
+  "unverified": [
+    {
+      "question": "Does `body_json_path_equals` on `message` (\"Hello\") hold for GET /items/1 (GET /items/1)?",
+      "reason": "the assertion could not be evaluated: unsupported JSONPath: path must start with $"
     }
   ]
 }
 ```
 
-The first assertion passed. The status is still `partial`, because `verified` is
-a claim about the whole goal and half of it was not examined.
+Quoted as it was captured, bracket and all: the question names its subject twice,
+because `uvp verify` derives a request's name from its method and path and the
+template then appended them again. It reads `... hold for GET /items/1` now.
+What matters for this page is the shape rather than the wording — the check that
+could not run is a question with a reason, in both the envelope and the bundle,
+and no counter anywhere says it passed.
+
+The first assertion was satisfied. The status is still `partial`, because
+`verified` is a claim about the whole goal and half of it was not examined: the
+exchange counters report the one check that ran, `coverage` says `examined: 1` of
+`total: 2`, and the check that did not run is a `ResidualUnknown` — in the
+envelope's `unknowns`, which a tool result's reader sees, and in `unverified`,
+which a bundle's reader sees.
 
 ## What evidence is not
 
