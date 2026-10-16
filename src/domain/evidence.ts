@@ -133,8 +133,22 @@ export const EVIDENCE_BUNDLE_STATUSES = ["verified", "partial", "failed", "unkno
 export type EvidenceBundleStatus = (typeof EVIDENCE_BUNDLE_STATUSES)[number];
 
 /**
- * The deliverable. A bundle is what a workflow tool hands back: the goal it was
- * given, everything it established, and everything it did not.
+ * A bundle shape that carries the records themselves.
+ *
+ * Nothing in this repository ships it, and that is the point of stating it here
+ * rather than leaving the docblock to imply otherwise. The bundle a workflow tool
+ * hands back is `verificationBundleSchema` in `src/contracts/`, assembled by
+ * `VerificationService` and read by `bundleFile.ts`; it carries `EvidenceRef`s,
+ * because `toEvidenceRef` drops `subject`, `observed` and `derived` on the way
+ * out of the handler. This shape carries the whole `Evidence[]` instead, which is
+ * the one difference that matters between them — `bundle_id`, `status`,
+ * `unknowns` and `limitations` all appear in both.
+ *
+ * So which of the two is "the deliverable" is an open question rather than a
+ * settled one, and it is not a question this file can answer by declaring itself
+ * the answer: making the records reachable changes what every tool returns. The
+ * roadmap row on the `docs/evidence.md` worked example carries the decision, and
+ * `createEvidenceBundle` below has no caller until it is made.
  */
 export const evidenceBundleSchema = z.object({
   bundle_id: z.string().regex(/^bun_[0-9a-f]{22}$/u),
@@ -157,6 +171,14 @@ export interface CreateEvidenceBundleInit {
   readonly limitations?: readonly string[];
 }
 
+/**
+ * Build the record-carrying bundle above.
+ *
+ * No production caller: the shipped bundle is assembled in `VerificationService`
+ * against the contract's schema. Kept rather than deleted because deleting it is
+ * the other half of the decision `evidenceBundleSchema` names, and a reader
+ * comparing the two shapes should be able to see both.
+ */
 export const createEvidenceBundle = (init: CreateEvidenceBundleInit): EvidenceBundle =>
   evidenceBundleSchema.parse({
     bundle_id: init.id ?? newId("bundle"),
