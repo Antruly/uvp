@@ -266,10 +266,17 @@ so 43 of the 45 run. The other 2 are a _second_ wall behind the first, and it is
 worth stating plainly because it is not the shell-script problem: the local
 provider chooses `cmake`'s arguments itself, and on Windows the fake is a copy of
 Node, which reads `-S`/`--build` as its own bad options and exits 9 before any of
-the suite's code runs. Two tests are skipped by name for it and it is filed as
-[#22](https://github.com/Antruly/uvp/issues/22), which records the routes — a
-`run` seam on the local provider, as the container provider has, or an executable
-image that is not Node — and leaves the choice to a maintainer.
+the suite's code runs. Two tests are skipped by name for it, filed as
+[#22](https://github.com/Antruly/uvp/issues/22) and **decided on 2026-10-16: no
+product change.** The two are the local provider's own tests, and the way to make
+them run on Windows would be a `run` seam on that provider — the shape
+`ContainerToolchainProvider` already has, where the test scripts the outcomes and
+the provider does not choose the command line — which is a product change made to
+satisfy a test's stand-in rather than a defect the test found. So they stay skipped,
+titled with the reason, and the route is recorded against the `local-msvc` row in
+[roadmap.md](roadmap.md#hardening) for whoever builds a Windows C++ lane, where it
+would be needed for real. What the Windows lane therefore does not get is stated
+above rather than implied.
 
 The recorded-command row was two problems wearing one issue number. The four
 assertions read the record as raw text, and `(?:^|\s)NAME=(\S+)` hands back

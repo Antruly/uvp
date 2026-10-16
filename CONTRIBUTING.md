@@ -184,6 +184,21 @@ That one command regenerates every derived file — the package metadata, the to
 catalog, the shipped skills, the error-contract schema, the licence inventory and
 the bill of materials — and `npm run docs:check` fails when any of them is stale.
 
+**A Dependabot npm bump arrives stale, by construction.** The bot edits
+`package.json` and `package-lock.json` and cannot run the command above, so
+`licenses/npm-dependencies.json` and `sbom.cdx.json` stop matching the lockfile the
+moment it pushes and `docs:check` refuses them — the first bump this happened to
+was green on every other lane (#7, run `38852318351`). The remedy is one command
+and one commit on the bot's branch:
+
+```bash
+npm run docs:generate
+```
+
+No workflow is given write access to a pull request branch to do it automatically;
+that would be a scope decision of its own, and it has not been taken
+([#17](https://github.com/Antruly/uvp/issues/17)).
+
 ### Working on the C++ side
 
 The templates in `src/application/templates.ts` are verified by generating a
