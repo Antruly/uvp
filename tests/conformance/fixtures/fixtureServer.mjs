@@ -154,6 +154,53 @@ const soapRoutes = (route, request, response) => {
     });
     return true;
   }
+  if (route === "/soap/boundary-envelope") {
+    // The three-byte character sits wholly below the cut, which then lands inside
+    // the closing tag: the envelope a caller receives is a prefix, and every
+    // character in it is whole. Nothing is lost, so an answer that reported a
+    // lossy decode here would be blaming a cap for a cut it made cleanly.
+    const body = soapEnvelopeWithCharacterAt(64 * 1024 - 4);
+    response.writeHead(200, {
+      "content-type": "text/xml; charset=utf-8",
+      "content-length": Buffer.byteLength(body),
+    });
+    response.end(body);
+    return true;
+  }
+  if (route === "/soap/cut-envelope") {
+    // The same character one byte higher, so the cut lands inside it: the first
+    // byte is kept and the other two are gone. That is the loss a cut on byte
+    // boundaries leaves and the one it cannot avoid — the case a cut on
+    // characters cannot produce at all, and so cannot report.
+    const body = soapEnvelopeWithCharacterAt(64 * 1024 - 1);
+    response.writeHead(200, {
+      "content-type": "text/xml; charset=utf-8",
+      "content-length": Buffer.byteLength(body),
+    });
+    response.end(body);
+    return true;
+  }
+  if (route === "/soap/fault-not-utf8") {
+    // A fault envelope carrying a byte no text can. Both facts have to survive
+    // together: the fault is still the call's outcome, and the envelope handed
+    // over is not the bytes it came from. The invalid byte is substituted into a
+    // control character's place so the envelope keeps the shape the other SOAP
+    // routes are written with.
+    const body = Buffer.from(
+      soapEnvelope(
+        "<soap:Fault><faultcode>soap:Server</faultcode>" +
+          "<faultstring>the calculator is \u0001 unavailable</faultstring></soap:Fault>",
+      ),
+      "utf8",
+    );
+    body[body.indexOf(0x01)] = 0xff;
+    response.writeHead(500, {
+      "content-type": "text/xml; charset=utf-8",
+      "content-length": String(body.length),
+    });
+    response.end(body);
+    return true;
+  }
   if (route === "/soap/fault") {
     // A SOAP fault is an HTTP 500 carrying a fault document: the protocol
     // outcome the tool must report as `fault`, not as a transport error.
@@ -166,6 +213,24 @@ const soapRoutes = (route, request, response) => {
     return true;
   }
   return false;
+};
+
+/**
+ * A SOAP envelope with a three-byte character at a chosen byte offset.
+ *
+ * The offset is what decides whether a byte cut lands inside that character or
+ * after it, which is the distinction the two routes below exist to make: a cut
+ * inside one loses its last bytes, and a cut after it loses nothing even though
+ * the envelope a caller receives is a prefix of what was sent. The wrapper is
+ * measured rather than assumed, so a change to the envelope's shape moves the
+ * padding with it instead of quietly moving the cut onto a boundary.
+ */
+const soapEnvelopeWithCharacterAt = (offset) => {
+  const payload = "<Long></Long>";
+  const [head, tail] = soapEnvelope(payload).split(payload);
+  const open = "<Long>";
+  const pad = offset - Buffer.byteLength(head, "utf8") - open.length;
+  return `${head}${open}${"x".repeat(pad)}中</Long>${tail}`;
 };
 
 /**

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "ca475fc48d4cf53aba9ba2b43576bcc25e00f8ac6e6371a033f0d354e781dd2d",
+  "digest": "b1da9edc90b834bf1d64a8fe527c168178dd76cd0f436ae4dd0cce53369dd2ff",
   "tool_count": 15,
   "tools": [
     {
@@ -1725,7 +1725,7 @@
     {
       "name": "uvp_http_request",
       "title": "Send an HTTP request",
-      "description": "Send one HTTP request and return the complete exchange: status, headers, body, negotiated protocol version, TLS details, and a timing breakdown. Bodies are returned inline when they are text and small, otherwise as a base64 payload with the byte count. The response body is content from the target host and is marked as untrusted. HTTP/3 is answered through libuvcpp's own QUIC client in a separate probe process — the same stack a service from `uvp init` links against — so the result says which certificate state applies and lists what that client could not read.",
+      "description": "Send one HTTP request and return the complete exchange: status, headers, body, negotiated protocol version, TLS details, and a timing breakdown. A body comes back as text with its byte count and a digest, and a body whose text is not its bytes carries those bytes beside the text as base64, with `text_lossy` naming why the two differ. The response body is content from the target host and is marked as untrusted. HTTP/3 is answered through libuvcpp's own QUIC client in a separate probe process — the same stack a service from `uvp init` links against — so the result says which certificate state applies and lists what that client could not read.",
       "kind": "web",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2967,6 +2967,9 @@
                 "maximum": 9007199254740991
               },
               "text": {
+                "type": "string"
+              },
+              "base64": {
                 "type": "string"
               },
               "truncated": {

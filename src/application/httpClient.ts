@@ -751,9 +751,9 @@ const danglingSequenceLength = (bytes: Buffer): number => {
  *   - `invalid-utf8` — the bytes hold something that is not UTF-8: a byte no
  *     sequence starts with, an overlong encoding, a surrogate, or a body that
  *     stops inside a character when nothing cut it. The text carries U+FFFD where
- *     those bytes were. Recovering them is the caller's to arrange and not this
- *     function's: `decodeBody` answers with text *or* base64 and never both, so a
- *     caller that hands the text over hands over the loss with it.
+ *     those bytes were. Those bytes travel with the answer rather than being lost
+ *     to the decode: see `decodeBody`, which hands them over as `base64` exactly
+ *     when this answer is not absent.
  *
  * The same vocabulary the WebSocket half of this repository already uses
  * (`text_omitted: "truncated" | "invalid-utf8"`), because two spellings of one
@@ -778,9 +778,11 @@ export const textLossiness = (
 /**
  * Decode a body as text when it plausibly is text.
  *
- * The answer carries exactly one of `text` and `base64`, so the caller reads the
- * one that is there rather than choosing: a result carrying both would make the
- * answer depend on which of the two a caller happened to look at first.
+ * `base64` is the body's bytes, and it is present exactly when `text` is not
+ * them: a body that is not text at all, one with a NUL too early to be anything
+ * but a binary format lying about its content type, and a textual body whose
+ * decode is lossy. Text alone is the ordinary case: the text is the bytes, so a
+ * caller holding it holds the body and can compare it against the digest.
  *
  * `text` is the body decoded as UTF-8, and decoding bytes that are not UTF-8 is
  * **lossy** — `Buffer.from([0x48, 0x69, 0xff])` decodes to `"Hi�"`, which
@@ -789,6 +791,14 @@ export const textLossiness = (
  * difference, and the field says whether the peer sent bytes that are not UTF-8
  * or the caller's own cap cut a character in half. Absent means the text is the
  * bytes. See `textLossiness` for the rule.
+ *
+ * When the text is not the bytes, both are handed over: `text` to read and
+ * `base64` to trust, over the same buffer, so recovering what the decode replaced
+ * is a decode of what came with the answer rather than a second call. Which of
+ * the two a caller wants is then a question with an answer — bytes are `base64`
+ * when it is there, else `text` — because `textLossy` says which case the answer
+ * is in. A rule of "text or base64, never both" would leave a caller holding a
+ * lossy text with no bytes behind it and no way to ask for them.
  *
  * `cutShort` is the caller's assertion that it shortened the body by a byte
  * count — `max_body_bytes` on the way in, or the transport's own cap — and it is
@@ -827,6 +837,10 @@ export const decodeBody = (
   return {
     text: decoded,
     decodedAsText: true,
-    ...(textLossy === undefined ? {} : { textLossy }),
+    // The bytes the text was decoded from, and the same buffer — so what the
+    // decode replaced is recoverable from this answer alone. Encoded only when
+    // there is a reason to: a clean decode is the common case and the text is
+    // already the bytes.
+    ...(textLossy === undefined ? {} : { textLossy, base64: body.toString("base64") }),
   };
 };

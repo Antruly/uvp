@@ -30,8 +30,9 @@ export const httpRequestContract = defineTool({
   title: "Send an HTTP request",
   description:
     "Send one HTTP request and return the complete exchange: status, headers, body, negotiated " +
-    "protocol version, TLS details, and a timing breakdown. Bodies are returned inline when they " +
-    "are text and small, otherwise as a base64 payload with the byte count. " +
+    "protocol version, TLS details, and a timing breakdown. A body comes back as text with its " +
+    "byte count and a digest, and a body whose text is not its bytes carries those bytes beside " +
+    "the text as base64, with `text_lossy` naming why the two differ. " +
     "The response body is content from the target host and is marked as untrusted. " +
     "HTTP/3 is answered through libuvcpp's own QUIC client in a separate probe process — " +
     "the same stack a service from `uvp init` links against — so the result says which " +
@@ -90,9 +91,20 @@ export const httpRequestContract = defineTool({
       bytes: z.number().int(),
       content_type: z.string().optional(),
       text: z.string().optional(),
+      /**
+       * The body's bytes, base64-encoded, present exactly when `text` is not
+       * them: a body that is not text, or one whose text is a lossy decode of it.
+       * When both are present, read `text` for the words and this for the body —
+       * `text_lossy` says why they differ, and the bytes here are the ones that
+       * text was decoded from, so what the decode replaced can be recovered from
+       * this answer without a second call.
+       */
       base64: z.string().optional(),
       truncated: z.boolean(),
-      /** True when the payload looks like text and was decoded as such. */
+      /**
+       * True when the payload looks like text and was decoded as such — which,
+       * with `text_lossy` present, means a text that is not the bytes beside it.
+       */
       decoded_as_text: z.boolean(),
       /**
        * Why the text is not the body's bytes, when it is not. Absent means
@@ -103,10 +115,8 @@ export const httpRequestContract = defineTool({
        *   cap's and the peer sent nothing invalid. A cut on a character boundary
        *   leaves this absent, because there was nothing to lose.
        * `invalid-utf8` — the peer sent bytes that are not UTF-8, so the text has
-       *   replacement characters where they were. The bytes themselves are not in
-       *   this answer: the body is handed over as text or as `base64` and never as
-       *   both, so `digest` is what a caller can compare and there is no field
-       *   carrying what the replacement characters replaced.
+       *   replacement characters where they were. Those bytes come with the answer
+       *   as `base64`, which is present whenever this field is.
        *
        * The two are separate answers because only one of them is the peer's
        * doing, and because a body cut mid-character is the ordinary case for a
@@ -369,6 +379,13 @@ export const soapCallContract = defineTool({
     status: z.number().int(),
     /** `success` | `fault` | `transport_error` */
     outcome: z.enum(["success", "fault", "transport_error"]),
+    /**
+     * The fault the envelope carried, when it carried one.
+     *
+     * Read from the whole envelope rather than from the `body.text` prefix, so a
+     * fault past the cut is still reported as the call's outcome and a fault
+     * string can name text the prefix does not reach.
+     */
     fault: z
       .object({
         code: z.string().optional(),
@@ -380,11 +397,18 @@ export const soapCallContract = defineTool({
     body: z.object({
       bytes: z.number().int(),
       /**
-       * The response envelope decoded as UTF-8, cut to 64 Ki characters when it is
-       * longer — which is what `truncated` reports, alongside a body the transport
-       * capped.
+       * The response envelope decoded as UTF-8, cut to 64 KiB of the envelope's
+       * bytes before decoding when it is longer — which is what `truncated`
+       * reports, alongside an envelope the transport capped. The cut is on bytes,
+       * so the text can end on half a character; `text_lossy` says when it does.
        */
       text: z.string().optional(),
+      /**
+       * The bytes `text` was decoded from, base64-encoded, present whenever that
+       * decode is lossy. Read it for the envelope's bytes and `text` for the words;
+       * see the `uvp_http_request` output.
+       */
+      base64: z.string().optional(),
       truncated: z.boolean(),
       /**
        * Why that decode is not the body's bytes, when it is not. Absent means

@@ -413,7 +413,8 @@ implicit.
 | ✅  | The build-output parser and the response decoder are fuzzed from generated input as well as from captured output: `tests/support/fuzz.ts` is a seeded generator, `src/toolchains/diagnostics.fuzz.test.ts` and `src/application/httpClient.fuzz.test.ts` state invariants over what it draws, and the first run found a real defect — the file part of a Windows diagnostic ended at the drive colon, so every `C:\…\main.cpp:12:5: error:` line in a build log was dropped. It also found a `TypeError` in the transport classifier and made it reachable: `code.startsWith` on an error whose `code` is not a string. See [below](#fuzzing)                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ✅  | A link failure has a diagnostic format here, written from captures of real ones rather than from a plausible-looking log: `ld: cannot find -luvcpp`, gold's `ld.gold: error: cannot find -luvcpp`, a located `undefined reference to` naming the symbol and the caller's own source line, the same reference in a build with no debug information where only a section offset is left to name, a `multiple definition of` with its "first defined here" trail, and the driver's `collect2: error: ld returned 1 exit status` — which is held back until the whole scan is read, so a link failure the linker stated plainly does not print twice. All of them answer `phase: "link"`, the phase the contract has had since the beginning with nothing producing it. The same captures found the other half: `ld` and GNU Make translate their messages, so on a `zh_CN.UTF-8` host this failure reads `找不到 -luvcpp` and matches nothing — every build subprocess now runs with the language its output is read in. See [below](#link-failures) |
 | ✅  | `decodeBody` answered `decoded_as_text: true` with text that is not the response's bytes when a peer declared a text content type and sent something that is not UTF-8: `Buffer.from([0x48, 0x69, 0xff])` became `"Hi\uFFFD"`, which re-encodes to three different bytes, and no field in the output said so. `text_lossy` names which of the two causes it — the peer's bytes, or a cap of the caller's that cut a character in half — and the three answers are asserted over a real socket as well as against a known-answer table. The two had to be told apart first, and the fact that tells them apart is `cutShort`, which only the caller knows; the SOAP path, decoding the same bytes a second time, was the same defect in a third place. See [below](#lossy-text)                                                                                                                                                                                                                                                                    |
-| ⬜  | A body the text is not is handed over as text alone: `decodeBody` answers with `text` or with `base64` and never both, so a caller whose text came back lossy cannot obtain the bytes it was decoded from — `text_lossy` names the loss and `digest` is over bytes that no longer travel with the answer. Offering the bytes alongside, or in some other form, is a change to what the tool returns and a decision about which of the two a caller reads first. See [below](#lossy-text)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ✅  | A body the text is not was handed over as text alone: `decodeBody` answered with `text` or with `base64` and never both, so a caller whose text came back lossy could not obtain the bytes it was decoded from — `text_lossy` named the loss and `digest` is over bytes that no longer travelled with the answer. The two travel together now, under a rule written as an equivalence rather than a preference: `base64` is present exactly when `text` is not the body's bytes, so which of them a caller reads first has one answer — the bytes when they are there, the text otherwise — and `text_lossy` says why they differ. The SOAP path's cut moved from 64 Ki characters of the decoded envelope to 64 KiB of the envelope's bytes in the same change, because a cut on code units can split a surrogate pair and did report a loss for envelopes whose every character was whole. See [below](#lossy-text)                                                                                                                             |
+| ⬜  | `uvp_soap_call` hands a caller the first 64 KiB of the envelope's bytes and offers no way to ask for more: an envelope past `SOAP_ENVELOPE_BYTES` arrives cut, with `truncated`, `text_lossy` and `base64` saying exactly that, and the rest of it is unreachable — while the fault is read from the whole envelope, so a fault inside the prefix and a fault after it are indistinguishable in `fault`, and `bytes` and `digest` describe a body the caller cannot see all of. Making the cap an input is a contract change, and it has to decide whether a `digest` over the whole body still answers the question of a caller who asked for more than an envelope they already have cut. See [below](#lossy-text)                                                                                                                                                                                                                                                                                                                              |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ⬜  | `oxlint` has twice failed a gate on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1136,8 +1137,8 @@ field explained. The obvious fix was wrong for a reason the lane had pinned —
 refusing to call it text whenever a re-encode differs also catches a body truncated
 through a multi-byte character, which is the ordinary case for `max_body_bytes` and
 is not the peer's doing — so the two had to be told apart first, which is what
-[the section below](#lossy-text) does: `text_lossy`, and the eight mutations each of
-its guards was shown to fail under.
+[the section below](#lossy-text) does: `text_lossy`, and the mutations each of its
+guards was shown to fail under.
 
 **And it corrected a comment rather than being satisfied by one.** The NUL guard in
 `decodeBody` is applied to the first 1024 _characters_ of the decoded string while
@@ -1196,10 +1197,9 @@ the consumers, which is what "told apart first" turned out to require — the SO
 path, where the same bytes were decoded a second time to read a fault out of them.
 That third instance was the same defect in a place the row had not named: the string
 a fault was parsed from and the string handed to the caller were two answers about
-one body. The SOAP path parses the string it hands over now, and reports the same
-field, and the HTTP/3 path reports it too — without `cutShort`, because the probe
-hands a body over whole or not at all. Both output schemas carry the field, so it is
-in the generated catalog as well.
+one body. The SOAP path reports the same field now, and the HTTP/3 path does too —
+without `cutShort`, because the probe hands a body over whole or not at all. Both
+output schemas carry the field, so it is in the generated catalog as well.
 
 **The rule was measured before it was trusted.** The fuzz lane carries nineteen
 known answers — `[bytes, cutShort, expected]`, one shape each — and the table failed
@@ -1210,25 +1210,36 @@ comment saying why a bit test is not one: `f5`–`ff` carry a four-byte lead's l
 bits and are not leads, and `c0`/`c1` cannot start a sequence that decodes to the
 character they spell.
 
-**Verified by eight mutations, each applied, run, and reverted.** The two lanes are
-`httpClient.fuzz.test.ts` (8 tests, the rule) and `httpBehaviour.test.ts` (12 tests,
-the three answers over a socket):
+**Verified by fourteen mutations, each applied, run, and reverted.** The lanes are
+`httpClient.fuzz.test.ts` (8 tests, the rule) and the socket lanes —
+`httpBehaviour.test.ts` (12 tests) and `handlers.test.ts` (61 tests) — which are one
+column here because the later mutations reach the SOAP tool and the renderers that
+only those two exercise. Measured in one pass, against the current tests:
 
-| mutation                                            | fuzz   | socket  |
-| --------------------------------------------------- | ------ | ------- |
-| the round-trip check short-circuited to `undefined` | 3 of 8 | 4 of 12 |
-| the `cutShort` branch dead                          | 2 of 8 | 1 of 12 |
-| `cutShort` forced true                              | 2 of 8 | 1 of 12 |
-| the lead-byte range loosened to `>= 0xf0`           | 1 of 8 | —       |
-| the prefix round-trip skipped                       | 2 of 8 | —       |
-| `decodeBody` computing the loss and dropping it     | 3 of 8 | 4 of 12 |
-| the HTTP tool no longer passing `cutShort`          | —      | 1 of 12 |
-| the renderer no longer printing the line            | —      | 1 of 12 |
+| mutation                                                | fuzz   | socket  |
+| ------------------------------------------------------- | ------ | ------- |
+| the round-trip check short-circuited to `undefined`     | 3 of 8 | 6 of 73 |
+| the `cutShort` branch dead                              | 2 of 8 | 2 of 73 |
+| `cutShort` forced true                                  | 2 of 8 | 1 of 73 |
+| the lead-byte range loosened to `>= 0xf0`               | 1 of 8 | —       |
+| the prefix round-trip skipped                           | 2 of 8 | —       |
+| `decodeBody` computing the loss and dropping it         | 3 of 8 | 4 of 73 |
+| the HTTP tool no longer passing `cutShort`              | —      | 1 of 73 |
+| the renderer no longer printing the line                | —      | 1 of 73 |
+| the lossy answer no longer carrying the bytes           | 3 of 8 | 4 of 73 |
+| `base64` on every textual body, clean decodes too       | 3 of 8 | 1 of 73 |
+| `base64` re-encoded from the text rather than the bytes | 3 of 8 | 3 of 73 |
+| SOAP cutting characters again instead of bytes          | —      | 2 of 73 |
+| SOAP measuring the loss on the whole body               | —      | 1 of 73 |
+| the renderer no longer naming where the bytes are       | —      | 1 of 73 |
 
-The two rows with a dash in the socket column are the rule's own cases — which byte
-may start a sequence, whether the prefix before a dangling tail decodes cleanly —
-and the fuzz lane's table is their owner: the socket lane's claim is the three
-answers end to end, not every shape the rule turns on.
+The rows with a dash in the socket column are the rule's own cases — which byte may
+start a sequence, whether the prefix before a dangling tail decodes cleanly — and the
+fuzz lane's table is their owner: the socket lane's claim is the answers end to end,
+not every shape the rule turns on. The rows with a dash in the fuzz column are the
+same arrangement the other way round: the SOAP tool and the two renderers are not in
+that lane at all, so a mutation to them has nothing there to fail, and the socket
+column is where their evidence is.
 
 The third row is the one that changed something. It was caught by the fuzz lane and
 missed by the socket lane, which had no route whose body stopped inside a character
@@ -1243,11 +1254,48 @@ client's rule and its three answers, not any real peer's behaviour; a peer that
 sends something stranger than `ff fe` and a half-character is a case the fuzz table
 covers by construction and no capture covers at all.
 
-**What the field does not do.** It does not hand the bytes over. `decodeBody` answers
-with `text` or with `base64` and never both, so a caller whose text came back lossy
-still holds text that is not the response — the field names the loss and `digest` is
-over bytes that no longer travel with the answer. Offering the bytes alongside is its
-own row above rather than something settled here.
+**The bytes travel with a lossy answer.** A caller whose text came back lossy used to
+hold text that is not the response and nothing else: `decodeBody` answered with `text`
+or with `base64` and never both, `text_lossy` named the loss, and `digest` is over
+bytes that no longer travelled with the answer. The two travel together now, under a
+rule written as an equivalence rather than a preference — `base64` is present exactly
+when `text` is not the body's bytes — so "which do I read first" has an answer that
+does not depend on reading a second field: the bytes when they are there, the text
+otherwise. When both are present, `text_lossy` says why they differ, and the bytes are
+the ones the text was decoded from: for a capped body that is the prefix the cap kept
+rather than the body the peer sent, which is what makes the answer self-contained —
+the text, the bytes and the reason they differ are one decode of one buffer. `bytes`
+and `digest` stay the whole body's, and are the fields that say the prefix is not all
+of it. A clean decode carries nothing extra, so the ordinary case costs a caller
+nothing: a `base64` there would be a second spelling of a body they already hold.
+`uvp http` and `uvp soap` name that the bytes came with the answer and leave them to
+`--json` rather than printing a base64 blob under a body they have just shown as text.
+
+**The SOAP cut moved to bytes, which is what let the pair be one decode.** The same
+change closed a second defect, in the one path where the text a caller received and
+the string the tool parsed were already two reads of one body. `uvp_soap_call` cut the
+envelope at 64 Ki _characters_ after decoding it, so the string handed over, the decode
+`text_lossy` was about, and the bytes `base64` would carry were three different ranges
+of the body, and two things followed from cutting on code units. It could split a
+surrogate pair, which is a loss no field here can name: each half re-encodes to a
+replacement character and the pair is gone, so the same body would report
+`invalid-utf8` for a cut the tool made. And it could report a loss where there was
+none, because `truncated` already compared the body's byte length against 64 KiB: an
+envelope of three-byte characters came back saying only a prefix was shown while every
+character in it was whole. The cut is `SOAP_ENVELOPE_BYTES` now, taken on the bytes,
+which is the same number `truncated` compares and the same buffer `text`, `text_lossy`
+and `base64` are all made from. A byte cut can land inside a character; nothing can
+avoid that, and saying so is what `text_lossy: "truncated"` is for.
+
+**The fault is read from the whole envelope, and that asymmetry is the point.** The
+prefix handed over is evidence about this exchange's bytes; a fault is a finding about
+the call. Reading the fault from the prefix would turn "the service answered with a
+fault" into `success` whenever the fault sat past the cut — a claim the response does
+not support, and the direction of error a caller acts on. So `fault` is parsed from
+the whole body while the body shown is a prefix, and what tells a caller that is
+`truncated` together with a `bytes` larger than the text. It is a real asymmetry
+rather than a tidy one, and the row above carries what it costs: the cap has no input,
+so a caller who needs the envelope a fault came from cannot ask for it.
 
 **An additive field, and breaking anyway.** `text_lossy` is optional and every
 previous answer is still valid, which is the shape a changelog would call a feature.
@@ -1259,6 +1307,14 @@ The commit is marked `!` with a `BREAKING CHANGE:` footer, and release-please ta
 the major bump. What made this worth checking rather than assuming is that the
 repository's own history has the other shape in it: additive fields landed without
 the marker, which is a rule quietly not followed rather than a rule changed.
+
+`base64` is the second instance of the same shape and the stronger one. It is
+optional and absent from every clean answer, and it also does not exist in the
+previous contract at all on `uvp_soap_call`'s body: a client that cached that schema
+does not merely reject a body carrying a field it marked optional, it sees a field
+the schema never declared, which is the same rejection for a different reason. Both
+facts are the same fact about closed objects, and both are why this is one `!` rather
+than a feature release and a note.
 
 ### A link failure, from captures {#link-failures}
 

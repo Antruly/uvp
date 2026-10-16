@@ -474,6 +474,80 @@ describe("the web primitives", () => {
   );
 
   it(
+    "keeps the fault, the lossy text and the bytes together on a mangled envelope",
+    async () => {
+      // Three answers about one response that a caller needs at once: the call
+      // faulted, the envelope it read is not the bytes that arrived, and those
+      // bytes come with the answer. Dropping any one of them loses something —
+      // the fault is the only actionable part of a 500, the loss explains a text
+      // that does not match the digest, and the bytes are what a caller needs to
+      // see what was actually there.
+      const output = await call("uvp_soap_call", {
+        endpoint: `${fixture.origin}/soap/fault-not-utf8`,
+        soap_version: "1.1",
+        operation: "Add",
+      });
+      expectConforms("uvp_soap_call", output);
+      expect(output["outcome"]).toBe("fault");
+      expect(output["status"]).toBe(500);
+      const fault = output["fault"] as { reason?: string };
+      expect(fault.reason).toContain("the calculator is");
+      expect(fault.reason).toContain(String.fromCodePoint(0xff_fd));
+
+      const body = output["body"] as { text?: string; base64?: string; text_lossy?: string };
+      expect(body.text_lossy).toBe("invalid-utf8");
+      // The byte the fixture put in the faultstring is in the envelope handed over,
+      // which is the property that makes these bytes worth carrying: only they can
+      // say what the decode replaced.
+      const sent = Buffer.from(body.base64 ?? "", "base64");
+      expect(sent.includes(0xff)).toBe(true);
+      // Not a re-encoding of the text beside it: that would carry the replacement
+      // character's own bytes instead of the byte they replaced, which is the
+      // difference between the envelope as it arrived and the envelope as it read.
+      expect(sent.equals(Buffer.from(body.text ?? "", "utf8"))).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "cuts the envelope on bytes, so a cut character is reported and a clean cut is not",
+    async () => {
+      // Two envelopes that differ only in where a three-byte character sits,
+      // relative to the 64 KiB cut: one under it, one straddling it. Both arrive
+      // as a prefix, and only the second lost anything — which a cut on characters
+      // could not tell apart, since it cannot land inside one.
+      const bodyOf = async (route: string): Promise<Record<string, unknown>> => {
+        const output = await call("uvp_soap_call", {
+          endpoint: `${fixture.origin}${route}`,
+          soap_version: "1.1",
+          operation: "Long",
+        });
+        expectConforms("uvp_soap_call", output);
+        return output["body"] as Record<string, unknown>;
+      };
+
+      const cut = await bodyOf("/soap/cut-envelope");
+      expect(cut["truncated"]).toBe(true);
+      expect(cut["text_lossy"]).toBe("truncated");
+      expect(cut["text"]).toMatch(new RegExp(`${String.fromCodePoint(0xff_fd)}$`, "u"));
+      // The bytes behind the text handed over: the first 64 KiB of the envelope as
+      // it was sent, not a re-encoding of a text that ends in half a character.
+      const handedOver = Buffer.from(cut["base64"] as string, "base64");
+      expect(handedOver.byteLength).toBe(64 * 1024);
+      expect(handedOver[64 * 1024 - 1]).toBe(0xe4);
+
+      const boundary = await bodyOf("/soap/boundary-envelope");
+      expect(boundary["truncated"]).toBe(true);
+      expect(boundary["text_lossy"]).toBeUndefined();
+      // Nothing lost on the way in, so there is nothing to hand over beside a text
+      // that is already the bytes it was decoded from.
+      expect(boundary["base64"]).toBeUndefined();
+      expect(boundary["text"]).toMatch(/<$/u);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "sends a caller-supplied envelope verbatim rather than rebuilding one",
     async () => {
       // The input that decides what goes on the wire. Without this, a client
@@ -507,6 +581,11 @@ describe("the web primitives", () => {
       expectConforms("uvp_soap_call", output);
       expect(output["outcome"]).toBe("success");
       expect(JSON.stringify(output)).toContain("42");
+      // A clean envelope is handed over as text and nothing else: the bytes are in
+      // the text, so a `base64` here would be a second copy of the answer.
+      const body = output["body"] as { base64?: string; text_lossy?: string };
+      expect(body.base64).toBeUndefined();
+      expect(body.text_lossy).toBeUndefined();
     },
     TIMEOUT,
   );

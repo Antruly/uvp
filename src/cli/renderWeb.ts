@@ -26,6 +26,17 @@ const LOSSY_TEXT: Record<string, string> = {
   "invalid-utf8": "the peer sent bytes that are not UTF-8, so this is not the response's text",
 };
 
+/**
+ * What both renderers say when a lossy decode comes with its bytes.
+ *
+ * The bytes are base64 of the same buffer the text was decoded from, and printing
+ * them here would put a blob under a body the tool has just decoded as text — and
+ * double a reader's output for what is usually one bad byte in an otherwise
+ * readable page. A reader who wants them can ask, so the line says how rather
+ * than spending the terminal on them.
+ */
+const BYTES_ALSO = "the bytes it is not came with this answer as base64; --json prints them";
+
 export const renderHttp = (output: Record<string, unknown>): string[] => {
   const request = obj(output["request"]);
   const body = obj(output["body"]);
@@ -89,9 +100,13 @@ export const renderHttp = (output: Record<string, unknown>): string[] => {
   if (lossy !== "") lines.push(row("", `text is a lossy decode: ${LOSSY_TEXT[lossy] ?? lossy}`));
 
   const text = str(body["text"]);
-  if (text !== "") lines.push("", `# ${CONTENT_WARNING}`, clip(text, 8_000));
   const base64 = str(body["base64"]);
-  if (base64 !== "") lines.push("", `# ${CONTENT_WARNING}, binary, base64:`, clip(base64, 2_000));
+  if (lossy !== "" && base64 !== "") lines.push(row("", BYTES_ALSO));
+  if (text !== "") lines.push("", `# ${CONTENT_WARNING}`, clip(text, 8_000));
+  // Only when there is no text: `base64` beside a text is the text's own bytes,
+  // which `text_lossy` has already accounted for above.
+  if (base64 !== "" && text === "")
+    lines.push("", `# ${CONTENT_WARNING}, binary, base64:`, clip(base64, 2_000));
 
   return lines;
 };
@@ -207,13 +222,15 @@ export const renderSoap = (output: Record<string, unknown>): string[] => {
   const body = obj(output["body"]);
   const text = str(body["text"]);
   if (text !== "") lines.push("", `# response envelope, ${CONTENT_WARNING}:`, clip(text, 8_000));
-  // Both caps — the 64 Ki-character cut above and the transport's — are reported
-  // by `truncated`, which used to say "the log is a prefix" here, a sentence
-  // about the log renderer copied into the SOAP one.
+  // Both caps — the 64 KiB byte cut `uvp_soap_call` makes on the envelope, and
+  // the transport's own read limit — are reported by `truncated`, which used to
+  // say "the log is a prefix" here, a sentence about the log renderer copied into
+  // the SOAP one.
   if (bool(body["truncated"]) === true)
     lines.push(row("truncated", "yes — only a prefix is shown"));
   const lossy = str(body["text_lossy"]);
   if (lossy !== "") lines.push(row("", `text is a lossy decode: ${LOSSY_TEXT[lossy] ?? lossy}`));
+  if (lossy !== "" && str(body["base64"]) !== "") lines.push(row("", BYTES_ALSO));
   return lines;
 };
 

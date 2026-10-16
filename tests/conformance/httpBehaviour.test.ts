@@ -305,11 +305,17 @@ describe("a body the text is not", () => {
       expect(body["digest"]).toBe(digest(sent));
       expect(digest(Buffer.from(body["text"] as string, "utf8"))).not.toBe(body["digest"]);
 
-      // And the bytes themselves are not in this answer: a body decoded as text is
-      // handed over as text and not also as base64, so `text_lossy` is the whole
-      // of what a caller gets to know about the loss. The roadmap carries that as
-      // its own question rather than this lane inventing an answer.
-      expect(body["base64"]).toBeUndefined();
+      // And the bytes the text is not come with the answer. This is the part a
+      // caller cannot get anywhere else: the digest is over bytes, `text_lossy`
+      // only names the loss, and the replacement characters cannot be undone — so
+      // without this field a caller holding a lossy text has no way to see what
+      // was actually sent.
+      expect(body["base64"]).toBe(sent.toString("base64"));
+      const handedOver = Buffer.from(body["base64"] as string, "base64");
+      expect(handedOver).toEqual(sent);
+      // Which is not the same thing as the text re-encoded, and that difference is
+      // the whole reason the field exists.
+      expect(handedOver.equals(Buffer.from(body["text"] as string, "utf8"))).toBe(false);
     },
     TIMEOUT,
   );
@@ -326,6 +332,10 @@ describe("a body the text is not", () => {
       expect(cut["truncated"]).toBe(true);
       expect(cut["text"]).toBe(`中中${replacement}`);
       expect(cut["text_lossy"]).toBe("truncated");
+      // The seven bytes that survived the cap, not the seven the caller named and
+      // not the body the peer sent: the bytes behind the text handed over.
+      const kept = Buffer.concat([Buffer.from("中中", "utf8"), Buffer.from([0xe4])]);
+      expect(cut["base64"]).toBe(kept.toString("base64"));
     },
     TIMEOUT,
   );
@@ -338,12 +348,16 @@ describe("a body the text is not", () => {
       // peer's, and a client that answered "truncated" here — the tempting
       // shortcut, since these are exactly the bytes a cap leaves — would send a
       // caller to look for a limit they never set.
+      const halfBody = Buffer.from("中".repeat(3), "utf8").subarray(0, 7);
       const half = await bodyOf({ url: `${fixture.origin}/half-character` });
 
       expect(half["truncated"]).toBe(false);
-      expect(half["bytes"]).toBe(7);
+      expect(half["bytes"]).toBe(halfBody.byteLength);
       expect(half["text"]).toBe(`中中${replacement}`);
       expect(half["text_lossy"]).toBe("invalid-utf8");
+      // Nothing cut it, so the bytes are the peer's own seven and the caller can
+      // check that the half character really is half of one.
+      expect(Buffer.from(half["base64"] as string, "base64")).toEqual(halfBody);
     },
     TIMEOUT,
   );
@@ -362,7 +376,9 @@ describe("a body the text is not", () => {
       expect(between["text"]).toBe("中中");
       expect(between["text_lossy"]).toBeUndefined();
       // And the text is the bytes that were kept, which is the property the field
-      // exists to certify.
+      // exists to certify — so there is nothing to hand over beside it, and a
+      // `base64` here would be a second spelling of a body the caller already has.
+      expect(between["base64"]).toBeUndefined();
       expect(Buffer.from(between["text"] as string, "utf8").byteLength).toBe(6);
     },
     TIMEOUT,
@@ -390,10 +406,16 @@ describe("a body the text is not", () => {
       expect(lossy.text).toMatch(/^\s+text is a lossy decode: the peer sent bytes.*$/mu);
       // Above the text, so it is read before the response is taken at face value.
       expect(lossy.text.indexOf("text is a lossy decode")).toBeLessThan(lossy.text.indexOf("Hi"));
+      // The bytes are in the answer, and the terminal says where they are rather
+      // than printing them: a reader of the human form wants the words, and the
+      // base64 blob would come under a body this renderer has just shown as text.
+      expect(lossy.text).toContain("--json");
+      expect(lossy.text).not.toContain("binary");
 
       const whole = await rendered(["http", `${fixture.origin}/multibyte`, "--max-bytes", "6"]);
       expect(whole.exit).toBe(EXIT_OK);
       expect(whole.text).not.toContain("lossy");
+      expect(whole.text).not.toContain("--json");
     },
     TIMEOUT,
   );

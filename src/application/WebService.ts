@@ -142,14 +142,16 @@ const readBody = (
  * The body block of the answer, assembled in one place.
  *
  * Every optional field here is present exactly when there is something to say:
- * `text` and `base64` are alternatives, `content_type` is absent for a response
- * that declared none, and `text_lossy` is absent when the text is the bytes. The
- * caller reads the field that is there rather than choosing between two, which is
- * why they are written as one spread each rather than as undefined values.
+ * `content_type` is absent for a response that declared none, `text_lossy` is
+ * absent when the text is the bytes, and `base64` is present exactly when the text
+ * is not them — so a caller that wants the body's bytes reads `base64` when it is
+ * there and `text` otherwise, which is a reading rather than a choice between two
+ * fields. They are written as one spread each rather than as undefined values
+ * because that is the same statement in the type.
  *
  * `bytes` and `digest` are the whole body's, not the decoded prefix's: the caps
- * above decide what is handed over as text, and a digest of what was kept would be
- * a different claim about a different body.
+ * above decide what is handed over, and a digest of what was kept would be a
+ * different claim about a different body.
  */
 const toBody = (
   exchange: HttpExchange,
@@ -197,6 +199,24 @@ export interface HttpRequestInput {
  * comparing the far end rather than the client.
  */
 const FRAME_PAYLOAD_BYTES = 64 * 1024;
+
+/**
+ * The most envelope bytes `uvp_soap_call` hands a caller as text.
+ *
+ * A byte count rather than the character count this used to cut at, so that the
+ * envelope a caller receives, the decode `text_lossy` is about, and the bytes
+ * `base64` carries are one buffer. Cutting characters is the one cut that can
+ * land between the two halves of a surrogate pair, which produces text that
+ * cannot be re-encoded to itself and that no field in the answer can name; a cut
+ * between bytes can only land inside a character, which is exactly what
+ * `text_lossy: "truncated"` reports. It is also the number `truncated` already
+ * compared the body's byte length against, so the field and the cut agree now
+ * rather than by coincidence on ASCII.
+ *
+ * There is no input for it — a caller cannot ask for more of the envelope — and
+ * the roadmap carries that as its own row rather than as a hidden limit.
+ */
+const SOAP_ENVELOPE_BYTES = 64 * 1024;
 
 /**
  * How far past the idle timeout the native probe's own ceiling sits.
@@ -1106,7 +1126,14 @@ export class WebService {
     status: number;
     outcome: "success" | "fault" | "transport_error";
     fault?: { code?: string; subcode?: string; reason?: string; detail?: string };
-    body: { bytes: number; text?: string; truncated: boolean; digest: string };
+    body: {
+      bytes: number;
+      text?: string;
+      base64?: string;
+      truncated: boolean;
+      text_lossy?: "truncated" | "invalid-utf8";
+      digest: string;
+    };
     timing: ReturnType<typeof toTiming>;
   }> {
     const envelope =
@@ -1191,15 +1218,24 @@ export class WebService {
       captureId: undefined,
     });
 
-    // One decode, one owner: the envelope is parsed from the same string the
-    // caller receives, so the text the fault was read out of and the text handed
-    // over cannot be two different answers about the same bytes.
-    const text = exchange.body.toString("utf8");
-    // `text` is cut to 64 Ki characters below and `truncated` reports that; this
-    // says why the decode itself is not the body's bytes, which is a different
-    // fact and the transport's cap is what causes it.
-    const lossy = textLossiness(exchange.body, text, exchange.bodyTruncated);
-    const fault = parseSoapFault(text);
+    // The envelope as the caller receives it: cut, then decoded once, so the text
+    // handed over, the `text_lossy` about it and the bytes `base64` carries are
+    // one decode of one buffer. A caller can then recover what the decode replaced
+    // from the answer itself.
+    const kept = exchange.body.subarray(0, SOAP_ENVELOPE_BYTES);
+    const text = kept.toString("utf8");
+    const truncated = exchange.body.byteLength > SOAP_ENVELOPE_BYTES || exchange.bodyTruncated;
+    // Why the decode is not the bytes it was given, which is a different fact from
+    // `truncated`: a cut that landed on a character boundary lost nothing.
+    const lossy = textLossiness(kept, text, truncated);
+    // The fault is read from the whole envelope rather than from the prefix above,
+    // because it is a finding about the call and not about the bytes handed over: a
+    // fault past the cut is still this call's outcome, and a `success` for a call
+    // whose fault was out of view would be a claim the response does not support.
+    // This is the same buffer read further rather than a second account of it, and
+    // where the two reads differ — a cut inside a character, which leaves the
+    // prefix ending in a replacement one — `text_lossy` accounts for the prefix.
+    const fault = parseSoapFault(exchange.body.toString("utf8"));
     if (fault !== undefined) {
       recordUnknown(
         recorder,
@@ -1219,8 +1255,9 @@ export class WebService {
       ...(fault === undefined ? {} : { fault }),
       body: {
         bytes: exchange.body.byteLength,
-        text: text.slice(0, 64 * 1024),
-        truncated: exchange.body.byteLength > 64 * 1024 || exchange.bodyTruncated,
+        text,
+        ...(lossy === undefined ? {} : { base64: kept.toString("base64") }),
+        truncated,
         ...(lossy === undefined ? {} : { text_lossy: lossy }),
         digest: sha256(exchange.body),
       },
