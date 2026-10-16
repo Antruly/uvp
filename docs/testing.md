@@ -880,14 +880,34 @@ workstation and the job runs on a smaller machine: the limit is what turns a
 sweep that overruns into a reported failure with its reports retained, rather than
 a platform kill with nothing to read.
 
+**The first full sweep is on the record, and it ran inside that projection.** Run
+[`38919206652`](https://github.com/Antruly/uvp/actions/runs/38919206652)
+(`Mutation sweep`, `workflow_dispatch`, success, 2026-10-16) mutated all eight
+files into **1281 mutants**. Its `npx --no-install stryker run` step took **51
+minutes 53 seconds** against the 41-minute projection, and it reported **936
+killed, 1 timeout, 344 survived, 0 with no coverage, 0 errors — 73.15%**, with the
+summary script printing `936/1281 mutants detected — score 73.1%`. That is **2.4
+seconds per mutant** in CI against the 1.9 measured on the workstation this
+document's other numbers come from, so the smaller machine costs about a quarter
+more time and the 90-minute limit is not close.
+
+**The per-file read**, because the aggregate hides the range: `ToolchainProvider.ts`
+94.44%, `errors.ts` 90.07%, `unknown.ts` 86.05%, `bundleDiff.ts` 85.41%,
+`evidence.ts` 67.50%, `assertions.ts` 66.41%, `workspaceManifest.ts` 58.59%, and
+`evidenceHelpers.ts` **17.65%** — 15 killed against 70 survived, an order of
+magnitude below every other file and the largest single read this lane has
+produced. `errors.ts`'s 127 killed and 14 survived reproduce the one-file
+measurement above exactly, from a different host and a different run shape.
+
 **What exit-code grading costs**, stated because it is where a score can still
 mislead: there is no per-test attribution left, so a survivor's `coveredBy` no
 longer says which test should have caught it; and a mutant whose damage stops the
 run from starting at all reads as a kill rather than as a survivor or as a broken
-run. The fourteen survivors are real locations — `src/domain/errors.ts:148`'s
-conditional `docs` spread among them, and the message strings beside it — and each
-one still has to be read, because a survivor is either a missing assertion or an
-equivalent mutant.
+run — which also makes the percentage an **upper bound**, since a group that fails
+for a reason of its own is indistinguishable from one a mutant killed. The fourteen
+survivors are real locations — `src/domain/errors.ts:148`'s conditional `docs`
+spread among them, and the message strings beside it — and each one still has to be
+read, because a survivor is either a missing assertion or an equivalent mutant.
 
 The four ways, all of them still on the record:
 
