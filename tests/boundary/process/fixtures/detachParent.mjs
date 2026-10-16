@@ -1,4 +1,20 @@
-import { startSupervised } from "../../../../dist/toolchains/processRunner.js";
+/**
+ * The compiled module, by URL rather than as a static specifier.
+ *
+ * `dist/` is build output, not a source directory — `npm run compile` deletes it
+ * with `clean-build-output.mjs` and writes it again, and `lint` runs in the same
+ * turbo pass. A static relative import here is a path `oxlint`'s import resolver
+ * *opens* while linting this file, and a delete that lands between the resolver's
+ * `stat` and its `open` fails the whole lint run with `Failed to open file
+ * …/dist/toolchains/processRunner.js … No such file or directory (os error 2)`.
+ * That is the whole of #13, reproduced by failing that one `open` and nothing
+ * else. A specifier built at run time is not resolved statically, so linting no
+ * longer reads the build output at all. The target is unchanged, and this fixture
+ * still runs against `dist/` rather than `src/`.
+ */
+const { startSupervised } = await import(
+  new URL("../../../../dist/toolchains/processRunner.js", import.meta.url).href
+);
 
 /**
  * A detached service and the parent that let go of it.
