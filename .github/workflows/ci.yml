@@ -203,6 +203,51 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The repository's only Windows lane, and the reason it is narrower than the
+  # others.
+  #
+  # Everything uvp says about Windows was read out of the source rather than
+  # observed: the `cl` probe in the local provider, the `C:/…` path rule in the
+  # build-output parser, `detached: process.platform !== "win32"` in the process
+  # runner, and the `.exe` suffix the native probe looks for. No job had ever run
+  # there, so every one of those claims was `undetermined` on the platform it is
+  # about.
+  #
+  # It runs the source projects only. They need no C++ compiler and no libuvcpp
+  # install, so what this job establishes is that the TypeScript half of uvp works
+  # on Windows — generation, parsing, the provider's own decisions, capture and
+  # replay. A generated workspace is **not** built or run here, and the job name
+  # says so rather than leaving it to be assumed: that is the `toolchain` lane, on
+  # Linux, against a real libuvcpp.
+  windows-source:
+    name: Windows source tests (no C++ build)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # ./.github/actions/npm-cache owns the npm download cache, and saves it
+          # only from trusted default-branch events. setup-node v5 caches it by
+          # itself whenever package.json declares a packageManager.
+          package-manager-cache: false
+      - name: Cache npm package downloads
+        id: npm-cache
+        uses: ./.github/actions/npm-cache
+      - run: npm ci
+      # No `--reporter` flags, and therefore nothing to add back: the config's own
+      # two reporters already name every skipped test, and a flag here would
+      # replace that list (see `scripts/verify-reporters.mjs`).
+      - name: Run the source projects
+        run: npm run test:fast
+      # No report artifact, deliberately. The `test` job merges every artifact
+      # named `vitest-report-*` into one coverage run, and this lane is not part of
+      # that merge — what it establishes is that these tests pass here, which the
+      # job's own log shows.
+
   test-shard:
     name: Test shard (${{ matrix.shard }})
     needs: [changes, build]
@@ -682,6 +727,7 @@ jobs:
       - static
       - build
       - test-source
+      - windows-source
       - test-shard
       - test
       - toolchain

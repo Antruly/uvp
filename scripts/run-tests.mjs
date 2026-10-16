@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { BUILT_PROJECT_NAMES, SOURCE_PROJECT_NAMES } from "./lib/test-projects.mjs";
@@ -25,7 +27,38 @@ import { REPO_ROOT } from "./lib/paths.mjs";
  * that has to be kept in step with this one. `--only` is the same idea for a
  * single lane: it stays valid when the lane list changes, where an enumerated
  * `--project` flag does not.
+ *
+ * The Vitest CLI is resolved from Vitest's own manifest and run through the Node
+ * already running this script, rather than spawned from `node_modules/.bin`.
+ * That path is the obvious one and works on Linux and macOS; on Windows there is
+ * no file there to execute, so the Windows lane would die before loading a test
+ * file and the failure would look like a broken suite rather than a wrong path.
  */
+
+const require = createRequire(import.meta.url);
+
+/**
+ * The Vitest entry point this install provides, resolved rather than assumed.
+ *
+ * Same reasoning as `scripts/lint.mjs`'s oxlint resolution: the package's own
+ * manifest says where its binary is, so a layout change moves both together and
+ * `knip` still sees the dependency being used. Spawning the path directly is not
+ * enough either — the file behind it is a script with a shebang, which Windows
+ * cannot start — so callers run it through `process.execPath`.
+ */
+const resolveVitest = () => {
+  try {
+    const manifest = require.resolve("vitest/package.json");
+    const { bin } = JSON.parse(readFileSync(manifest, "utf8"));
+    return path.join(path.dirname(manifest), typeof bin === "string" ? bin : bin.vitest);
+  } catch (error) {
+    console.error(`Cannot resolve vitest: ${error.message}`);
+    console.error("Install first: npm ci");
+    process.exit(2);
+  }
+};
+
+const VITEST = resolveVitest();
 
 const GROUPS = {
   source: SOURCE_PROJECT_NAMES,
@@ -89,10 +122,9 @@ if (projects.length === 0) {
 }
 
 const projectFlags = projects.flatMap((name) => ["--project", name]);
-const result = spawnSync(
-  path.join(REPO_ROOT, "node_modules", ".bin", "vitest"),
-  ["run", ...projectFlags, ...rest],
-  { cwd: REPO_ROOT, stdio: "inherit" },
-);
+const result = spawnSync(process.execPath, [VITEST, "run", ...projectFlags, ...rest], {
+  cwd: REPO_ROOT,
+  stdio: "inherit",
+});
 
 process.exit(result.status ?? 1);
