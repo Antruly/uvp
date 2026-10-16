@@ -1050,10 +1050,13 @@ the report's own `config.testRunner` is `command` — under any other runner the
 summary says it cannot read the basis rather than reporting 936 false positives,
 which is the state [#41](https://github.com/Antruly/uvp/issues/41)'s fix would
 create. `npm run verify:mutation-summary` pins each reading against fixture
-reports. One number in that job is still wrong and filed as
-[#43](https://github.com/Antruly/uvp/issues/43): the summary counts the sweep's one
-`Timeout` as a survivor where Stryker counts it as detected, so the same run printed
-`73.1%` and `73.15%`.
+reports. One number in that job was wrong and is fixed as
+[#43](https://github.com/Antruly/uvp/issues/43): the summary counted the sweep's one
+`Timeout` as a survivor where Stryker's own metric counts it as detected, so the same
+run printed `73.1%` beside `73.15%` and listed a mutant that stopped the group
+finishing in a table of places where the suite still passes. The counting is now read
+from `mutation-testing-metrics`' own formula, so the same report prints `937/1281` and
+`344 survivor(s)`, and the timed-out mutant is named on its own line.
 
 The four ways, all of them on the record:
 

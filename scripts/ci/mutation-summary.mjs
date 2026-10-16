@@ -10,13 +10,50 @@
  * an evidence report that says `verified` without having looked. The score
  * itself is an upper bound, and the kill basis below it is how much of one.
  *
+ * The score is the one `mutation-testing-metrics` computes rather than one this
+ * file invents. What counts as detected, what counts as a survivor, and what is
+ * outside the score altogether are read from the package Stryker's own clear-text
+ * report scores through, because two readings of one report in one job is a
+ * disagreement waiting to be read as a trend.
+ *
  * Prints to stdout and, when `GITHUB_STEP_SUMMARY` is set, to the job summary.
  */
 
 import { appendFileSync, readFileSync } from "node:fs";
 
 const REPORT = process.env["MUTATION_REPORT"] ?? "reports/mutation/uvp.json";
-const SURVIVING_STATUSES = new Set(["Survived", "NoCoverage", "Timeout"]);
+
+/**
+ * Which statuses count, taken from the tool that produces the report.
+ *
+ * `mutation-testing-metrics@3.8.4` — the package behind Stryker's own reported
+ * score — computes `totalDetected = timeout + killed` and
+ * `totalUndetected = survived + noCoverage`
+ * (`dist/src/calculateMetrics.js:170`), scores
+ * `totalDetected / (totalDetected + totalUndetected)`, and keeps
+ * `totalInvalid = runtimeErrors + compileErrors` along with the ignored and
+ * pending mutants out of that total.
+ *
+ * This file used to count a `Timeout` as a survivor. The first full sweep printed
+ * **73.15%** from Stryker and **73.07%** from here in the same job, and the whole
+ * gap was its single timed-out mutant ([#43](https://github.com/Antruly/uvp/issues/43)).
+ *
+ * The metrics package is the right reference on the merits too, not only as a
+ * convention. Under the `command` runner every mutant runs the whole mutation
+ * group, which normally finishes in about two seconds against the runner's
+ * thirty-second limit — so a mutant that times out is one whose damage stopped
+ * the run finishing at all. That is the suite responding to the change, which is
+ * what detected means.
+ *
+ * It is not the same kind of detection as a kill, though: the group did not
+ * exit, it was killed. So the timed-out mutants are printed with their locations
+ * rather than folded silently into the count, and the mutants outside the score
+ * are printed when there are any.
+ */
+const DETECTING_STATUSES = new Set(["Killed", "Timeout"]);
+const SURVIVING_STATUSES = new Set(["Survived", "NoCoverage"]);
+const INVALID_STATUSES = new Set(["RuntimeError", "CompileError"]);
+const UNSCOPED_STATUSES = new Set(["Ignored", "Pending"]);
 
 /**
  * What a kill rests on.
@@ -107,6 +144,40 @@ const killBasisLines = (killed, runner) => {
   ];
 };
 
+// `3 RuntimeError, 1 Ignored`, in the order the statuses were declared above.
+const statusCounts = (mutants) => {
+  const counts = new Map();
+  for (const mutant of mutants) {
+    counts.set(mutant.status, (counts.get(mutant.status) ?? 0) + 1);
+  }
+  return [...counts].map(([status, count]) => `${String(count)} ${String(status)}`).join(", ");
+};
+
+// The timed-out mutants, as lines. They are counted as detected, and they are
+// still worth naming: a mutation that stops the group terminating is a decision
+// the code makes that no assertion bounds, which is a reading a kill count
+// cannot carry.
+const timeoutLines = (timedOut) => {
+  if (timedOut.length === 0) return ["Timeout: no mutant exceeded the runner's limit."];
+  return [
+    `Timeout: ${String(timedOut.length)} of the detected mutants — ${timedOut
+      .slice(0, 5)
+      .map(location)
+      .join(", ")}.`,
+    "These are mutants the runner's limit stopped rather than a failing test: counted as",
+    "detected, the way Stryker's own metric counts them, and worth reading anyway.",
+  ];
+};
+
+// The mutants no score covers. Printed only when there are any, because a zero
+// here is the ordinary case and a line of zeroes every week is a line nobody
+// reads.
+const outsideScoreLines = (outside) => [
+  `Outside the score: ${statusCounts(outside)}. An errored mutant is not a detected one,`,
+  "and an ignored or pending one was never run; Stryker's metric leaves all of them out",
+  "of its total, and so does this.",
+];
+
 const main = () => {
   const report = readReport();
   if (report === undefined) {
@@ -142,17 +213,38 @@ const main = () => {
   }
 
   const survivors = mutants.filter((mutant) => SURVIVING_STATUSES.has(mutant.status));
-  const detected = mutants.length - survivors.length;
-  const score = mutants.length === 0 ? 0 : (detected / mutants.length) * 100;
+  const detected = mutants.filter((mutant) => DETECTING_STATUSES.has(mutant.status));
+  const outside = mutants.filter(
+    (mutant) => INVALID_STATUSES.has(mutant.status) || UNSCOPED_STATUSES.has(mutant.status),
+  );
+  const scoreable = detected.length + survivors.length;
 
+  // The same refusal to invent a number the metrics package makes: it returns
+  // `NaN` when nothing was scoreable, and a percentage over a report that is all
+  // errors and ignored mutants would describe the runner rather than the suite.
+  if (scoreable === 0) {
+    process.stderr.write(
+      `${String(mutants.length)} mutants were reported and none of them was scoreable: ` +
+        `they are ${statusCounts(outside)}. A score over this report would describe the ` +
+        "runner, not the suite, so it is reported as a failure instead of a number.\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const score = (detected.length / scoreable) * 100;
   const killed = mutants.filter((mutant) => mutant.status === "Killed");
+  const timedOut = mutants.filter((mutant) => mutant.status === "Timeout");
 
   const lines = [
     `# Mutation sweep`,
     "",
-    `${String(detected)}/${String(mutants.length)} mutants detected — score ${score.toFixed(1)}%.`,
+    `${String(detected.length)}/${String(scoreable)} mutants detected — score ${score.toFixed(1)}%.`,
     "",
     ...killBasisLines(killed, report.config?.testRunner),
+    "",
+    ...timeoutLines(timedOut),
+    ...(outside.length === 0 ? [] : ["", ...outsideScoreLines(outside)]),
     "",
   ];
 
