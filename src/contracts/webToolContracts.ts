@@ -3,6 +3,7 @@ import { z } from "zod";
 import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
+import { verdictStatusSchema } from "../domain/verdict.js";
 
 const exchangeIdSchema = z.string().regex(/^exc_[0-9a-f]{22}$/u);
 const captureIdSchema = z.string().regex(/^cap_[0-9a-f]{22}$/u);
@@ -883,11 +884,11 @@ export const assertExchangeContract = defineTool({
   title: "Assert over a recorded exchange",
   description:
     "Evaluate assertions against an exchange recorded earlier in this session, without sending " +
-    "any traffic. Returns each assertion's outcome with the observed value behind it, so a " +
-    "failure shows what was actually there rather than only that it differed. An assertion the " +
-    "record cannot answer — a header the client never read, a body that was never recorded — is " +
-    "reported as an unknown with the reason and left out of both counts, because `passed` and " +
-    "`failed` are claims about checks that ran.",
+    "any traffic. Returns one row per assertion, in the order asked, with the verdict it came to " +
+    "and the observed value behind it, so a failure shows what was actually there rather than " +
+    "only that it differed. An assertion the record cannot answer — a header the client never " +
+    "read, a body that was never recorded — comes back `undetermined` with the reason in its " +
+    "message: neither a pass nor a failure, and counted as neither.",
   kind: "web",
   inputSchema: z.object({
     exchange_id: exchangeIdSchema,
@@ -907,13 +908,24 @@ export const assertExchangeContract = defineTool({
   outputSchema: z.object({
     ...toolEnvelopeShape,
     exchange_id: exchangeIdSchema,
-    passed: z.number().int(),
-    failed: z.number().int(),
+    /**
+     * The three counts and the rows they count.
+     *
+     * `satisfied + unmet + undetermined` is `results.length`, always: every
+     * assertion asked appears exactly once, so a caller does not have to notice
+     * an absent check to know one did not run. The vocabulary is `domain`'s
+     * `VerdictStatus`, the one `uvp_doctor` reports feature availability with,
+     * because a row here and a feature verdict there answer the same question
+     * and must not spell their third state two ways.
+     */
+    satisfied: z.number().int(),
+    unmet: z.number().int(),
+    undetermined: z.number().int(),
     results: z.array(
       z.object({
         kind: z.string(),
         target: z.string().optional(),
-        passed: z.boolean(),
+        status: verdictStatusSchema,
         /** What was actually observed, in the form the assertion compared against. */
         observed: z.unknown(),
         expected: z.unknown().optional(),

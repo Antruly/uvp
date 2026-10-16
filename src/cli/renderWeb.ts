@@ -448,10 +448,15 @@ export const renderCaptureReplay = (output: Record<string, unknown>): string[] =
 
 export const renderAssert = (output: Record<string, unknown>): string[] => {
   const results = list(output["results"]);
+  const satisfied = num(output["satisfied"]) ?? 0;
+  const unmet = num(output["unmet"]) ?? 0;
+  const undetermined = num(output["undetermined"]) ?? 0;
   const lines = [
     row(
       "assertions",
-      `${String(num(output["passed"]) ?? 0)} passed, ${String(num(output["failed"]) ?? 0)} failed over ${str(output["exchange_id"])}`,
+      `${String(satisfied)} satisfied, ${String(unmet)} unmet` +
+        (undetermined === 0 ? "" : `, ${String(undetermined)} undetermined`) +
+        ` over ${str(output["exchange_id"])}`,
     ),
   ];
   if (results.length === 0) return lines;
@@ -460,7 +465,7 @@ export const renderAssert = (output: Record<string, unknown>): string[] => {
     table(
       ["", "kind", "target", "observed", "expected"],
       results.map((entry) => [
-        bool(at(entry, "passed")) === true ? "ok" : "FAILED",
+        verdictMark(at(entry, "status")),
         str(at(entry, "kind")),
         str(at(entry, "target"), "-"),
         oneLine(describe(at(entry, "observed")), 40),
@@ -468,11 +473,21 @@ export const renderAssert = (output: Record<string, unknown>): string[] => {
       ]),
     ),
   );
+  // Both kinds of non-satisfied row carry a message worth reading, and they are
+  // not the same message: one says what differed, the other says why nobody
+  // could tell. Marked, because a reader scanning the tail of a long table
+  // should not have to match prose to a status column to see which is which.
   for (const entry of results) {
-    if (bool(at(entry, "passed")) !== true) lines.push(`  ${str(at(entry, "message"))}`);
+    const status = str(at(entry, "status"));
+    if (status === "satisfied") continue;
+    lines.push(`  ${status === "undetermined" ? "? " : "! "}${str(at(entry, "message"))}`);
   }
   return lines;
 };
+
+/** The status column: one word a reader can scan, for each of the three states. */
+const verdictMark = (status: unknown): string =>
+  status === "satisfied" ? "ok" : status === "unmet" ? "FAILED" : "unknown";
 
 const describe = (value: unknown): string => {
   if (value === undefined) return "-";

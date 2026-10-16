@@ -347,7 +347,7 @@ and DNS — which is why generated services bound each statement with a 5 s
 timeout instead of resizing a process-global pool, and why the generated README
 carries `UV_THREADPOOL_SIZE` for a caller who has measured their own workload.
 
-### The assertion engine's third state
+### The assertion engine's third state {#assertion-third-state}
 
 An assertion had two outcomes where the engine had three, and the missing one was
 the state this whole framework is built around. `AssertionOutcome.passed` is a
@@ -380,15 +380,47 @@ ran: `uvp_verify` reports `partial` when part of the goal was unexamined and
 nobody recorded is no longer measured as `length 0`, and a request that never
 answered is no longer compared against a latency limit.
 
-**No output schema changed, and that is a decision rather than an omission.**
+**The output schema changed, and the third state now has one name everywhere.**
 [CONTRIBUTING](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md) puts a
-tool's output schema behind a design discussion first, and the third state reaches
-a caller through `unverified` and the envelope's `unknowns`, which already exist
-and already carry a reason. The open question is whether `uvp_assert_exchange`'s `results[]` should carry
-`evaluated` beside `passed`, or a `status: met | unmet | undetermined` reusing the
-capability vocabulary — a `results` row and a capability answer to the same
-question should not spell their third state two ways. Until that is settled, the
-counter and the coverage note are where a caller learns a check did not run.
+tool's output schema behind a design discussion first, and the question left open
+here was whether `uvp_assert_exchange`'s `results[]` should carry `evaluated`
+beside `passed`, or a `status` reusing the capability vocabulary. It carries
+`status` — the second option — and the vocabulary is declared once, in
+`src/domain/verdict.ts`, as `satisfied | unmet | undetermined`.
+
+Three facts decided it. The same question was already answered in that vocabulary
+by `uvp_doctor` (`satisfied | unmet | undetermined`, declared inline in
+`DoctorService.ts` and again as a `z.enum` in the toolchain contract), and a
+`results` row and a capability answer that spell their third state two ways are
+two vocabularies to keep true. `evaluated` beside `passed` is that same pair
+re-encoded, which is the duplicated interpretation
+[the architecture rules](architecture.md) keep out of a boundary. And the row
+that a caller reads is the right place for the answer: `results[]` now holds one
+row per assertion asked, `not_evaluated[]` is gone, and
+`satisfied + unmet + undetermined` is `results.length`, so a check nobody could
+evaluate is visible in the array rather than inferable from a counter. The
+envelope's `unknowns` and the `partial` coverage note still carry it, which is
+where `uvp_verify` reports it and stays as it was: `uvp_verify` has no per-check
+rows, and its third state reaches a caller through `unverified[]` and `coverage`; its
+exchange counters are `assertions_passed`/`assertions_failed`, which its own contract
+declares and which this change leaves alone. The assertion evidence record inside the
+bundle does carry the three words now, because a bundle that spelled "nobody could tell"
+one way while the tool result it came from spelled it another is the duplication this row
+was opened for.
+
+The engine followed. `AssertionOutcome` carries `status` instead of
+`evaluated` + `passed`, negation is `negateVerdict` — which leaves
+`undetermined` alone, because the check that must not be inverted into a pass is
+the one that never ran — and the two counts moved to `tallyVerdicts`, so one
+function decides what a status contributes to a total. `uvp assert` renders the
+three states (`ok`, `FAILED`, `unknown`) and exits `2`, not `0`, when a check went
+unanswered: the exit codes are a two-way answer to a three-way question, and the
+collapse that must not happen is the one where "nobody could tell" reads as
+"everything held". This is a breaking output-schema change for `uvp_assert_exchange`
+and for `AssertionOutcome`; the catalog and the shipped skill were regenerated
+from the contracts, and the conformance test that pinned "an assertion it could
+not evaluate" as a missing row now pins it as a row whose `status` is
+`undetermined`.
 
 What makes this evidence rather than a patch: twenty-three of the engine's
 sixty-three tests fail against the previous `assertions.ts`, and each of the three
@@ -425,7 +457,7 @@ implicit.
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens                                                                                                                                         |
 | ⬜  | The runner warns that Node.js 20 is deprecated, naming the actions it is about by the SHA pinned here: in run `38827824455` it named `cache@0057852b`, `checkout@11d5960a`, `setup-node@49933ea5`, `upload-artifact@ea165f8d` and `download-artifact@d3f86a10`. That list is what ran rather than what is deprecated — `github-script@v7` targets `node20` too and never appeared, because its one job runs only on pull requests — so the count is six, where the row this replaced said four. `runs.using` in each action's own `action.yml` says `node20` at the pinned SHA and `node24` at the major Dependabot proposes, so all six clear it, none of them from a release note. They run on Node 24 today and the warning is not yet a failure — exactly the state that ends in a red lane on a date nobody wrote down. Adopting the six is the human owner's decision, [the pins above](#action-pins); they are rehearsed — SHAs resolved, all 40 references replaced, `verify:actions` green, every input still declared — but not run.    |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ⬜  | `uvp_verify`'s exchange rows carry `assertions_passed`, `assertions_failed` and `failures[]`, and its bundle's third state is `unverified[]`; there is no `results[]` there. The array with a `passed` per row is `uvp_assert_exchange`'s `results[]`, and an assertion that could not be evaluated is absent from it: a caller learns of it from the envelope's `unknowns` and the `partial` coverage note, not from a row. Whether that row should carry `evaluated` beside `passed`, or a `status: met \| unmet \| undetermined` reusing the capability vocabulary, is the open question; a row and a capability answer to the same question should not spell the third state two ways. An additive change, but a change to a tool's output schema, so it waits for the design discussion CONTRIBUTING requires                                                                                                                                                                                                                                |
+| ✅  | `uvp_assert_exchange`'s `results[]` carries `status: satisfied \| unmet \| undetermined` in place of `passed`, one row per assertion asked, and `not_evaluated[]` is gone: `satisfied + unmet + undetermined` is the row count, so a check nobody could evaluate is visible in the array rather than inferable from a counter. The vocabulary is declared once, in `src/domain/verdict.ts`, and `uvp_doctor`'s feature verdicts read it too. `uvp_verify` is unchanged — it has no per-check rows, and its third state reaches a caller through `unverified[]` and the coverage note. See [below](#assertion-third-state)                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ✅  | A workflow job whose own `if:` is wider than its steps assume: `test` runs whenever the run is not cancelled, so that a failed shard still produces a merged report, but it downloaded `uvp-test-runtime`, which `build` uploads only when `code` or `package` is selected. Two documentation-only pushes (`315d494`, `0dcbd94`) went red in _Portable tests_ at `Download the built runtime` while every lane that job depends on was correctly skipped, and the guard the job does carry sits below the download. The three artifact steps are guarded on `code` individually, a step above them says which of the two cases the run is in, and `npm run verify:artifact-guards` now compares every reader's condition against its writer's as a logical implication. See [below](#artifact-guards)                                                                                                                                                                                                                                             |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such

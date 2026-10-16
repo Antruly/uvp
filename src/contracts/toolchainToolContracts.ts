@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { UVP_FEATURES } from "../domain/features.js";
+import { verdictStatusSchema } from "../domain/verdict.js";
 import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 
@@ -13,7 +14,7 @@ import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
  */
 const featureAssessmentSchema = z.object({
   feature: z.enum(UVP_FEATURES),
-  status: z.enum(["satisfied", "unmet", "undetermined"]),
+  status: verdictStatusSchema,
   /** Why the feature is not satisfied, when it is not. */
   note: z.string().optional(),
 });

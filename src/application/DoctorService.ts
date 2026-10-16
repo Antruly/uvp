@@ -5,6 +5,7 @@ import { UvpFailure } from "../domain/errors.js";
 import { assessFeatures } from "./ToolchainProvider.js";
 import type { HeaderProbe, LibuvcppBuild, ToolchainProvider } from "./ToolchainProvider.js";
 import type { UvpFeature } from "../domain/features.js";
+import type { VerdictStatus } from "../domain/verdict.js";
 import { readWorkspaceManifest } from "./workspaceManifest.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import {
@@ -405,7 +406,7 @@ export interface DoctorLibuvcpp {
 /** One feature's verdict, as the tool contract reports it. */
 export interface DoctorFeature {
   feature: UvpFeature;
-  status: "satisfied" | "unmet" | "undetermined";
+  status: VerdictStatus;
   note?: string;
 }
 

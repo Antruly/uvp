@@ -9,6 +9,8 @@ import {
   transportFailureKind,
   TransportFailure,
 } from "./httpClient.js";
+import { tallyVerdicts } from "../domain/verdict.js";
+import type { VerdictStatus } from "../domain/verdict.js";
 import type { HttpExchange, HttpTiming } from "./httpClient.js";
 import type { NativeHttp3Probe } from "./NativeHttp3Probe.js";
 import { evaluateAssertions, percentile } from "./assertions.js";
@@ -1438,29 +1440,29 @@ export class WebService {
     }[];
   }): {
     exchange_id: string;
-    passed: number;
-    failed: number;
+    satisfied: number;
+    unmet: number;
+    undetermined: number;
+    /**
+     * One row per assertion that was asked of this exchange, in the order asked,
+     * with the verdict the engine reached and the value it read.
+     *
+     * A row whose `status` is `undetermined` is one the engine could not decide —
+     * a request that never completed, a header nobody looked at, a pattern that
+     * is not a valid expression — and its `message` says which. Every assertion
+     * the caller asked for is here, so the three counts above always add up to
+     * `results.length`; a check that could not run is neither a pass nor a
+     * failure and sits in neither count.
+     *
+     * It used to be two arrays, with the unevaluable ones in a `not_evaluated`
+     * of their own. One array with three states is the same information without
+     * asking a caller to join two lists to find out how many checks there were.
+     */
     results: {
       kind: string;
       target?: string;
-      passed: boolean;
+      status: VerdictStatus;
       observed: unknown;
-      expected?: unknown;
-      message: string;
-    }[];
-    /**
-     * The assertions this exchange could not answer, with the engine's reason.
-     *
-     * Separate from `results` rather than a `false` inside it, so that the
-     * counts a caller reads are counts of checks that ran: `passed + failed`
-     * equals `results.length`, which it would not if an unevaluable assertion
-     * sat in `results` while being absent from `failed`. The handler turns each
-     * of these into an envelope unknown, which is where this framework says
-     * what it did not establish.
-     */
-    not_evaluated: {
-      kind: string;
-      target?: string;
       expected?: unknown;
       message: string;
     }[];
@@ -1488,27 +1490,18 @@ export class WebService {
       })),
     );
 
-    const evaluated = outcomes.filter((outcome) => outcome.evaluated);
+    const tally = tallyVerdicts(outcomes.map((outcome) => outcome.status));
     return {
       exchange_id: input.exchange_id,
-      passed: evaluated.filter((outcome) => outcome.passed).length,
-      failed: evaluated.filter((outcome) => !outcome.passed).length,
-      results: evaluated.map((outcome) => ({
+      ...tally,
+      results: outcomes.map((outcome) => ({
         kind: outcome.kind,
         ...(outcome.target === undefined ? {} : { target: outcome.target }),
-        passed: outcome.passed,
+        status: outcome.status,
         observed: outcome.observed,
         ...(outcome.expected === undefined ? {} : { expected: outcome.expected }),
         message: outcome.message,
       })),
-      not_evaluated: outcomes
-        .filter((outcome) => !outcome.evaluated)
-        .map((outcome) => ({
-          kind: outcome.kind,
-          ...(outcome.target === undefined ? {} : { target: outcome.target }),
-          ...(outcome.expected === undefined ? {} : { expected: outcome.expected }),
-          message: outcome.message,
-        })),
     };
   }
 }

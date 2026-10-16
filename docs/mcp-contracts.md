@@ -181,10 +181,14 @@ exchange, and the digests behind them.
 **`uvp_assert_exchange`** — Assert over a recorded exchange.
 Evaluates assertions against an exchange captured earlier — status, headers, a
 JSON path, a body substring. Splitting assertions from requests means a failure
-can be re-examined without re-issuing the request. An assertion the record cannot
-answer is a third outcome: it is named in `unknowns` with the reason, left out of
-`passed` and `failed`, and counted as unexamined in the evidence's `coverage`, so
-neither counter is ever a claim about a check that never ran.
+can be re-examined without re-issuing the request. Every assertion asked appears
+once in `results`, in the order asked, carrying `status`: `satisfied`, `unmet`, or
+`undetermined`. The third one is an assertion the record cannot answer — a header
+the client never read, a body that was never recorded — and it is neither a pass
+nor a failure: `satisfied + unmet + undetermined` is always the row count, and the
+same check is also named in `unknowns` and counted as unexamined in the evidence's
+`coverage`. The vocabulary is the one `uvp_doctor` reports feature availability
+with, so the same question gets the same word in both places.
 
 ### Workflow
 

@@ -1410,10 +1410,11 @@ describe("capture and assertion", () => {
         ],
       });
       expectConforms("uvp_assert_exchange", asserted);
-      expect(asserted["passed"]).toBe(2);
-      expect(asserted["failed"]).toBe(0);
-      for (const result of asserted["results"] as { passed: boolean; observed: unknown }[]) {
-        expect(result.passed).toBe(true);
+      expect(asserted["satisfied"]).toBe(2);
+      expect(asserted["unmet"]).toBe(0);
+      expect(asserted["undetermined"]).toBe(0);
+      for (const result of asserted["results"] as { status: string; observed: unknown }[]) {
+        expect(result.status).toBe("satisfied");
         // The observed value travels with the verdict, so a failure shows what was
         // there rather than only that it differed.
         expect(result.observed).not.toBeUndefined();
@@ -1436,13 +1437,15 @@ describe("capture and assertion", () => {
         assertions: [{ kind: "status_equals", expected: 200 }],
       });
       expectConforms("uvp_assert_exchange", asserted);
-      expect(asserted["failed"]).toBe(1);
+      expect(asserted["unmet"]).toBe(1);
+      expect(asserted["satisfied"]).toBe(0);
+      expect(asserted["undetermined"]).toBe(0);
       const results = asserted["results"] as {
-        passed: boolean;
+        status: string;
         observed: unknown;
         message: string;
       }[];
-      expect(results[0]?.passed).toBe(false);
+      expect(results[0]?.status).toBe("unmet");
       expect(results[0]?.observed).toBe(418);
       expect(results[0]?.message).toContain("418");
     },
@@ -1450,12 +1453,13 @@ describe("capture and assertion", () => {
   );
 
   it(
-    "reports an assertion it could not evaluate as unanswered, not as a failure",
+    "reports an assertion it could not evaluate as undetermined, in a row of its own",
     async () => {
       // The check asks about a path the engine cannot walk, which is a limit of
-      // the check rather than a value that differed. Counted as a failure it
-      // reports the service as having answered something else, and counted as a
-      // pass it reports a check nobody performed.
+      // the check rather than a value that differed. Counted as unmet it reports
+      // the service as having answered something else, and counted as satisfied
+      // it reports a check nobody performed — so it is its own row, in its own
+      // state, and the count says how many of them there were.
       const output = await call("uvp_http_request", {
         url: `${fixture.origin}/hello`,
         method: "GET",
@@ -1470,11 +1474,16 @@ describe("capture and assertion", () => {
         ],
       });
       expectConforms("uvp_assert_exchange", asserted);
-      expect(asserted["passed"]).toBe(1);
-      expect(asserted["failed"]).toBe(0);
-      // One row per assertion that ran, so `passed + failed` is the row count
-      // rather than a number a reader has to reconcile against it.
-      expect((asserted["results"] as unknown[]).length).toBe(1);
+      expect(asserted["satisfied"]).toBe(1);
+      expect(asserted["unmet"]).toBe(0);
+      expect(asserted["undetermined"]).toBe(1);
+      // Both assertions are rows. The one that ran is not the only thing the
+      // caller asked about, and a row count below the number of assertions asked
+      // is what used to make a partial check read as a whole one.
+      const rows = asserted["results"] as { kind: string; status: string; message: string }[];
+      expect(rows).toHaveLength(2);
+      expect(rows[1]?.status).toBe("undetermined");
+      expect(rows[1]?.message).toContain("unsupported JSONPath");
 
       const unknowns = asserted["unknowns"] as { question: string; blocked_by?: string }[];
       expect(unknowns).toHaveLength(1);

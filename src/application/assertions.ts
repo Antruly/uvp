@@ -1,5 +1,7 @@
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import type { AssertionKind } from "../domain/assertionKinds.js";
+import { negateVerdict } from "../domain/verdict.js";
+import type { VerdictStatus } from "../domain/verdict.js";
 import type { ExchangeRecord } from "./sessionStore.js";
 
 /**
@@ -30,9 +32,8 @@ export interface AssertionSpec {
 export interface AssertionOutcome {
   readonly kind: AssertionKind;
   readonly target: string | undefined;
-  readonly passed: boolean;
   /**
-   * Whether the check ran at all.
+   * What the check came to.
    *
    * Two states were not enough. An exchange whose request never completed has no
    * status to compare, an HTTP/3 record carries only the response headers the
@@ -42,8 +43,13 @@ export interface AssertionOutcome {
    * each case, so the difference is a field rather than a word inside
    * `message`: a bundle counts failed assertions, and a check that never ran
    * must not be counted among them.
+   *
+   * Carried as the shared [`VerdictStatus`] rather than as `passed` beside an
+   * `evaluated` flag, because the tool that reports these rows and the tool that
+   * reports a feature's availability answer the same question, and their third
+   * states have to be the same word.
    */
-  readonly evaluated: boolean;
+  readonly status: VerdictStatus;
   readonly observed: unknown;
   readonly expected: unknown;
   readonly message: string;
@@ -139,9 +145,7 @@ const looseEquals = (actual: unknown, expected: unknown): boolean => {
  * correctly in ten of them and incorrectly in the eleventh.
  */
 interface RawOutcome {
-  readonly passed: boolean;
-  /** False when the evaluator never reached a verdict, and so never read the fact it compares. */
-  readonly evaluated: boolean;
+  readonly status: VerdictStatus;
   readonly observed: unknown;
   readonly message: string;
 }
@@ -151,15 +155,14 @@ type RawEvaluator = (record: ExchangeRecord, spec: AssertionSpec) => RawOutcome;
 /**
  * The verdict of a check that ran.
  *
- * A helper rather than three literals at each site, because `evaluated: true` is
- * the claim each evaluator is making: it read the fact it was asked about and
- * the fact decided the outcome. A site that cannot make that claim returns
+ * A helper rather than a literal at each site, because `status` here is the
+ * claim each evaluator is making: it read the fact it was asked about and the
+ * fact decided the outcome. A site that cannot make that claim returns
  * `notEvaluated` instead, and the two functions are the only way to build a
  * `RawOutcome`.
  */
 const verdict = (passed: boolean, observed: unknown, message: string): RawOutcome => ({
-  passed,
-  evaluated: true,
+  status: passed ? "satisfied" : "unmet",
   observed,
   message,
 });
@@ -167,14 +170,11 @@ const verdict = (passed: boolean, observed: unknown, message: string): RawOutcom
 /**
  * A check that could not run, with the reason and nothing else.
  *
- * `passed` is false here in the sense of "not a pass" rather than "a failure":
- * the message carries the difference, and `evaluated` is what a caller reads to
- * tell the two apart. Everything routed through this function is a fact about
- * the record or the request, never about the service.
+ * `unmet` would be a claim about the service; this is a fact about the record or
+ * the request, which is what everything routed through this function carries.
  */
 const notEvaluated = (message: string, observed: unknown = undefined): RawOutcome => ({
-  passed: false,
-  evaluated: false,
+  status: "undetermined",
   observed,
   message,
 });
@@ -475,8 +475,8 @@ export const evaluateAssertion = (
     // reported a pass — the one outcome here that claims the most while resting
     // on nothing. A `!header:…` against a name nobody looked at, and a
     // `!body~=…` against a body that was never recorded, both used to pass.
-    passed: raw.evaluated && (negated ? !raw.passed : raw.passed),
-    evaluated: raw.evaluated,
+    // `negateVerdict` leaves `undetermined` alone for that reason.
+    status: negated ? negateVerdict(raw.status) : raw.status,
     observed: raw.observed,
     message: negated ? `negated: ${raw.message}` : raw.message,
   };

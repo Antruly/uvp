@@ -199,6 +199,11 @@ export const assertCommand: CommandSpec = {
     "",
     "This is where negated assertions belong: --assert '!status=200'. `uvp verify` does not accept",
     "them, because uvp_verify's contract has no field to carry the negation and it would be dropped.",
+    "",
+    "A check that could not be evaluated — a header the client never read, a body that was never",
+    "recorded — is neither met nor unmet, and is not counted as either. If every check was answered",
+    "and none held, the exit code is 1; if any check went unanswered, it is 2, because the question",
+    "was asked and the record could not answer it.",
   ],
   input: (parsed) => {
     const exchangeId = asString(parsed, "exchange");
@@ -215,7 +220,14 @@ export const assertCommand: CommandSpec = {
     }
     return { exchange_id: exchangeId, assertions };
   },
-  verdict: (output) => ((num(output["failed"]) ?? 0) > 0 ? EXIT_NO : undefined),
+  // Three states, three exits. A caller scripting this command reads `0` as "every check
+  // held", so an assertion nobody could evaluate must not exit 0: the question was asked
+  // and not answered, which is `2` here and everywhere else in this CLI. `1` stays what it
+  // was — the service was read and the answer was no.
+  verdict: (output) => {
+    if ((num(output["unmet"]) ?? 0) > 0) return EXIT_NO;
+    return (num(output["undetermined"]) ?? 0) > 0 ? EXIT_WRONG : undefined;
+  },
 };
 
 /**

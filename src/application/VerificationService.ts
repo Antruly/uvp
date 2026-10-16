@@ -12,6 +12,7 @@ import {
   recordUnknown,
 } from "./evidenceHelpers.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
+import { tallyVerdicts } from "../domain/verdict.js";
 import { evaluateAssertions, unevaluatedQuestion } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
 import type { TlsVerification } from "./httpClient.js";
@@ -418,15 +419,15 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
             })),
           );
 
-    // A check that could not run is neither passed nor failed, and the two
-    // counters below are what `verificationStatus` reads. Counting an
-    // unevaluable assertion as a pass was the whole of this defect: the bundle
-    // reported `verified` for a pass that compared nothing.
-    const unrun = outcomes.filter((outcome) => !outcome.evaluated);
-    const passedCount = outcomes.filter((outcome) => outcome.passed).length;
-    evaluated += outcomes.length - unrun.length;
+    // A check that could not run is neither satisfied nor unmet, and the counts
+    // below are what `verificationStatus` reads. Counting an unevaluable
+    // assertion as a pass was the whole of this defect: the bundle reported
+    // `verified` for a pass that compared nothing.
+    const tally = tallyVerdicts(outcomes.map((outcome) => outcome.status));
+    const unrun = outcomes.filter((outcome) => outcome.status === "undetermined");
+    evaluated += tally.satisfied + tally.unmet;
     const failures = outcomes
-      .filter((outcome) => outcome.evaluated && !outcome.passed)
+      .filter((outcome) => outcome.status === "unmet")
       .map((outcome) => outcome.message);
     failed += failures.length;
 
@@ -461,21 +462,25 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       observed: {
         status: exchange.status,
         assertions: outcomes.length,
-        passed: passedCount,
-        failed: failures.length,
-        not_evaluated: unrun.length,
+        // The same three words the engine's outcomes and `uvp_assert_exchange`'s
+        // rows use. Renaming them in two places and not this one would leave the
+        // bundle spelling "nobody could tell" one way and the tool result it
+        // came from spelling it another.
+        satisfied: tally.satisfied,
+        unmet: tally.unmet,
+        undetermined: tally.undetermined,
       },
       derived: { elapsed_ms: Date.now() - startedAt },
       coverage:
         outcomes.length === 0
           ? coverageUnknown(`${spec.name} assertions`, "no assertions were supplied")
-          : unrun.length === 0
+          : tally.undetermined === 0
             ? coverageComplete(`${spec.name} assertions`)
             : coveragePartial(
                 `${spec.name} assertions`,
-                `${String(unrun.length)} of ${String(outcomes.length)} assertion(s) could not be evaluated ` +
+                `${String(tally.undetermined)} of ${String(outcomes.length)} assertion(s) could not be evaluated ` +
                   "against this exchange; each one names its own reason",
-                passedCount + failures.length,
+                tally.satisfied + failures.length,
                 outcomes.length,
               ),
       sources: [endpointSource(url)],
@@ -490,7 +495,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       // request for `2` reached a service that only speaks `1.1`.
       http_version: exchange.http_version,
       elapsed_ms: Date.now() - startedAt,
-      assertions_passed: passedCount,
+      assertions_passed: tally.satisfied,
       assertions_failed: failures.length,
       failures,
       ...certificateOf(exchange.tls),

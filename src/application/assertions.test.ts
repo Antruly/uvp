@@ -49,7 +49,7 @@ describe("evaluateAssertions", () => {
       { kind: "status_equals", expected: 200 },
       { kind: "status_equals", expected: 500 },
     ]);
-    expect(outcomes.map((outcome) => outcome.passed)).toEqual([true, false]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["satisfied", "unmet"]);
   });
 
   it("echoes the kind, target, and expected value it was asked about", () => {
@@ -80,7 +80,7 @@ describe("status_equals", () => {
   it("passes when the recorded status matches the expectation", () => {
     expect(only(exchange({ status: 200 }), { kind: "status_equals", expected: 200 })).toMatchObject(
       {
-        passed: true,
+        status: "satisfied",
         observed: 200,
       },
     );
@@ -88,7 +88,7 @@ describe("status_equals", () => {
 
   it("fails when the status differs, and reports what it saw", () => {
     const outcome = only(exchange({ status: 500 }), { kind: "status_equals", expected: 200 });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe(500);
     expect(outcome.expected).toBe(200);
     expect(outcome.message).toContain("500");
@@ -103,15 +103,14 @@ describe("status_equals", () => {
       kind: "status_equals",
       expected: 200,
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("no response status");
   });
 
   it("compares a numeric status against its string form, as documented", () => {
-    expect(only(exchange({ status: 200 }), { kind: "status_equals", expected: "200" }).passed).toBe(
-      true,
+    expect(only(exchange({ status: 200 }), { kind: "status_equals", expected: "200" }).status).toBe(
+      "satisfied",
     );
   });
 });
@@ -119,13 +118,13 @@ describe("status_equals", () => {
 describe("status_in", () => {
   it("passes when the status is one of the allowed values", () => {
     expect(
-      only(exchange({ status: 204 }), { kind: "status_in", expected: [200, 204] }).passed,
-    ).toBe(true);
+      only(exchange({ status: 204 }), { kind: "status_in", expected: [200, 204] }).status,
+    ).toBe("satisfied");
   });
 
   it("fails when the status is outside the allowed set, naming the set", () => {
     const outcome = only(exchange({ status: 500 }), { kind: "status_in", expected: [200, 204] });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe(500);
     expect(outcome.message).toContain("200");
     expect(outcome.message).toContain("204");
@@ -133,8 +132,7 @@ describe("status_in", () => {
 
   it("does not test membership when no status was recorded", () => {
     const outcome = only(exchange({ status: undefined }), { kind: "status_in", expected: [200] });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     // The set is still named, so a reader of the verdict knows what the check
     // would have been.
     expect(outcome.message).toContain("200");
@@ -151,7 +149,7 @@ describe("header assertions", () => {
       target: "Content-Type",
       expected: "application/json",
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
     expect(outcome.observed).toBe("application/json");
   });
 
@@ -161,7 +159,7 @@ describe("header assertions", () => {
       target: "content-type",
       expected: "application/json",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe("text/plain");
   });
 
@@ -171,7 +169,7 @@ describe("header assertions", () => {
       target: "content-type",
       expected: "application/json",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("absent");
   });
@@ -181,13 +179,13 @@ describe("header assertions", () => {
       kind: "header_exists",
       target: "Authorization",
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
     expect(outcome.observed).toBe("");
   });
 
   it("header_exists fails when the header is absent", () => {
     const outcome = only(withHeaders({}), { kind: "header_exists", target: "Authorization" });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBeUndefined();
   });
 
@@ -197,8 +195,8 @@ describe("header assertions", () => {
         kind: "header_matches",
         target: "content-type",
         expected: "^application/json",
-      }).passed,
-    ).toBe(true);
+      }).status,
+    ).toBe("satisfied");
   });
 
   it("header_matches fails when the value does not match, keeping the observed value", () => {
@@ -207,7 +205,7 @@ describe("header assertions", () => {
       target: "content-type",
       expected: "^application/json",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe("text/plain");
   });
 
@@ -221,8 +219,7 @@ describe("header assertions", () => {
       target: "content-type",
       expected: "(",
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("invalid regular expression");
   });
 
@@ -233,7 +230,7 @@ describe("header assertions", () => {
   // it made, as header_equals does ("header content-type is absent").
   it("header_exists describes the absence it found, rather than claiming presence", () => {
     const outcome = only(withHeaders({}), { kind: "header_exists", target: "Authorization" });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.message).toBe("header authorization is absent");
   });
 
@@ -259,8 +256,7 @@ describe("header assertions", () => {
       ["header_matches", { kind: "header_matches", target: "x-request-id", expected: "^a" }],
     ] as const)("%s names the gap rather than the service", (kind, spec) => {
       const outcome = only(narrowed({}, ["content-type", "date"]), spec as AssertionSpec);
-      expect(outcome.evaluated, kind).toBe(false);
-      expect(outcome.passed).toBe(false);
+      expect(outcome.status, kind).toBe("undetermined");
       expect(outcome.message, kind).toContain("was not looked at");
       // Both halves matter: what happened, and which names a caller *can* assert
       // on — otherwise the next question has no answer in the report.
@@ -286,8 +282,7 @@ describe("header assertions", () => {
         target: "Content-Type",
         expected: "text/plain",
       });
-      expect(outcome.evaluated).toBe(true);
-      expect(outcome.passed).toBe(true);
+      expect(outcome.status).toBe("satisfied");
       expect(outcome.observed).toBe("text/plain");
     });
 
@@ -303,7 +298,7 @@ describe("header assertions", () => {
         kind: "header_exists",
         target: "content-type",
       });
-      expect([unread.evaluated, absent.evaluated]).toEqual([false, true]);
+      expect([unread.status, absent.status]).toEqual(["undetermined", "unmet"]);
       expect(unread.message).not.toBe(absent.message);
     });
 
@@ -316,8 +311,7 @@ describe("header assertions", () => {
         target: "x-request-id",
         negate: true,
       });
-      expect(outcome.evaluated).toBe(false);
-      expect(outcome.passed).toBe(false);
+      expect(outcome.status).toBe("undetermined");
       expect(outcome.message.startsWith("negated: ")).toBe(true);
     });
 
@@ -329,7 +323,7 @@ describe("header assertions", () => {
         kind: "header_exists",
         target: "content-type",
       });
-      expect(outcome.passed).toBe(false);
+      expect(outcome.status).toBe("unmet");
       expect(outcome.message).toBe("header content-type is absent");
     });
   });
@@ -341,8 +335,8 @@ describe("body assertions", () => {
 
   it("body_contains passes when the needle is present", () => {
     expect(
-      only(withBody('{"status":"healthy"}'), { kind: "body_contains", expected: "healthy" }).passed,
-    ).toBe(true);
+      only(withBody('{"status":"healthy"}'), { kind: "body_contains", expected: "healthy" }).status,
+    ).toBe("satisfied");
   });
 
   it("body_contains fails when the needle is missing", () => {
@@ -350,7 +344,7 @@ describe("body assertions", () => {
       kind: "body_contains",
       expected: "degraded",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.message).toContain("degraded");
   });
 
@@ -360,8 +354,7 @@ describe("body assertions", () => {
     // message used to read `body length 0` — a length for a body nobody
     // recorded, and the number that made `body_bytes_under` pass.
     const outcome = only(exchange(), { kind: "body_contains", expected: "healthy" });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("no response body was recorded");
     expect(outcome.message).not.toContain("length 0");
@@ -369,8 +362,8 @@ describe("body assertions", () => {
 
   it("body_matches passes when the body matches the pattern", () => {
     expect(
-      only(withBody("service ready"), { kind: "body_matches", expected: "^service" }).passed,
-    ).toBe(true);
+      only(withBody("service ready"), { kind: "body_matches", expected: "^service" }).status,
+    ).toBe("satisfied");
   });
 
   it("body_matches fails when the body does not match, keeping a bounded excerpt", () => {
@@ -378,14 +371,13 @@ describe("body assertions", () => {
       kind: "body_matches",
       expected: "^service",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe("not ready");
   });
 
   it("body_matches reports an invalid pattern as unevaluated rather than throwing", () => {
     const outcome = only(withBody("anything"), { kind: "body_matches", expected: "[" });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("invalid regular expression");
   });
 });
@@ -400,7 +392,7 @@ describe("JSON path assertions", () => {
       target: "$.count",
       expected: 3,
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
     expect(outcome.observed).toBe(3);
   });
 
@@ -410,7 +402,7 @@ describe("JSON path assertions", () => {
       target: "$.ok",
       expected: true,
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe(false);
     // Both halves, because in a verification bundle this string is all a caller
     // is given: the expectation is not carried anywhere else in the output.
@@ -426,7 +418,7 @@ describe("JSON path assertions", () => {
       target: "$.nope",
       expected: 1,
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toBe("$.nope is absent, expected 1");
   });
@@ -437,8 +429,7 @@ describe("JSON path assertions", () => {
       target: "$.ok",
       expected: true,
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("not valid JSON");
   });
 
@@ -451,7 +442,7 @@ describe("JSON path assertions", () => {
       target: "$.ok",
       expected: true,
     });
-    expect(outcome.evaluated).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("no response body was recorded");
   });
 
@@ -460,14 +451,14 @@ describe("JSON path assertions", () => {
       kind: "body_json_path_exists",
       target: "$.ok",
     });
-    expect(outcome.evaluated).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("no response body was recorded");
   });
 
   it("body_json_path_exists passes for a key that resolves", () => {
     expect(
-      only(withJson({ ok: true }), { kind: "body_json_path_exists", target: "$.ok" }).passed,
-    ).toBe(true);
+      only(withJson({ ok: true }), { kind: "body_json_path_exists", target: "$.ok" }).status,
+    ).toBe("satisfied");
   });
 
   it("body_json_path_exists fails for a key that is not there", () => {
@@ -475,7 +466,7 @@ describe("JSON path assertions", () => {
       kind: "body_json_path_exists",
       target: "$.missing",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
   });
 
   it("reports a path the engine cannot evaluate as unsupported, not as a resolved nothing", () => {
@@ -485,8 +476,7 @@ describe("JSON path assertions", () => {
       kind: "body_json_path_exists",
       target: "ok",
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("unsupported JSONPath");
   });
 });
@@ -497,7 +487,7 @@ describe("measurement assertions", () => {
       kind: "body_bytes_under",
       expected: 10,
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
     expect(outcome.observed).toBe(4);
   });
 
@@ -506,8 +496,7 @@ describe("measurement assertions", () => {
       kind: "body_bytes_under",
       expected: 4,
     });
-    expect(outcome.evaluated).toBe(true);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe(4);
     expect(outcome.message).toContain("4");
   });
@@ -521,8 +510,7 @@ describe("measurement assertions", () => {
       kind: "body_bytes_under",
       expected: 10,
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("no response body was recorded");
   });
@@ -535,15 +523,13 @@ describe("measurement assertions", () => {
       kind: "latency_under_ms",
       expected: 100,
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("no response was recorded");
   });
 
   it("latency_under_ms passes when the recorded duration is under the limit", () => {
     const outcome = only(exchange({ durationMs: 5 }), { kind: "latency_under_ms", expected: 10 });
-    expect(outcome.evaluated).toBe(true);
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
   });
 
   it("latency_under_ms fails at or above the limit, naming the observed latency", () => {
@@ -551,7 +537,7 @@ describe("measurement assertions", () => {
       kind: "latency_under_ms",
       expected: 100,
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe(120);
     expect(outcome.message).toContain("120");
     expect(outcome.message).toContain("100");
@@ -564,7 +550,7 @@ describe("http_version_equals", () => {
       kind: "http_version_equals",
       expected: "2.0",
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
     expect(outcome.observed).toBe("2.0");
   });
 
@@ -576,7 +562,7 @@ describe("http_version_equals", () => {
       kind: "http_version_equals",
       expected: "2.0",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe("1.1");
     expect(outcome.message).toContain("1.1");
     expect(outcome.message).toContain("2.0");
@@ -591,7 +577,7 @@ describe("http_version_equals", () => {
       kind: "http_version_equals",
       expected: "2",
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
   });
 
   it("reports that nothing negotiated anything when no response was recorded", () => {
@@ -599,8 +585,7 @@ describe("http_version_equals", () => {
       kind: "http_version_equals",
       expected: "2.0",
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.observed).toBeUndefined();
     expect(outcome.message).toContain("no http version was recorded");
   });
@@ -608,8 +593,10 @@ describe("http_version_equals", () => {
   it("is satisfied by a service that spoke HTTP/2 and also by asserting the absence of it", () => {
     // Both directions pinned, so the kind cannot be one that accepts everything.
     const spokeH2 = exchange({ httpVersion: "2.0" });
-    expect(only(spokeH2, { kind: "http_version_equals", expected: "2.0" }).passed).toBe(true);
-    expect(only(spokeH2, { kind: "http_version_equals", expected: "1.1" }).passed).toBe(false);
+    expect(only(spokeH2, { kind: "http_version_equals", expected: "2.0" }).status).toBe(
+      "satisfied",
+    );
+    expect(only(spokeH2, { kind: "http_version_equals", expected: "1.1" }).status).toBe("unmet");
   });
 });
 
@@ -620,7 +607,7 @@ describe("negate", () => {
       expected: 200,
       negate: true,
     });
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("unmet");
     expect(outcome.message.startsWith("negated: ")).toBe(true);
   });
 
@@ -630,7 +617,7 @@ describe("negate", () => {
       expected: 500,
       negate: true,
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
   });
 
   it("inverts the observed value's verdict, not the other fields", () => {
@@ -641,30 +628,30 @@ describe("negate", () => {
       expected: 200,
       negate: true,
     });
-    expect(outcome.passed).toBe(true);
+    expect(outcome.status).toBe("satisfied");
     expect(outcome.observed).toBe(500);
     expect(outcome.expected).toBe(200);
   });
 
   it("does not manufacture a pass out of a check that never ran", () => {
-    // The one place where the third state was dangerous. A not-evaluated
-    // outcome carries `passed: false`, `!false` is `true`, and so a negated
-    // assertion over an exchange the engine could not read reported a pass —
-    // the strongest claim in the vocabulary resting on a request that never
-    // completed. Negation inverts a verdict; there was no verdict here.
+    // The one place where the third state was dangerous. A check that could not
+    // be evaluated used to carry `passed: false`, `!false` is `true`, and so a
+    // negated assertion over an exchange the engine could not read reported a
+    // pass — the strongest claim in the vocabulary resting on a request that
+    // never completed. Negation inverts a verdict; there was no verdict here,
+    // and `negateVerdict` is what keeps it that way.
     const outcome = only(exchange({ status: undefined }), {
       kind: "status_equals",
       expected: 200,
       negate: true,
     });
-    expect(outcome.evaluated).toBe(false);
-    expect(outcome.passed).toBe(false);
+    expect(outcome.status).toBe("undetermined");
     expect(outcome.message.startsWith("negated: ")).toBe(true);
   });
 });
 
-describe("evaluated", () => {
-  it("is true for every kind on a record that carries every fact they need", () => {
+describe("status", () => {
+  it("is satisfied for every kind on a record that carries every fact they need", () => {
     // The control for the third state: if an evaluator's guard were widened,
     // every assertion would quietly become "could not run" and the counts
     // would read as clean. This pins the other end.
@@ -676,7 +663,9 @@ describe("evaluated", () => {
       durationMs: 5,
     });
     for (const kind of ASSERTION_KINDS) {
-      expect(only(complete, { kind, target: "$.ok", expected: 1 }).evaluated, kind).toBe(true);
+      expect(only(complete, { kind, target: "$.ok", expected: 1 }).status, kind).not.toBe(
+        "undetermined",
+      );
     }
   });
 
@@ -687,8 +676,7 @@ describe("evaluated", () => {
       { kind: "status_equals", expected: 200 },
       { kind: "body_bytes_under", expected: 10 },
     ]);
-    expect(outcomes.map((outcome) => outcome.evaluated)).toEqual([true, false]);
-    expect(outcomes.map((outcome) => outcome.passed)).toEqual([true, false]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["satisfied", "undetermined"]);
   });
 });
 

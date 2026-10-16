@@ -982,11 +982,13 @@ export const createToolHandlers = (
           })),
         });
 
-        // One unknown per assertion the engine could not run, asked the way the
-        // caller asked it. Without these, `passed: 0, failed: 0, results: []`
-        // over an exchange that recorded nothing is indistinguishable from a
-        // clean pass — the two states this framework exists to keep apart.
-        for (const outcome of evaluated.not_evaluated) {
+        // One unknown per assertion the engine could not decide, asked the way
+        // the caller asked it. The row itself says `undetermined`, and these are
+        // what a caller reads to find out whether the tool's scope was covered:
+        // without them, `satisfied: 0, unmet: 0` over an exchange that recorded
+        // nothing would look like a clean pass that examined everything.
+        const undetermined = evaluated.results.filter((result) => result.status === "undetermined");
+        for (const outcome of undetermined) {
           recordUnknown(
             recorder,
             unevaluatedQuestion(outcome, "for this exchange"),
@@ -997,29 +999,30 @@ export const createToolHandlers = (
           );
         }
 
-        const total = evaluated.results.length + evaluated.not_evaluated.length;
+        const total = evaluated.results.length;
+        const examined = total - undetermined.length;
         record(recorder, {
           kind: "assertion",
           subject: { exchange_id: input.exchange_id },
           observed: {
-            evaluated: evaluated.results.length,
-            passed: evaluated.passed,
-            failed: evaluated.failed,
-            not_evaluated: evaluated.not_evaluated.length,
+            assertions: total,
+            satisfied: evaluated.satisfied,
+            unmet: evaluated.unmet,
+            undetermined: evaluated.undetermined,
           },
           // `partial` rather than `complete`, with the count, because the scope
           // was named and only part of it was examined — which is the one thing
           // `complete` must never mean.
           coverage:
-            evaluated.not_evaluated.length === 0
+            undetermined.length === 0
               ? { scope: "assertions", status: "complete" }
               : {
                   scope: "assertions",
                   status: "partial",
                   note:
-                    `${String(evaluated.not_evaluated.length)} of ${String(total)} assertion(s) could not be ` +
+                    `${String(undetermined.length)} of ${String(total)} assertion(s) could not be ` +
                     "evaluated against this exchange; each one names its own reason",
-                  examined: evaluated.results.length,
+                  examined,
                   total,
                 },
           sources: [],
@@ -1034,8 +1037,9 @@ export const createToolHandlers = (
             ],
           }),
           exchange_id: evaluated.exchange_id,
-          passed: evaluated.passed,
-          failed: evaluated.failed,
+          satisfied: evaluated.satisfied,
+          unmet: evaluated.unmet,
+          undetermined: evaluated.undetermined,
           results: evaluated.results,
         };
       },

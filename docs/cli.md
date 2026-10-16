@@ -17,6 +17,13 @@ wrong — a bad flag, no libuvcpp, no such workspace. The distinction matters to
 script: `1` means "the service is not doing what you asked", `2` means "uvp could
 not ask it".
 
+An assertion that could not be evaluated at all — a header the client never read,
+a body the record does not hold — is the third state, and `uvp assert` exits `2`
+on it rather than `0`. The exit codes are a two-way answer to a three-way
+question, and the safe collapse is the one that does not turn "nobody could tell"
+into "everything held": a script reading `0` concludes the service passed a check
+it was never given.
+
 **Failures print the error contract.** Code, message, and the offending field
 where there is one. A schema violation is `invalid_request` naming the field, not
 a usage dump.
