@@ -35,12 +35,22 @@ export interface SupervisedProcess {
   /**
    * Resolves once the kernel has accepted the spawn; rejects when it has not.
    *
-   * `spawn` is asynchronous about failure: a binary that does not exist, or is
-   * not executable, produces an `error` event on a later turn of the loop rather
-   * than a throw. Until one of the two events has arrived the honest answer to
-   * "did this start?" is *not known yet*, and every other answer is a claim about
-   * a process that may never have existed. So a caller that reports anything
-   * about the launch waits for this first.
+   * Every launch failure arrives here, and an implementation owes that rather
+   * than assuming the host does: `spawn` is asynchronous about *some* of them. A
+   * binary that does not exist or is not executable produces an `error` event on
+   * a later turn of the loop rather than a throw — Node forwards `EACCES`,
+   * `EAGAIN`, `EMFILE`, `ENFILE` and `ENOENT` to that event and throws for every
+   * other errno, `ETXTBSY` among them: a file some process holds open for writing
+   * cannot be executed, and that arrives as a synchronous throw with no path in
+   * its message. The local supervisor converts it into this rejection rather than
+   * letting it escape (`refusedLaunch`, `toolchains/processRunner.ts`), because a
+   * throw happens before a handle exists to carry it and would bypass the error
+   * contract entirely.
+   *
+   * Until one of the two events has arrived the honest answer to "did this
+   * start?" is *not known yet*, and every other answer is a claim about a process
+   * that may never have existed. So a caller that reports anything about the
+   * launch waits for this first.
    */
   whenStarted(): Promise<void>;
   isRunning(): boolean;
