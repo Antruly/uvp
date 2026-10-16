@@ -260,6 +260,25 @@ const main = () => {
   );
 
   if (broken.length > 0) {
+    // The composition of the class, printed here rather than recounted by hand from
+    // the site table below: a mutant may name two codes, so these columns overlap.
+    const named = new Map();
+    for (const mutant of broken) {
+      for (const code of mutant.verdict.split("+")) named.set(code, (named.get(code) ?? 0) + 1);
+    }
+    const tallies = [...named].sort(
+      (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+    );
+    lines.push(
+      `## The diagnostics named by the ${String(broken.length)} that do not compile`,
+      "",
+      "| Diagnostic | Survivors naming it |",
+      "| --- | --- |",
+      ...tallies.map(([code, total]) => `| ${code} | ${String(total)} |`),
+      "",
+      `A mutant can name more than one code, so these rows do not sum to ${String(broken.length)}.`,
+      "",
+    );
     lines.push(`## The ${String(broken.length)} survivor(s) that do not compile`, "");
     lines.push("| Site | Diagnostic | Mutation |", "| --- | --- | --- |");
     for (const mutant of classified.flatMap((entry) =>
