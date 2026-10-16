@@ -26,8 +26,11 @@ const readReport = () => {
   }
 };
 
+// The report keys files by path and does not repeat the path on each mutant, so
+// it is carried along here: a survivor list that names no file is a list nobody
+// can act on.
 const location = (mutant) => {
-  const file = mutant.sourceFile?.replace(/^.*\/src\//u, "src/") ?? "(unknown file)";
+  const file = (mutant.fileName ?? "(unknown file)").replace(/^.*\/src\//u, "src/");
   const line = mutant.location?.start?.line;
   return line === undefined ? file : `${file}:${String(line)}`;
 };
@@ -41,7 +44,30 @@ const main = () => {
     return;
   }
 
-  const mutants = Object.values(report.files ?? {}).flatMap((file) => file.mutants ?? []);
+  const mutants = Object.entries(report.files ?? {}).flatMap(([fileName, file]) =>
+    (file.mutants ?? []).map((mutant) => ({ ...mutant, fileName })),
+  );
+
+  // A mutant that was planned as a run and completed no test has no result to
+  // report: Stryker reports "Survived" for a mutant it never executed, and a
+  // score over a report of that shape reads exactly like a suite that notices
+  // nothing while being a runner defect instead. Static mutants are exempt —
+  // they are activated before the tests load, and Stryker sizes a run plan for
+  // them from the whole project, which is how the only real kills in this
+  // repository's sweep were produced. See docs/testing.md, "The score is not a
+  // measurement yet".
+  const unran = mutants.filter((mutant) => mutant.static !== true && mutant.testsCompleted === 0);
+  if (unran.length > 0) {
+    process.stderr.write(
+      `${String(unran.length)} of ${String(mutants.length)} mutants ran zero tests. ` +
+        "A score over this report would describe the runner, not the suite, so it is " +
+        "reported as a failure instead of a number. Survivors are listed in the retained " +
+        `report; the first few are ${unran.slice(0, 5).map(location).join(", ")}.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const survivors = mutants.filter((mutant) => SURVIVING_STATUSES.has(mutant.status));
   const detected = mutants.length - survivors.length;
   const score = mutants.length === 0 ? 0 : (detected / mutants.length) * 100;

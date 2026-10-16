@@ -630,12 +630,13 @@ implicit.
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and has passed on every run since, local and CI, including 300 standalone runs of that file on this host with none. That bounds how often it happens here rather than explaining it: the one occurrence was in CI, where the load and the image are things this host does not reproduce. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ✅  | `tests/conformance/captureReplay.test.ts` has failed **four** times with `TransportFailure: socket hang up`, each from a request through a capture proxy: twice inside a full local gate (2026-10-16T05:59:33Z, 06:56Z) and twice from standalone runs on an idle machine, which ruled the gate's load out and settled that this row wanted a sample rather than a theory. The proxy's number had been handed out twice, and the client's global keep-alive pool still held a socket for that `host:port`; the mechanism is constructed rather than sampled below. Fixed at the reservation, where a number is now handed out once per process, with a test that measures its own strength. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens, and the part a container can rehearse has now been rehearsed: the distro image's own tools, and libuvcpp 1.7.0's configure against its OpenSSL, which accepted 3.5.5 and then stopped on a dependency fetch this host's route could not complete in three attempts. Neither is a claim about a runner. See [below](#ubuntu-2604)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ✅  | The runner warned that Node.js 20 was deprecated, naming five of the six actions pinned here by SHA. `runs.using` in each action's own `action.yml` read `node20` at all six pinned SHAs and `node24` at every major Dependabot proposed, which is how the sixth was counted without waiting for a warning about it, and all six are adopted in [the pins above](#action-pins). Two of the majors change more than their runtime, both read rather than assumed: `setup-node` v5 caches by itself when `package.json` declares a `packageManager`, which this one does and `.github/actions/npm-cache` already owns, so it is switched off at all 11 call sites; `download-artifact` v8 fails a run on a digest mismatch where it used to warn. `checkout` v7 refuses a fork's code under `pull_request_target` — the event `pr-readiness.yml` uses — but its guard reads the requested ref, repository and commit, and that workflow asks for the default branch and none of those.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ✅  | `uvp_assert_exchange`'s `results[]` carries `status: satisfied \| unmet \| undetermined` in place of `passed`, one row per assertion asked, and `not_evaluated[]` is gone: `satisfied + unmet + undetermined` is the row count, so a check nobody could evaluate is visible in the array rather than inferable from a counter. The vocabulary is declared once, in `src/domain/verdict.ts`, and `uvp_doctor`'s feature verdicts read it too. `uvp_verify` is unchanged — it has no per-check rows, and its third state reaches a caller through `unverified[]` and the coverage note. See [below](#assertion-third-state)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ✅  | A workflow job whose own `if:` is wider than its steps assume: `test` runs whenever the run is not cancelled, so that a failed shard still produces a merged report, but it downloaded `uvp-test-runtime`, which `build` uploads only when `code` or `package` is selected. Two documentation-only pushes (`315d494`, `0dcbd94`) went red in _Portable tests_ at `Download the built runtime` while every lane that job depends on was correctly skipped, and the guard the job does carry sits below the download. The three artifact steps are guarded on `code` individually, a step above them says which of the two cases the run is in, and `npm run verify:artifact-guards` now compares every reader's condition against its writer's as a logical implication. See [below](#artifact-guards)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ⬜  | The worked example in `docs/evidence.md` was hand-written, and every field it showed was wrong the same way: a `vb_`-prefixed `bundle_id`, `evidence_ids`, `unknown_ids`, and `members[]` entries carrying `subject`, `observed` and `derived`. No tool returns any of those; the page shows two captures of a real pass now. They settled the claim beside the example too, that the envelope holds references "so the bundle holds the detail". It does not: `toEvidenceRef` drops `subject`, `observed` and `derived`, the bundle carries the same references, and `digest` is computed _from_ the fields that were dropped, so a reader can compare two runs but not see what either observed. Making it reachable changes every tool's output, so it waits for the design discussion CONTRIBUTING requires. The same reading found one thing declared twice: `createEvidenceBundle` in `src/domain/evidence.ts` takes full `Evidence[]` records and has no production caller, while the shipped bundle is `verificationBundleSchema`. The unused one now says so in its own docblock, where it used to call itself "The deliverable" — a claim the contract's shape holds and this one does not, and its own docblock already said which two tools agree about it. Neither changed behaviour: the two differ in exactly one thing that matters, whether the records travel. **What is left is one decision, and it is not a documentation one:** delete the record-carrying pair (foreclosing the option) or adopt it (changing what every tool returns). So the row stays open, and it is now only the decision rather than the decision plus a false claim in the source. `uvp_build` and `uvp_verify` are unaffected either way. |
+| ⬜  | **The mutation sweep's score is not a measurement.** Of its 1294 mutants, 934 ran no test at all — each reported `Survived` with `testsCompleted: 0` beside a `coveredBy` naming the tests that should have run — and all 199 of its kills are `static` mutants, which Stryker plans by a different path. The cause is one separator: the vitest runner records a test as `file#suite and test names joined by a space`, and vitest 5 matches a name pattern against the same names joined by `" > "`, so a per-test filter selects nothing. The reported number is wrong rather than low, which was checked from the other side: the mutant Stryker called `Survived` at `src/application/assertions.ts:74:10` fails 4 of the lane's own 396 tests. The configuration could not start at all before this change — three separate defects, all fixed — and the summary script now fails on a report of this shape rather than printing a percentage over it. Which of four ways out to take is undecided. See [below](#mutation-not-measured)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
 rather than as a bug report. It has been seen three times, each time as the only
@@ -772,6 +773,129 @@ would have let a wiring mistake compile and surface later as a service that cann
 start. The new `src/application/**` rule in `.oxlintrc.json` is the part that
 generalises: a scratch file importing `toolchains/local` from `application` was
 confirmed to fail the lint both as a value import and as a type-only one.
+
+### The mutation sweep's score is not a measurement {#mutation-not-measured}
+
+The mutation row above is a different kind of entry from the rest of this table:
+what it records is not a gap in the suite but a defect in the lane that reads it.
+The sweep was run, the report was parsed, and the report says the lane never ran
+the tests it planned.
+
+Of the 1294 mutants in a sweep of the eight mutated files, **934 ran no test at
+all** — each reported `Survived` with `testsCompleted: 0` beside a `coveredBy`
+naming the tests that should have run — and every one of the 199 kills is
+`static: true`. That split is the tell: a static mutant is planned with the
+project's whole test-file list instead of a per-test filter, so every kill came
+from the one path that does not go through the broken one.
+
+The mechanism is a single separator, read in the runner and then measured. Core
+plans a non-static mutant against the tests that covered it and hands the runner
+their ids as a `testFilter`. The runner writes an id as
+`file#<suite and test names joined by a space>` (`collectTestName`) and turns the
+filter into `project.config.testNamePattern`. Vitest 5 matches that pattern
+against a task's `fullTestName`, which joins the same names with `" > "`. So the
+pattern matches nothing: vitest loads the right files and selects zero tests, the
+runner returns `{tests: [], status: Complete}`, and Stryker records `Survived`.
+Driving one test file through vitest's own programmatic API with the runner's own
+pattern counts **13 tests with no pattern, 0 with it, and 2 with the same two
+names joined by `" > "`**. The runner's peer range is `vitest >=2.0.0`, so this
+is not a package used outside the versions it claims.
+
+Two settings look like they would step around it and neither does, which was run
+rather than reasoned about: `coverageAnalysis: "off"` cannot remove the per-test
+plan, because core only _adds_ the coverage global it uses in that mode while the
+vitest runner returns its own `mutantCoverage` from the dry run either way; and
+`related: false` changes which files the dry run loads, not how a mutant is
+planned. The `assertions.ts` slice reports the same shape under `"all"`, `"off"`
+and `related` both ways.
+
+That the number is wrong rather than low was settled from the other side, without
+the runner: the mutant Stryker called `Survived` at
+`src/application/assertions.ts:74:10` — `while (index < path.length)` mutated to
+`index >= path.length` — fails **4 of the 396 tests** the lane runs. The suite
+would have caught it, so the survivors this lane lists are not a list of gaps.
+
+Three defects also stood between the committed configuration and any run at all,
+and they are why `stryker.config.mjs` now reads the way it does: `vitest.project`
+is not a Stryker 10 option and the schema rejects the key, which is what the
+workflow's preflight step hit first; core rewrites the sandbox's tsconfig through
+`ts.parseConfigFileTextToJson`, which TypeScript 7.0.2 does not export — its
+JavaScript API is `version` and `versionMajorMinor` alone — so `checkers` is
+empty and `tsconfigFile` names a file that is deliberately absent; and the
+`mutate` list named `src/domain/result.ts`, which has never existed here. Those
+are fixed. The lane is not.
+
+Four ways out, none of them taken, and which one to take is the interesting part:
+
+- **Own the runner** — a Stryker `TestRunner` plugin over `vitest/node`'s public
+  API, recording ids in the form vitest matches. The only option that keeps
+  per-test planning, and so the only one whose sweep stays affordable. Its size
+  is unmeasured and it is not a shim: the package exposes `.` and
+  `./package.json`, so `VitestTestRunner` cannot be subclassed, and the dry run,
+  the setup file and per-test mutant activation would be this repository's.
+- **Patch the dependency** — one separator, in two copies of `collectTestName`.
+  It would put a patched package between what CI installs and what this
+  repository reads, for a bug that is upstream's to fix.
+- **Run every mutant against the whole scope** — the built-in `command` runner,
+  which supplies no coverage and is therefore planned with the global filter.
+  Measured at `concurrency: 2` on this host: `domain/unknown.ts`'s 43 mutants in
+  1 minute 26 seconds, about **two seconds per mutant**, which puts 1294 of them
+  near **43 minutes** — on an 18-core workstation, against a 60-minute job on a
+  smaller runner, so that is a floor. It also grades a mutant only by the
+  command's exit code, so a mutant that stops the run from starting reads as a
+  kill.
+- **Drop the lane** — the cheapest, and honest if the other three are not worth
+  their cost: what is lost is a survivor list that was not real.
+
+Until one is taken, the weekly job fails at the summary step rather than
+publishing a percentage: a report in which mutants ran no test is treated the way
+a missing report already was, as a finding to report rather than a score to
+print. [testing.md](testing.md#mutation-not-a-measurement) carries the same
+account with the commands behind it.
+
+### Rehearsing Ubuntu 26.04 {#ubuntu-2604}
+
+`ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19, and the two things
+the table's `ubuntu-latest` row says about the new image come from its published
+software list rather than from a run on it. So the image was rehearsed — in a container, which
+is `ubuntu:26.04` the distribution, **not** the runner image and no substitute
+for one. It measured Ubuntu 26.04.1 LTS (`resolute`) with **CMake 4.2.3**, **g++
+15.2.0**, **ninja 1.13.2** and `pkg-config openssl` **3.5.5**. The CMake it
+reports is the distro image's own, and not a correction of the runner image's
+4.4.3: those are two artifacts, and the row's number is about the second.
+
+Against the toolchain the real lane would meet there, libuvcpp 1.7.0's configure
+established three things before it stopped:
+
+- **It accepted 26.04's OpenSSL.** `-- Using system OpenSSL 3.5.5`, against a
+  minimum of 1.1.1, with `OPENSSL_*` resolving into
+  `/usr/lib/x86_64-linux-gnu`. The row's inference that the lane's from-source
+  3.5.0 build becomes redundant on 26.04 has that much behind it now and no
+  more: this is a configure, not a build and not a link.
+- **It answered its QUIC and HTTP/3 probes** the way it does anywhere:
+  `Looking for SSL_set_quic_tls_cbs - found`, `Looking for
+  SSL_provide_quic_data - not found`, and so `libngtcp2_crypto_quictls library
+  is disabled due to lack of good quictls`. That is a property of Ubuntu's
+  OpenSSL build rather than of 26.04, and it is reported rather than fatal.
+- **It fetched three of the dependencies** it needs at configure time — llhttp
+  `v9.2.0`, ngtcp2 `v1.25.0`, nghttp3 `v1.18.0` — and then stopped on the
+  fourth: `Had to git clone more than once: 3 times. Failed to clone repository:
+  'https://github.com/nlohmann/json.git'`.
+
+So the configure failed on a **fetch**, not on the toolchain. The probe sets
+`http.lowSpeedLimit 1000` with `http.lowSpeedTime 60` so that a stalled transfer
+fails rather than holding the run open, and cmake made three attempts of its
+own; these logs do not separate a transfer the guard ended from one the route
+ended. What is established is narrower than either: the fetch did not complete
+through this host's route in three attempts, on a container that shares this
+host's network and therefore says nothing about a runner's. Whether the configure
+_completes_ on 26.04 is **undetermined**, with that as its reason — and the row
+above stays open on the terms it already had, because what a runner meets is
+measured on a runner.
+
+The `cmake_minimum_required` floor that row leans on was re-read while writing
+this, from the templates that declare it: 3.16 and 3.20, both above the 3.5 that
+CMake 4 stopped accepting. That break is not this repository's.
 
 ### The run that showed CI had never tested anything
 

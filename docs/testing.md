@@ -638,11 +638,21 @@ Stryker runs weekly and on dispatch, never on the critical path of a pull
 request. It mutates:
 
 `src/application/assertions.ts`, `src/application/ToolchainProvider.ts`,
-`src/application/evidenceHelpers.ts`, `src/domain/{evidence,unknown,errors,result}.ts`,
-`src/application/workspaceManifest.ts`.
+`src/application/evidenceHelpers.ts`, `src/application/bundleDiff.ts`,
+`src/application/workspaceManifest.ts`, and `src/domain/{evidence,unknown,errors}.ts`.
 
-`coverageAnalysis: "perTest"` with `related: true`, so a mutation re-runs only
-the tests that covered it.
+Those files' tests are the `services` and `domain` projects, and no other
+project runs: a mutant in a pure module does not change what a lane that
+compiles real C++ decides, and running one per mutant would turn a sweep
+measured in milliseconds per mutant into one measured in minutes.
+`vitest.mutation.config.ts` is that scope, filtered out of the suite's own
+project list so that the file which decides what `domain` and `services` contain
+is still `scripts/lib/test-projects.mjs`.
+
+`coverageAnalysis: "perTest"` with `related: true` is the plan: a mutant re-runs
+only the tests that covered it. It is also the plan the runner cannot carry out —
+read [the subsection below](#mutation-not-a-measurement) before reading any
+number this lane prints.
 
 **There is no break threshold.** `thresholds.break` is `null` on purpose. A
 mutation score that gates a merge invites two bad responses: writing tests that
@@ -651,7 +661,94 @@ reported, the survivors are listed, and a human decides.
 
 The summary script exits non-zero when the report is **missing** — a run that
 produced no report is not a clean sweep, and treating it as one is how a broken
-mutation job goes unnoticed for a month.
+mutation job goes unnoticed for a month. It exits non-zero for one more reason,
+which [the next subsection](#mutation-not-a-measurement) explains: a report in
+which mutants that were planned as a run completed no test describes the runner
+rather than the suite, and a percentage over it reads like a suite that notices
+nothing.
+
+### The score is not a measurement yet {#mutation-not-a-measurement}
+
+Measured on this tree at `175b9a7`, with the configuration described above,
+against `@stryker-mutator/core@10.0.0`, `@stryker-mutator/vitest-runner@10.0.0`
+and `vitest@5.0.3`.
+
+A sweep of those eight files produced **1294 mutants: 199 killed, 934 survived,
+125 with no coverage, 36 static survivors**. All 199 kills are `static: true`,
+and **not one of the 934 mutants reported `Survived` ran a single test** — every
+one carries `testsCompleted: 0` next to a `coveredBy` naming the tests that were
+supposed to run. The shape does not depend on the settings that look like they
+would change it: the same files' `assertions.ts` slice under
+`coverageAnalysis: "all"` with `related: false` gives 307 runtime survivors with
+zero tests run, 65 with no coverage and 11 static kills, and under
+`coverageAnalysis: "off"` the same split appears.
+
+**The mechanism.** Core plans a non-static mutant against the tests that covered
+it and hands the runner their ids as a `testFilter`. The runner records an id as
+`file#suite and test names joined by a space` (`collectTestName` in the runner's
+`test-helpers.js`) and turns the filter into `project.config.testNamePattern`, a
+regular expression built from those names. Vitest 5 matches that pattern against
+a task's `fullTestName`, which joins the same names with `" > "`. The pattern
+therefore matches nothing: vitest loads the right files, selects zero tests, and
+the runner returns `{tests: [], status: Complete}`, which Stryker records as
+`Survived`. Driving one test file through vitest's own programmatic API with the
+runner's pattern gives **13 tests with no pattern, 0 with the recorded one, and
+2 with the same two names joined by `" > "`**. Static mutants are untouched —
+they are planned with the project's whole test-file list instead of a name
+pattern — which is why they produced every kill. The runner's own peer range is
+`vitest >=2.0.0`, so this is not a case of a package used outside the versions it
+claims: the lane is inside it.
+
+`coverageAnalysis: "off"` does not avoid it, because core only ever _adds_ the
+coverage global it uses in that mode: the vitest runner returns its own
+`mutantCoverage` from the dry run regardless, so coverage exists and the per-test
+plan is built from it. `related: false` does not avoid it either; it changes
+which files the dry run loads, not how a mutant is planned.
+
+**The score is wrong, not merely low.** Hand-applying the mutant Stryker reported
+as `Survived` at `src/application/assertions.ts:74:10` (replacement
+`index >= path.length`) fails **4 of the 396 tests** in the lane's own scope. The
+suite would have caught it; the runner never ran it. So the survivors this lane
+lists are not a list of gaps, and the percentage over them describes the runner.
+
+**Three defects stood between the configuration and this measurement**, all
+fixed before that measurement was produced. `vitest.project` is not a Stryker
+10 option and the schema rejects the key, which is what the workflow's preflight
+step hit first. Core's `TSConfigPreprocessor` rewrites the sandbox's tsconfig
+through `ts.parseConfigFileTextToJson`, which TypeScript 7.0.2 does not export —
+its JavaScript API is `version` and `versionMajorMinor` alone — so the checker
+declared in `plugins` cannot run either, `checkers` is empty, and `tsconfigFile`
+names a file that is deliberately absent from the repository. And the `mutate`
+list named `src/domain/result.ts`, a file that has never existed here.
+
+**What is undecided** is how the lane gets a measurement. Four ways, with the
+cost each one was measured or reasoned at:
+
+- **Own the runner.** A Stryker `TestRunner` plugin over `vitest/node`'s public
+  API, recording ids in the `" > "` form vitest matches. It is the only option
+  that keeps per-test planning, and therefore the only one whose sweep stays
+  affordable. Its size is not measured, and it is not a shim: the package exposes
+  `.` and `./package.json` and nothing else, so `VitestTestRunner` cannot be
+  subclassed, and the dry run, the setup file that names each test to the
+  instrumented code, and per-test mutant activation would all be written here.
+- **Patch the dependency.** One separator, two copies of `collectTestName`. It
+  puts a patched package between what CI installs and what this repository reads,
+  for a bug that is upstream's to fix.
+- **Run every mutant against the whole scope**, using the built-in `command`
+  runner, which supplies no coverage and so is planned with the global filter.
+  Measured on this host at `concurrency: 2`: the 43 mutants of `domain/unknown.ts`
+  took 1 minute 26 seconds, about **two seconds per mutant**, which puts the
+  1294-mutant sweep near **43 minutes** — on an 18-core workstation, against a
+  job with a 60-minute timeout on a smaller runner, so treat it as a floor. It
+  also grades a mutant only by the command's exit code, so a mutant that stops
+  the run from starting reads as a kill, and it reports `1.00 tests per mutant`
+  because it models the whole command as one test.
+- **Drop the lane.** The cheapest, and honest if none of the above is worth the
+  cost: what is lost is the survivor list, and that list was not real either.
+
+Until one of them is taken, the weekly job fails at the summary step instead of
+publishing a percentage, and the mutation row under _Hardening_ in the roadmap
+owns the decision.
 
 ## The rules the test suite enforces
 
