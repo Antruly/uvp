@@ -800,6 +800,33 @@ subsection](#mutation-not-a-measurement) was reported as a failure instead of a
 score, and it stays: it is the check that would catch the same class of breakage
 arriving a second way.
 
+**The upper bound is printed beside the score, and it is not a gate either.** A
+kill is the group's exit code, so a group that fails for a reason of its own —
+a flake, or damage that stops the run before the suite reports — reads as
+detected. The report carries the fact that separates the two without running
+anything again: the `command` runner puts the child's combined stdout and stderr
+in each killed mutant's `statusReason` (`completeResult` in core's
+`command-test-runner.js`), so a kill whose suite ran carries the suite's own
+summary there, and a kill without one rests on the exit code alone.
+`scripts/ci/mutation-summary.mjs` counts that and prints it under the score —
+`Kill basis: all 936 kills carry the suite's own summary, so none rests on the
+group's exit code alone.` — and never fails on it. A mutant whose damage stops the
+run before the suite reports is conventionally counted as killed, Stryker counts a
+mutant that breaks the build the same way, and a check keyed to a test reporter's
+wording is exactly the kind that should report a shape change rather than fail a
+lane for a reason that is not about mutations.
+
+That reading holds only under the `command` runner, so the report's own
+`config.testRunner` decides whether the line is read at all. Under another runner
+— the `vitest` runner, where a result travels back over the IPC channel and
+`statusReason` is not known to hold the suite's output — every kill would match
+nothing, and the honest answer is not `936 of 936 kills carry no suite summary`
+but `Kill basis: not read`, with the runner it saw named beside it and the score
+still an upper bound. [#41](https://github.com/Antruly/uvp/issues/41) is the
+issue that would change it. `npm run verify:mutation-summary` pins each of those
+readings against fixture reports, since the real input is a 52-minute weekly
+sweep.
+
 ### The runner ran no test {#mutation-not-a-measurement}
 
 Measured on this tree at `175b9a7`, with the configuration as it then stood —
@@ -909,6 +936,24 @@ survivors are real locations — `src/domain/errors.ts:148`'s conditional `docs`
 spread among them, and the message strings beside it — and each one still has to be
 read, because a survivor is either a missing assertion or an equivalent mutant.
 
+**In that run the upper bound was tightly zero, and the line says so.** Over the
+936 kills of the retained report, **936 carry the suite's own summary** in their
+`statusReason` and the 344 survivors carry no `statusReason` at all, so no kill in
+that sweep came from a group that never reached the suite — the bias is measured
+rather than bounded. The strip is what makes that reading possible, and measuring
+it is what says so: the record is the child's output **as a terminal sees it**, so
+its summary lines begin with an escape sequence, and the same two patterns match
+**0 of the 936 without stripping ANSI** against 936 with it. `Kill basis: all 936
+kills carry the suite's own summary, so none rests on the group's exit code alone.`
+is what run `38919206652`'s summary prints now that the count is in the script;
+what it printed on the day is the line quoted above it.
+
+One number in that job is still wrong, and it is filed rather than explained away:
+the summary counts a `Timeout` mutant as a survivor where Stryker's own table
+counts it as detected, so the same run printed `936/1281 … 73.1%` and `73.15%`,
+and listed the one timeout under `src/application/assertions.ts:74` in a 345-row
+survivor table. See [#43](https://github.com/Antruly/uvp/issues/43).
+
 The four ways, all of them still on the record:
 
 - **Own the runner.** A Stryker `TestRunner` plugin over `vitest/node`'s public
@@ -998,6 +1043,26 @@ like a fence and is not one. Which files are pages is asked of
 `docs/.vitepress/config.ts`'s `srcExclude` rather than restated, so the Chinese
 README, a GitHub page that no Vue renders, is out of the scan. See
 [the roadmap](roadmap.md#docs-interpolation) for the page that shipped empty.
+
+**Sweep reporting.** `npm run verify:mutation-summary` runs
+`scripts/ci/mutation-summary.mjs` over fixture reports whose answers are known by
+construction, and fails when its output disagrees with any of them. The line it
+checks is the kill basis — how many kills carry the suite's own summary, which is
+the measurement behind the score's upper bound — and nothing else can check it:
+the real input is a 52-minute weekly sweep, and a classification that has stopped
+matching prints a plausible count either way. The two failures are silent and
+opposite. Vitest's colors are the first, and it is measured rather than imagined:
+`statusReason` is the child's output as a terminal sees it, so the same patterns
+match 936 of 936 kills **with** ANSI stripped and **0 of 936 without** — a summary
+that forgets to strip reports every kill as resting on the exit code alone, every
+week. A matcher loosened to a bare `/Test Files/` is the second and the worse one,
+because it matches the failing test's own name and reports zero bias always, which
+reads as a clean sweep. So the fixtures include a kill whose output mentions a test
+file without printing a summary at all, and a report whose `config.testRunner` is
+not `command`, where the script has to say it cannot read the basis rather than
+report 936 false positives. What this does not establish is that a real report
+still has the shape its fixtures have — that is what the kill basis line in the
+weekly job's own summary is for, and the two are read together.
 
 **Pack reproducibility.** `npm run verify:pack-reproducible` packs three more
 times — twice more from the tree, once from the first tarball's own contents

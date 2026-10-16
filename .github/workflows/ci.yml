@@ -122,6 +122,13 @@ jobs:
       - name: Verify that no docs page holds an unescaped Vue interpolation
         if: needs.changes.outputs.code == 'true' || needs.changes.outputs.docs == 'true'
         run: npm run verify:docs-interpolation
+      # Guarded on `code`, which is where both the checker and the summary script
+      # live, and on `workflows`, because `mutation.yml` is what runs the script and
+      # what a runner change would be made in. The weekly sweep is too slow to test
+      # its own reporting here, so the script is checked against fixture reports.
+      - name: Verify that the sweep summary still reports what its kills rest on
+        if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
+        run: npm run verify:mutation-summary
       - name: Check formatting when no code changed
         if: needs.changes.outputs.code != 'true'
         run: npm run format:check
