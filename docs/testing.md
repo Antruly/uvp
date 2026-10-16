@@ -785,10 +785,33 @@ meets the suite's pools, worker bound and canonical `TMPDIR` — and a mutant is
 killed exactly when that command exits non-zero. The cost is time: every mutant
 runs all 396 tests of the group.
 
-**There is no break threshold.** `thresholds.break` is `null` on purpose. A
-mutation score that gates a merge invites two bad responses: writing tests that
-kill mutants rather than find bugs, and nudging the threshold. The score is
-reported, the survivors are listed, and a human decides.
+**The break threshold is 70, and the sweep is a canary rather than a per-PR
+gate.** `thresholds.break` fails the weekly run when the score falls below it. The
+first full sweep reported **73.15%**, so 70 is a floor about three points under
+the measured baseline — enough headroom for the noise this lane actually has (a
+flaky kill, a mutant that times out instead of dying, the difference between this
+host and the CI runner) without being loose enough to pass a real regression. It
+is a floor, not a target: a run that trips it is telling the maintainer to read
+the survivors, which is what the sweep is for. It is one measurement, and it is
+re-derived once several weekly numbers exist, and again from the first sweep under
+a runner that attributes per test, because [#41](https://github.com/Antruly/uvp/issues/41)
+would move the number in a direction nobody has measured — the `command` runner's
+exit-code grading makes today's score an upper bound ([#42](https://github.com/Antruly/uvp/issues/42)).
+
+Why a floor here and not on a pull request: the old rationale — a score that gates
+a merge invites writing tests that kill mutants rather than find bugs, and nudging
+the threshold — is about a person under merge pressure with the threshold standing
+between them and `main`. A scheduled run has none of that. **The sweep is a
+canary, not a per-PR gate**: it takes 51 minutes 53 seconds, so a lane that slow
+cannot run on a pull request, and `mutation.yml` stays `schedule` and
+`workflow_dispatch`-only. Tripping the floor produces a failed workflow and a
+report to read, which is the outcome the lane exists to produce.
+
+Because Stryker signals a below-threshold run with a non-zero exit, `mutation.yml`
+marks the sweep step `continue-on-error` and fails the job in a later step, after
+the report is required, the survivors are summarized and the reports are uploaded.
+Otherwise the one run that most needs reading would be the one that printed
+nothing.
 
 The summary script exits non-zero when the report is **missing** — a run that
 produced no report is not a clean sweep, and treating it as one is how a broken

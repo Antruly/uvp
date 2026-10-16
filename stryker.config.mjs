@@ -30,7 +30,8 @@
  * mutation` command exits non-zero, which is the standard criterion and the
  * `unran.length === 0` condition `scripts/ci/mutation-summary.mjs` requires. What
  * that costs is the per-test attribution, which the summary does not use, and
- * time — measured at 1.9 s per mutant for this group, so ~41 minutes for a sweep
+ * time — 1.9 s per mutant on an 18-core workstation, which projected to about 41
+ * minutes and measured at **51 minutes 53 seconds** in CI on the smaller runner,
  * against the job's 90-minute limit. If a faster sweep is ever worth buying, the
  * way to buy it is the patched dependency, and that decision has not been taken.
  *
@@ -64,10 +65,21 @@ const config = {
   // repository — renaming it to `tsconfig.json` crashes the run before the first
   // mutant, which is what the committed configuration did.
   tsconfigFile: "tsconfig.json.absent",
-  // No break threshold. A mutation score is a signal to investigate, and a gate
-  // that fails a build on a score invites mutating the score instead of the
-  // tests. The mutations that survive are what get read.
-  thresholds: { break: null },
+  // Seventy, about three points under the measured baseline: the first full
+  // sweep reported 73.15% over 1281 mutants, and this lane's noise — a flaky
+  // kill, a mutant that times out instead of dying, the difference between this
+  // host and the CI runner — is smaller than that. It is a floor, not a target,
+  // and it gates a weekly run rather than a merge, which is what the old
+  // "no threshold" reasoning was actually about: a gate that stands between a
+  // person and `main` invites mutating the score instead of the tests, while a
+  // weekly run that trips the floor produces a failed workflow and a report to
+  // read, which is what the lane is for. Expected to move: it is one
+  // measurement, and it is re-derived once several weekly numbers exist, and
+  // again from the first sweep under a runner that attributes per test (#41),
+  // since the `command` runner's exit-code grading makes today's score an upper
+  // bound (#42). The sweep is a canary and never a per-PR gate — see
+  // docs/testing.md#mutation-testing.
+  thresholds: { break: 70 },
   ignorePatterns: ["/coverage/**", "/.cache/**", "/tests/toolchain/workspaces/**"],
   concurrency: 2,
   timeoutMS: 30000,
