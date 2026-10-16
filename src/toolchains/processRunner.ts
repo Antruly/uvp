@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 
-import type { ProcessSupervisor, StopOutcome } from "../application/ProcessSupervisor.js";
+import type {
+  ProcessSupervisor,
+  StartSupervisedOptions,
+  StopOutcome,
+  SupervisedProcess,
+} from "../application/ProcessSupervisor.js";
 
 /**
  * Subprocess supervision, in one place.
@@ -269,6 +274,50 @@ export const runProcess = async (options: RunProcessOptions): Promise<ProcessOut
 const DEFAULT_TAIL_BYTES = 64 * 1024;
 
 /**
+ * A launch this host refused before there was a process to supervise.
+ *
+ * `spawn` reports most exec failures on a later turn of the loop — which is the
+ * shape the port's `whenStarted()` is written for — but not all of them. Node
+ * forwards `EACCES`, `EAGAIN`, `EMFILE`, `ENFILE` and `ENOENT` to the `error`
+ * event and **throws** `new ErrnoException(err, "spawn")` for every other errno.
+ * `ETXTBSY` is on the throw side: the kernel refuses to `execve` a file some
+ * process holds open for writing, and the message is `spawn ETXTBSY` with no path
+ * in it. Measured on this host with Node v24.21.0 rather than read from the
+ * documentation — a handle held open on the target (`open(path, "w")` from
+ * another process, `openSync(path, "r+")` in this one) makes `spawn` throw and
+ * `child.on("error")` never fire, and closing the handle makes the next spawn
+ * succeed.
+ *
+ * Left unhandled, that throw happens where `startSupervised` has not returned a
+ * handle yet, so it bypasses the port entirely: it reached CI as a bare `Error`
+ * out of `WorkspaceService.run` — no code, no category, no remedy, and no path,
+ * because the message names the errno and not the file. The port promises the
+ * launch outcome through `whenStarted()`, so a throw becomes the same rejection
+ * the `error` event feeds, and the caller's refusal is typed like any other.
+ */
+const refusedLaunch = (options: StartSupervisedOptions, cause: unknown): SupervisedProcess => {
+  const failure = cause instanceof Error ? cause : new Error(String(cause));
+  // The same reason `started` below marks its rejection handled: a caller that
+  // only polls `isRunning()` never observes this one, and an unobserved rejection
+  // would take the host process with it.
+  const refused = Promise.reject(failure);
+  refused.catch(() => undefined);
+  return {
+    pid: undefined,
+    command: renderCommand(options),
+    whenStarted: () => refused,
+    // Nothing was started, so there is nothing running to report, nothing to
+    // signal, and no output that a process could have written.
+    isRunning: () => false,
+    exitInfo: () => undefined,
+    stdoutTail: () => "",
+    stderrTail: () => "",
+    stop: async () => ({ outcome: "already_gone", killed: false }),
+    release: () => undefined,
+  };
+};
+
+/**
  * The local host's implementation of the supervision port.
  *
  * Annotated with the port type rather than with its own signature so that the
@@ -279,13 +328,19 @@ const DEFAULT_TAIL_BYTES = 64 * 1024;
  */
 export const startSupervised: ProcessSupervisor = (options) => {
   const maxTail = options.maxTailBytes ?? DEFAULT_TAIL_BYTES;
-  const child = spawn(options.command, [...options.args], {
-    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-    detached: process.platform !== "win32",
-  });
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(options.command, [...options.args], {
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    });
+  } catch (cause) {
+    // The errnos Node throws for rather than emitting — see `refusedLaunch`.
+    return refusedLaunch(options, cause);
+  }
 
   const tails = { stdout: "", stderr: "" };
   const append = (which: "stdout" | "stderr", chunk: Buffer): void => {

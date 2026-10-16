@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +33,12 @@ import { describe, expect, it } from "vitest";
  *   missing file. That is a loud failure, not a quiet one.
  * - Type-only imports are invisible, because `tsc` erases them and they are not
  *   in the built output to find.
+ *
+ * One reader of these specifiers is not a program at all. `oxlint` resolves static
+ * imports and opens what they name, so a test fixture that imports from `dist/`
+ * puts build output in the linter's hands — and `compile` deletes `dist/` and
+ * writes it again beside `lint` in the same turbo pass. The last describe below is
+ * that property; the mechanism is written up in `docs/roadmap.md` (#13).
  */
 
 const DIST = resolve(import.meta.dirname, "..", "..", "dist");
@@ -273,5 +279,78 @@ describe("what a published install can reach", () => {
     // walk broke rather than because the artifact is clean.
     expect(reached.size).toBeGreaterThan(30);
     expect(statSync(DIST).isDirectory()).toBe(true);
+  });
+});
+
+/**
+ * The specifier forms `oxlint`'s import resolver follows: `from "x"` — static
+ * import and re-export — and a bare `import "x"`.
+ *
+ * Deliberately narrower than `SPECIFIER_PATTERNS` above. The dynamic form is
+ * excluded because it was measured rather than assumed: `strace` over a full
+ * `oxlint` run on this tree shows it opening no path for `scripts/uvp.mjs`'s
+ * `import("../dist/cli.js")`, which is the only other import of build output
+ * outside this describe. Measured on 1.87.0, and again on 1.88.0 when the
+ * npm-minor bump moved this repository to it: with the pre-fix fixture in place
+ * both versions open the same static specifier into `dist/`, so the new one
+ * resolves what the old one resolved rather than more. If a later oxlint starts
+ * resolving dynamic specifiers too, this is the check that has to widen — and the
+ * shim in #13 is how to re-run the measurement.
+ */
+const STATIC_SPECIFIER_PATTERNS = [
+  /\bfrom\s*["']([^"']+)["']/gu,
+  /^[ \t]*import\s*["']([^"']+)["']/gmu,
+];
+
+/** Every specifier in the two forms above, matched rather than parsed. */
+const staticSpecifiersIn = (source: string): string[] => {
+  const found: string[] = [];
+  for (const pattern of STATIC_SPECIFIER_PATTERNS) {
+    for (const match of source.matchAll(pattern)) {
+      if (match[1] !== undefined) found.push(match[1]);
+    }
+  }
+  return found;
+};
+
+describe("what linting is asked to open", () => {
+  it("hands the resolver no static specifier into the build output", async () => {
+    // #13 was this: `tests/boundary/process/fixtures/detachParent.mjs` imported
+    // `dist/toolchains/processRunner.js`, `oxlint` opened the resolved path, and a
+    // `clean-build-output.mjs` delete landing between the resolver's `stat` and its
+    // `open` failed the entire lint run with `Failed to open file …/dist/… with
+    // error "No such file or directory (os error 2)"`. Intermittent by
+    // construction, three times in two days, and green on every retry.
+    //
+    // The property is checked across the tree rather than at the one file it was
+    // found in, because the next fixture to reach for build output would otherwise
+    // reintroduce it silently.
+    const roots = ["src", "tests", "scripts"];
+    const files = (await Promise.all(roots.map((root) => walk(join(REPOSITORY, root)))))
+      .flat()
+      .filter((file) => /\.(?:[cm]?[jt]s)$/u.test(file));
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const directory = dirname(file);
+      for (const specifier of staticSpecifiersIn(await readFile(file, "utf8"))) {
+        if (!isRelative(specifier)) continue;
+        if (resolve(directory, specifier).startsWith(`${DIST}${sep}`)) {
+          offenders.push(`${relative(REPOSITORY, file)} -> ${specifier}`);
+        }
+      }
+    }
+
+    expect(offenders, "static specifiers into the build output").toEqual([]);
+
+    // The walk is most of this check: a `roots` list that no longer matches the
+    // tree would leave `offenders` empty and pass while checking nothing. The
+    // fixture named above is asserted to be in the set for the same reason — it is
+    // the file that can no longer import `dist/` statically, and this is where that
+    // is noticed if it moves out of the walk.
+    expect(files.length).toBeGreaterThan(100);
+    expect(files.map((file) => relative(REPOSITORY, file))).toContain(
+      join("tests", "boundary", "process", "fixtures", "detachParent.mjs"),
+    );
   });
 });

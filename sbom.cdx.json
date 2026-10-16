@@ -58,7 +58,7 @@
       },
       {
         "name": "uvp:lockfile-sha512",
-        "value": "24f13aaf6ed30246ac73c84bcea96944dded860efaceed893605c00eef1805a766787a4591299b699bcd059c1dd4d9fdd7c7c4c12cb5b5828ff77c1b3b438834"
+        "value": "67d42d4cf62c468595dd275ae1bb6e9e13b655ff88a7b030fee9a3441facf4a1ad38660ebd4a13ed204fa045c4e59317603cb12b0b318be0f2c41165a3c7c43b"
       },
       {
         "name": "uvp:closure",
@@ -124,23 +124,23 @@
       ]
     },
     {
-      "bom-ref": "canonicalize@3.0.0",
+      "bom-ref": "canonicalize@5.1.0",
       "type": "library",
       "name": "canonicalize",
-      "version": "3.0.0",
+      "version": "5.1.0",
       "scope": "required",
-      "purl": "pkg:npm/canonicalize@3.0.0",
+      "purl": "pkg:npm/canonicalize@5.1.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmmirror.com/canonicalize/-/canonicalize-3.0.0.tgz"
+          "url": "https://registry.npmjs.org/canonicalize/-/canonicalize-5.1.0.tgz"
         }
       ],
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "c982df1f20cc21747246ab0a0512d7d36deb8852e95d8d9839f76da8a5d9459cbdaac7ce27d53ee05f5864becc1332f9fb388ddb1da7941bd8fd5a22dc40658c"
+          "content": "6da6fdf9679f6658ea43c8d3d2a4705664f2cc0514eb72bded02100f76a0ca7201adbeac6b9336780cbc1eff0ade9e15f7e38d55864ab46625e0383eff91ae9b"
         }
       ],
       "licenses": [
@@ -152,23 +152,23 @@
       ]
     },
     {
-      "bom-ref": "zod@4.4.3",
+      "bom-ref": "zod@4.6.7",
       "type": "library",
       "name": "zod",
-      "version": "4.4.3",
+      "version": "4.6.7",
       "scope": "required",
-      "purl": "pkg:npm/zod@4.4.3",
+      "purl": "pkg:npm/zod@4.6.7",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmmirror.com/zod/-/zod-4.4.3.tgz"
+          "url": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz"
         }
       ],
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "cad10d163209165d94c1882575eda37215b61f09b818914b0e249759d4eb25004837d15cca9ee7e0387124489634024c575fc1a967d6fe4920ef55037072724d"
+          "content": "83c5b60f6914e9af2e9ed734e777d7d6e5412b333bcaa0315bfdf3c24f37fba472176f9228eb95f9cd30043854c335753da19aa66647fab99c5333dffb7086c2"
         }
       ],
       "licenses": [
@@ -185,31 +185,31 @@
       "ref": "uvp-agents@0.1.0",
       "dependsOn": [
         "@modelcontextprotocol/server@2.3.1",
-        "canonicalize@3.0.0",
-        "zod@4.4.3"
+        "canonicalize@5.1.0",
+        "zod@4.6.7"
       ]
     },
     {
       "ref": "@modelcontextprotocol/core@2.3.1",
       "dependsOn": [
-        "zod@4.4.3"
+        "zod@4.6.7"
       ]
     },
     {
       "ref": "@modelcontextprotocol/server@2.3.1",
       "dependsOn": [
         "@modelcontextprotocol/core@2.3.1",
-        "zod@4.4.3"
+        "zod@4.6.7"
       ]
     },
     {
-      "ref": "canonicalize@3.0.0",
+      "ref": "canonicalize@5.1.0",
       "dependsOn": []
     },
     {
-      "ref": "zod@4.4.3",
+      "ref": "zod@4.6.7",
       "dependsOn": []
     }
   ],
-  "serialNumber": "urn:uuid:777b68e5-5175-57cf-a6c6-6d084dd7981e"
+  "serialNumber": "urn:uuid:e102e71c-86bf-579f-a072-a4418446b985"
 }
