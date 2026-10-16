@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ASSERTION_KINDS, evaluateAssertions, percentile } from "./assertions.js";
+import { ASSERTION_KINDS, evaluateAssertions, percentile, requestLabel } from "./assertions.js";
 import type { AssertionOutcome, AssertionSpec } from "./assertions.js";
 import type { ExchangeRecord } from "./sessionStore.js";
 
@@ -677,6 +677,40 @@ describe("status", () => {
       { kind: "body_bytes_under", expected: 10 },
     ]);
     expect(outcomes.map((outcome) => outcome.status)).toEqual(["satisfied", "undetermined"]);
+  });
+});
+
+describe("requestLabel", () => {
+  it("names a request once when its name is already its method and path", () => {
+    // What `uvp verify` builds, and what a captured bundle showed reaching a
+    // reader as "hold for GET /items/1 (GET /items/1)?" — the same request named
+    // twice in one sentence.
+    expect(requestLabel({ name: "GET /items/1", method: "GET", path: "/items/1" })).toBe(
+      "GET /items/1",
+    );
+    expect(requestLabel({ name: "POST /items", method: "POST", path: "/items" })).toBe(
+      "POST /items",
+    );
+  });
+
+  it("adds the method and path when the name is a caller's own", () => {
+    // An `uvp_verify` caller names a request, and the name alone may not say
+    // which request it was — so the method and path are added in parentheses
+    // rather than dropped.
+    expect(requestLabel({ name: "first-item", method: "GET", path: "/items/1" })).toBe(
+      "first-item (GET /items/1)",
+    );
+  });
+
+  it("adds them when the name repeats only part of the method and path", () => {
+    // The comparison is against the whole label, not a substring of it: a name
+    // that merely mentions the path still needs the method to identify it.
+    expect(requestLabel({ name: "/items/1", method: "GET", path: "/items/1" })).toBe(
+      "/items/1 (GET /items/1)",
+    );
+    expect(requestLabel({ name: "GET items/1", method: "GET", path: "/items/1" })).toBe(
+      "GET items/1 (GET /items/1)",
+    );
   });
 });
 

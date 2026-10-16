@@ -517,6 +517,26 @@ export const unevaluatedQuestion = (
     ...(outcome.expected === undefined ? [] : [`(${brief(outcome.expected)})`]),
   ].join(" ")} hold ${subject}?`;
 
+/**
+ * How a request is named inside one of those questions.
+ *
+ * The name is the request's own identity — it is what `exchanges[].name` reports
+ * and what a caller of `uvp_verify` supplies. `uvp verify` derives it from the
+ * method and path, so spelling those after it again produced questions that named
+ * their subject twice: `... hold for GET /items/1 (GET /items/1)?`. A caller who
+ * names a request something else (`first-item`) still needs the method and path
+ * to say which request is meant, so they are appended only when the name does not
+ * already carry them.
+ */
+export const requestLabel = (request: {
+  readonly name: string;
+  readonly method: string;
+  readonly path: string;
+}): string =>
+  request.name === `${request.method} ${request.path}`
+    ? request.name
+    : `${request.name} (${request.method} ${request.path})`;
+
 /** Percentile over an already-collected sample, using nearest-rank. */
 export const percentile = (sortedSamples: readonly number[], fraction: number): number => {
   if (sortedSamples.length === 0) return 0;

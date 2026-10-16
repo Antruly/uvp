@@ -13,7 +13,7 @@ import {
 } from "./evidenceHelpers.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import { tallyVerdicts } from "../domain/verdict.js";
-import { evaluateAssertions, unevaluatedQuestion } from "./assertions.js";
+import { evaluateAssertions, requestLabel, unevaluatedQuestion } from "./assertions.js";
 import type { AssertionSpec } from "./assertions.js";
 import type { TlsVerification } from "./httpClient.js";
 import type { ToolchainIdentity } from "./ToolchainProvider.js";
@@ -378,7 +378,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
       )
       .catch((cause: unknown) => {
         const blockedBy = cause instanceof Error ? cause.message : String(cause);
-        const question = `Does ${spec.name} (${spec.method} ${spec.path}) behave as asserted?`;
+        const question = `Does ${requestLabel(spec)} behave as asserted?`;
         recordUnknown(recorder, question, "not_attempted", { blockedBy });
         // Carried into the bundle as well as into the evidence, because
         // `unverified` is where a caller reads what the pass could not establish
@@ -432,10 +432,7 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
     failed += failures.length;
 
     for (const outcome of unrun) {
-      const question = unevaluatedQuestion(
-        outcome,
-        `for ${spec.name} (${spec.method} ${spec.path})`,
-      );
+      const question = unevaluatedQuestion(outcome, `for ${requestLabel(spec)}`);
       // Both places, for the same reason the request-failure branch above
       // writes both: `unverified` is what a reader of the bundle sees, and the
       // envelope's `unknowns` is what a reader of the tool result sees.
