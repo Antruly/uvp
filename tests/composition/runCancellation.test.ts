@@ -1,7 +1,8 @@
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -9,6 +10,8 @@ import { createToolHandlers, handlerFor } from "../../src/composition/toolHandle
 import { createUvpServices } from "../../src/composition/uvpServices.js";
 import { runContract } from "../../src/contracts/projectToolContracts.js";
 import { toUvpError, type UvpError } from "../../src/domain/errors.js";
+import { isWindows } from "../../src/toolchains/host.js";
+import { installFakeExecutable } from "../support/fakeExecutable.js";
 
 /**
  * What an interrupted `uvp_run` is allowed to say.
@@ -23,34 +26,44 @@ import { toUvpError, type UvpError } from "../../src/domain/errors.js";
  * listener was installed the process did not die either), and what finally came
  * back described a machine's deadline as though the caller had waited for it.
  *
- * The service here is a shell script rather than a built C++ one, and that is the
- * point: what is under test is who owns the process this call started and what is
- * said when the caller withdraws, neither of which needs libuvcpp. The script
- * writes a file when it starts and one when it is asked to stop, so "nothing was
- * started" and "it was stopped" are read from the filesystem rather than inferred
- * from a pid that may already be reused.
+ * The service here is a program this file installs rather than a built C++ one,
+ * and that is the point: what is under test is who owns the process this call
+ * started and what is said when the caller withdraws, neither of which needs
+ * libuvcpp. It writes a file when it starts and one when it is asked to stop, so
+ * "nothing was started" and "it was stopped" are read from the filesystem rather
+ * than inferred from a pid that may already be reused.
+ *
+ * The second of those two files is the one thing here that is not portable, and
+ * the test that reads it says so in its own name: a stop on Windows is
+ * `TerminateProcess`, so a service that was stopped there writes nothing.
  */
 
 /**
- * What a Windows host cannot do, and where the work on it is tracked.
+ * A service that announces its pid and, when stopped, says so.
  *
- * The two tests marked below wait for the service this file's `beforeAll` writes
- * — `build/fake-svc`, a `#!/bin/sh` script set executable. Windows has no
- * `/bin/sh` and does not treat an extensionless file as an image `CreateProcess`
- * will start, so the run never starts a process and the tests report `ENOENT`
- * rather than anything about who owns it. #18 has the measurement and the ways
- * out. The third test in the same describe asserts the opposite — that nothing
- * was started — and passes on Windows, which is why this is not a whole-suite
- * skip.
+ * Installed rather than written here because what the *host* will start is a
+ * question with one owner, `tests/support/fakeExecutable.ts`, and the answer
+ * differs by host: a shell script that `exec`s this Node on Unix, a copy of Node
+ * itself on Windows. Both receive the two paths below as the program's first
+ * arguments.
  */
-const windowsGap =
-  process.platform === "win32"
-    ? "Windows cannot launch this file's fake service, a `#!/bin/sh` script with no extension (see #18)"
-    : undefined;
+const STOPS_WHEN_ASKED = fileURLToPath(
+  new URL("../support/fixtures/stopsWhenAsked.mjs", import.meta.url),
+);
 
-/** `title`, with the reason attached on the host that cannot run it. */
+/**
+ * `title`, on the host that cannot check it.
+ *
+ * `child.kill("SIGTERM")` in `processRunner.ts` is libuv's `uv_process_kill`,
+ * which on Windows is `TerminateProcess` whichever signal is named. A terminated
+ * process runs no handler, so the service's own account of the stop cannot exist
+ * there — and uvp's account of it is exactly what the test below declines to
+ * substitute for it.
+ */
 const named = (title: string): string =>
-  windowsGap === undefined ? title : `${title} — skipped: ${windowsGap}`;
+  isWindows
+    ? `${title} — skipped: a stop on Windows is TerminateProcess, and a terminated process writes nothing`
+    : title;
 
 const services = createUvpServices();
 const handlers = createToolHandlers(services);
@@ -60,27 +73,19 @@ const run = handlerFor(handlers, runContract.name);
 let workspace = "";
 let pidFile = "";
 let stopFile = "";
+/** What the launcher has to pass for the installed service to run at all. */
+let serviceArgs: readonly string[] = [];
 
 beforeAll(async () => {
   workspace = await realpath(await mkdtemp(join(tmpdir(), "uvp-run-cancel-")));
   pidFile = join(workspace, "started.pid");
   stopFile = join(workspace, "stopped.marker");
-  await mkdir(join(workspace, "build"), { recursive: true });
   await writeFile(join(workspace, "uvp.json"), JSON.stringify({ name: "fake-svc" }));
-  const binary = join(workspace, "build", "fake-svc");
-  await writeFile(
-    binary,
-    [
-      "#!/bin/sh",
-      // The pid is written by the script, so it is the process uvp spawned and not
-      // the shell that launched it.
-      `echo "$$" > "${pidFile}"`,
-      `trap 'echo stopped > "${stopFile}"; exit 0' TERM`,
-      "while true; do sleep 0.2; done",
-      "",
-    ].join("\n"),
-  );
-  await chmod(binary, 0o755);
+  const service = await installFakeExecutable(join(workspace, "build"), "fake-svc", {
+    module: STOPS_WHEN_ASKED,
+    args: [pidFile, stopFile],
+  });
+  serviceArgs = service.args;
 });
 
 afterAll(async () => {
@@ -125,7 +130,10 @@ describe("a run whose caller withdrew", () => {
     controller.abort();
 
     const failure = await failureOf(
-      run({ path: workspace, args: [], env: {}, detach: true }, { signal: controller.signal }),
+      run(
+        { path: workspace, args: serviceArgs, env: {}, detach: true },
+        { signal: controller.signal },
+      ),
     );
 
     expect(failure?.code).toBe("cancelled");
@@ -136,78 +144,89 @@ describe("a run whose caller withdrew", () => {
     expect(existsSync(pidFile)).toBe(false);
   });
 
-  it.skipIf(windowsGap !== undefined)(
-    named("stops the service it started, and reports the withdrawal rather than the deadline"),
+  /**
+   * A run of the installed service, withdrawn while it waits for readiness.
+   *
+   * Both files are this test's own evidence, so both are cleared first: neither a
+   * leftover from another test nor a run of this test on its own can be mistaken
+   * for what this one observed. The two tests below share it because each reads a
+   * different one of the two — that the service started, and how it left.
+   */
+  const withdrawnRun = async (): Promise<UvpError | undefined> => {
+    await rm(pidFile, { force: true });
+    await rm(stopFile, { force: true });
+
+    const { signal, clear } = abortAfter(400);
+    try {
+      return await failureOf(
+        run(
+          {
+            path: workspace,
+            args: serviceArgs,
+            env: {},
+            ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
+            detach: true,
+          },
+          { signal },
+        ),
+      );
+    } finally {
+      clear();
+    }
+  };
+
+  it("reports the withdrawal rather than the deadline, over the service it started", async () => {
+    const failure = await withdrawnRun();
+
+    // The failure's own words travel with the code, because of a CI run that has
+    // never been explained: `expected 'execution_failure' to be 'cancelled'` in run
+    // 38805381480, 21.5 ms into the request — far too early to be the cancellation
+    // grace. The two mechanisms that could produce that code differ in exactly this
+    // text (a real failure from a second copy of the errors module keeps its
+    // message; an unrecognised error carries its own), so a repetition should print
+    // the one fact that tells them apart rather than send the next reader through
+    // the same search. See docs/roadmap.md#the-cancellation-flake.
+    expect(
+      failure?.code,
+      `${String(failure?.message)} | details: ${JSON.stringify(failure?.details)}`,
+    ).toBe("cancelled");
+    // The old wording was "the probe did not answer within 10000 ms", filed as an
+    // unknown about the service with the bound as its reason. That the caller
+    // stopped waiting is not a fact about the service.
+    expect(failure?.message).not.toMatch(/did not answer within/u);
+    expect(failure?.message).toMatch(/cancelled/u);
+    // The service really did run, so the call had something to be responsible for
+    // when it answered. What became of it is the next test's subject.
+    expect(existsSync(pidFile)).toBe(true);
+  });
+
+  it.skipIf(isWindows)(
+    named("stops it, and the service's own account of the stop is on disk"),
     async () => {
-      // Both files are this test's own evidence, so neither a leftover from the test
-      // above nor a run of this test on its own can be mistaken for it.
-      await rm(pidFile, { force: true });
-      await rm(stopFile, { force: true });
-
-      const { signal, clear } = abortAfter(400);
-      let failure: UvpError | undefined;
-      try {
-        failure = await failureOf(
-          run(
-            {
-              path: workspace,
-              args: [],
-              env: {},
-              ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
-              detach: true,
-            },
-            { signal },
-          ),
-        );
-      } finally {
-        clear();
-      }
-
-      // The failure's own words travel with the code, because of a CI run that has
-      // never been explained: `expected 'execution_failure' to be 'cancelled'` in run
-      // 38805381480, 21.5 ms into the request — far too early to be the cancellation
-      // grace. The two mechanisms that could produce that code differ in exactly this
-      // text (a real failure from a second copy of the errors module keeps its
-      // message; an unrecognised error carries its own), so a repetition should print
-      // the one fact that tells them apart rather than send the next reader through
-      // the same search. See docs/roadmap.md#the-cancellation-flake.
-      expect(
-        failure?.code,
-        `${String(failure?.message)} | details: ${JSON.stringify(failure?.details)}`,
-      ).toBe("cancelled");
-      // The old wording was "the probe did not answer within 10000 ms", filed as an
-      // unknown about the service with the bound as its reason. That the caller
-      // stopped waiting is not a fact about the service.
-      expect(failure?.message).not.toMatch(/did not answer within/u);
-      expect(failure?.message).toMatch(/cancelled/u);
-      // The script really did run — otherwise "it was stopped" would be a claim
-      // about nothing — and the stop is the script's own account of it, not uvp's
-      // inference from a process's absence.
-      expect(existsSync(pidFile)).toBe(true);
+      await withdrawnRun();
+      // The service's account, not uvp's inference from a process's absence: the
+      // trap ran, which is the only thing that could have written this.
       expect(existsSync(stopFile), "the started service was left running").toBe(true);
     },
   );
 
-  it.skipIf(windowsGap !== undefined)(
-    named("reports a readiness timeout as itself when the caller is still waiting"),
-    async () => {
-      // The control for the test above: the same request without a withdrawal. If
-      // the cancellation check were simply "the wait ended without an answer", this
-      // is the case that would notice, because a deadline is not a decision.
-      const result = (await run(
-        {
-          path: workspace,
-          args: [],
-          env: {},
-          ready: { port: silentPort, path: "/", timeout_ms: 700 },
-          detach: true,
-        },
-        { signal: new AbortController().signal },
-      )) as { ready: boolean; unknowns: readonly { reason: string }[] };
+  it("reports a readiness timeout as itself when the caller is still waiting", async () => {
+    // The control for the tests above: the same request without a withdrawal. If
+    // the cancellation check were simply "the wait ended without an answer", this
+    // is the case that would notice, because a deadline is not a decision.
+    const result = (await run(
+      {
+        path: workspace,
+        args: serviceArgs,
+        env: {},
+        ready: { port: silentPort, path: "/", timeout_ms: 700 },
+        detach: true,
+      },
+      { signal: new AbortController().signal },
+    )) as { ready: boolean; unknowns: readonly { reason: string }[] };
 
-      expect(result.ready).toBe(false);
-      expect(result.unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
-      await services.workspace.stop({ all: true, graceMs: 3_000, force: true });
-    },
-  );
+    expect(result.ready).toBe(false);
+    expect(result.unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
+    await services.workspace.stop({ all: true, graceMs: 3_000, force: true });
+  });
 });
