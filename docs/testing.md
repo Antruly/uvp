@@ -785,9 +785,10 @@ meets the suite's pools, worker bound and canonical `TMPDIR` — and a mutant is
 killed exactly when that command exits non-zero. The cost is time: every mutant
 runs the whole group rather than the tests that touched it. That count is a property
 of the tree rather than of the lane, and it moves with nothing to mark it: **391**
-where the first full sweep ran (`a772ccb`), **396** on `main` now that
+where the first full sweep ran (`a772ccb`), **396** at `a1e82da` once
 [#31](https://github.com/Antruly/uvp/issues/31) pinned twelve `errors.ts` survivors
-with five more cases, **428** with the `evidenceHelpers` tests below. It is read off
+with five more cases, **428** on `main` with the `evidenceHelpers` tests below, and
+**447** with the `workspaceManifest` tests below. It is read off
 runs rather than remembered — all 936 kill records of run `38919206652` carry
 `(391)` — and the figure written here was 396 while the tree it described had 391:
 wrong where it was written, and true again by accident once those five cases landed
@@ -1002,6 +1003,58 @@ turns every later wording change into a test failure — an assertion that would
 measure this document rather than the suite. They are unpinned here and in the test
 file, recorded rather than quietly dropped. The sweep's other 260 survivors are
 still unread.
+
+**`workspaceManifest.ts`'s fifty-three have been read, and it is the read that says
+the most about how a file can look tested and not be.** Twelve cases already reached
+this reader, so the mutants did not live in an untested file — they lived in the
+shape of the thing. Nineteen more cases pin forty-nine of the fifty-three as of
+[#54](https://github.com/Antruly/uvp/issues/54), and the file moves from **58.59% to
+96.88%** — **124 killed, 4 survived, 0 timeouts, 0 errors** over the group's 447
+tests, in 3 minutes 32 seconds for the one-file run. The largest family was the one
+already covered: **seven of the fifteen `StringLiteral` mutants replace a property
+name the reader looks up** — `"binary"`, `"template"`, `"libuvcpp"`, `"port"`,
+`"name"`, `"requirements"`, `"image"` — so a manifest that stated that field reads as
+one that stated nothing, or falls back to `app`. Two replace a literal it compares
+against (`"local"` for the kind, `"number"` for `typeof`), one the default it falls
+back to, one the encoding, and four a refusal message. None of the fifteen failed a
+case. The four `toolchainProblem` mutants survived for a sharper reason — the table
+asserting them asserted `toBeTypeOf("string")`, and the empty string is one — so it
+now asserts that the reason _exists_, which is the defect those mutants produce,
+without pinning prose for the reason `:256`/`:257` above are not pinned.
+
+The four survivors are not gaps, and each is measured rather than argued. A scratch
+harness applied each mutation to the **compiled** reader and compared it with the
+original by a shape walk, not by `JSON.stringify` — JSON drops a key whose value is
+`undefined`, and that is exactly the difference a spread mutant makes — over **4921
+inputs**: 4910 manifests from a lattice that walks every value of every field against
+every value of every other field, plus eleven raw files (`null`, an array, a number
+and a string, an empty file, malformed JSON, a BOM, non-ASCII, a lone escaped
+surrogate, invalid UTF-8 bytes, a trailing newline). **No input distinguishes any of
+the four**, while two control mutations travelling with them were caught on 2651 and
+4260 of those inputs, so the verdict is the comparison's finding rather than a
+comparison that cannot see. Separately, `tsc --noEmit` over each mutation says `:88`
+and `:107` compile clean and `:135` and `:106` do not — `TS2375` and `TS2345`, the
+shapes `exactOptionalPropertyTypes` forbids — which is the second way a mutant can be
+unfalsifiable here: `checkers` is empty in `stryker.config.mjs`, so Stryker reports a
+mutant the tree could never hold as a survivor. The four sites are
+`src/application/workspaceManifest.ts:88:12` (`image === undefined` implies the
+conjunction's other operand), `:106:66` (`readFile(path, "")` returns a `Buffer`,
+which `JSON.parse` accepts by coercion), `:107:11` (an emptied `catch` leaves
+`parsed` `undefined`, and the next line returns `undefined` for it) and `:135:9`
+(`Number.isInteger` is false for everything that is not a number).
+
+One question from this read is worth keeping visible because its answer is
+one-sided, and because it is the opposite of what `evidenceHelpers.ts` above found. A
+key present with the value `undefined` is **not** the same object as an absent key, so
+the spread mutants were real missing assertions and the suite now has them —
+`toStrictEqual` between them is load-bearing, since `toEqual` ignores exactly this
+difference. But no consumer distinguishes the two today: `selectToolchain` compares
+`manifest?.toolchain` with `undefined`, `WorkspaceService` reads `manifest?.binary ??
+manifest?.name`, `DoctorService` enumerates `manifest.features`, and `??` and
+`!== undefined` alike treat a present `undefined` as absent. Those assertions
+therefore pin the reader to its own docblock rather than to a caller, and they become
+load-bearing the day one of those consumers spreads a manifest or asks whether a key
+is there. The sweep's other 207 survivors are still unread.
 
 **In that run the upper bound was tightly zero, and the line says so.** Over the
 936 kills of the retained report, **936 carry the suite's own summary** in their
