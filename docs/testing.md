@@ -221,6 +221,53 @@ second cap at 64 KiB used to be invisible; and posts 8 MiB + 1 to a session that
 will not forward it, asserting the `413` and that the refusal is in the capture
 as an exchange with no status rather than as traffic that happened.
 
+## The Windows lane {#windows}
+
+`windows-source` runs `npm run test:fast` on `windows-latest`: the source
+projects, on the platform uvp says it supports. Before it existed, every claim
+this repository makes about Windows was read out of the source rather than
+observed — the `cl` probe in the local provider, the `C:/…` rule in the build
+output parser, `detached: process.platform !== "win32"` in the process runner,
+the `.exe` suffix the native probe looks for. Each of those was `undetermined` on
+the platform it was about. The lane is what makes them observed.
+
+**It says what it does not cover.** No job had run on Windows before this one, and
+the lane deliberately stops at the TypeScript half: it needs no C++ compiler and
+no libuvcpp, so it establishes generation, parsing, the providers' own decisions,
+capture and replay on Windows, and nothing about a compiler there. A workspace
+built and run on Windows, `local-msvc` end to end, is not this lane and is not
+claimed by it. The job name carries the limit for the same reason
+`tests/toolchain/` skips with a reason rather than failing: a lane must not imply
+coverage it did not have.
+
+**Its first run found real gaps, and they are skipped by name until each is
+fixed.** 53 of the source tests could not run there, in three groups, each with
+an issue and a fix PR of its own:
+
+| tests | gap                                                                                                                                           | tracked by                                      |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 45    | the suite's fake built binaries are `#!/bin/sh` scripts with no extension, which Windows cannot spawn — five fixtures write one independently | [#18](https://github.com/Antruly/uvp/issues/18) |
+| 4     | the artifacts fixture names its outputs the POSIX way (no extension), and `discoverArtifacts` decides by extension on Windows                 | [#19](https://github.com/Antruly/uvp/issues/19) |
+| 4     | a recorded command line is rendered in POSIX dialect (`env NAME='C:\…'`), and four assertions read the raw line                               | [#20](https://github.com/Antruly/uvp/issues/20) |
+
+The skips are `it.skipIf`/`describe.skipIf` with the reason in the **title**, so
+`scripts/lib/vitest-skipped-reporter.mjs` prints each one and no skip can read as
+a pass. Each names its issue, which is where the removal is tracked; the count
+above is the number that should fall as those land.
+
+The lane also found one defect it could not have run without: `scripts/run-tests.mjs`
+spawned `node_modules/.bin/vitest` directly, which on Windows is not a file that
+can be executed — only `vitest.cmd` and a shell script are there. `npm run
+test:fast` would have died before loading a test file, and it would have looked
+like a broken suite rather than a wrong path. The runner now resolves the Vitest
+entry from Vitest's own `package.json` and runs it through the Node already
+executing the script, which is the answer `scripts/lint.mjs` already gives for
+oxlint.
+
+Not yet in the lane: `typecheck`, `lint` and `oxfmt`. `scripts/lint.mjs` spawns
+its resolved oxlint path directly, which is the same Windows problem the runner
+had, so that fix belongs with the widening rather than before it.
+
 ## Built tests
 
 These require `npm run compile` to have run first. They exercise the artifacts

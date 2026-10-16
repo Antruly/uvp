@@ -31,6 +31,27 @@ import { discoverArtifacts } from "./artifacts.js";
 
 let root: string;
 
+/**
+ * Where this fixture and a Windows host disagree, and the issue tracking it.
+ *
+ * `discoverArtifacts` decides what a build produced from a mode bit on POSIX and
+ * from an extension on Windows — that branch is in `artifacts.ts` and is right on
+ * both platforms. The fixture below names its outputs the POSIX way: no
+ * extension, set executable. On Windows the walk finds the file and correctly
+ * refuses to call it an artifact, so the four tests that assert one *is* found
+ * fail with `expected [] to deeply equal [...]`, while the tests that assert
+ * nothing is found pass for the wrong reason. #19 tracks naming them the way the
+ * host names an executable, which is what the fix PR does.
+ */
+const windowsGap =
+  process.platform === "win32"
+    ? "Windows decides executable-ness by extension, and this fixture names none (see #19)"
+    : undefined;
+
+/** `title`, with the reason attached on the host that cannot run it. */
+const named = (title: string): string =>
+  windowsGap === undefined ? title : `${title} — skipped: ${windowsGap}`;
+
 /** Write `name` under `dir` with `contents`, and return its full path. */
 const put = (dir: string, name: string, contents: string, mode?: number): string => {
   mkdirSync(dir, { recursive: true });
@@ -59,20 +80,23 @@ const buildDir = (name: string): string => {
 };
 
 describe("discoverArtifacts", () => {
-  it("reports an executable file with its size and its digest", async () => {
-    const dir = buildDir("basic");
-    const produced = put(dir, "hello-service", "a produced binary\n", 0o755);
+  it.skipIf(windowsGap !== undefined)(
+    named("reports an executable file with its size and its digest"),
+    async () => {
+      const dir = buildDir("basic");
+      const produced = put(dir, "hello-service", "a produced binary\n", 0o755);
 
-    const found = await discoverArtifacts(dir);
+      const found = await discoverArtifacts(dir);
 
-    expect(found).toEqual([
-      {
-        path: produced,
-        bytes: Buffer.byteLength("a produced binary\n"),
-        digest: sha256Of("a produced binary\n"),
-      },
-    ]);
-  });
+      expect(found).toEqual([
+        {
+          path: produced,
+          bytes: Buffer.byteLength("a produced binary\n"),
+          digest: sha256Of("a produced binary\n"),
+        },
+      ]);
+    },
+  );
 
   it("skips a file that is present and not executable", async () => {
     const dir = buildDir("not-executable");
@@ -102,40 +126,49 @@ describe("discoverArtifacts", () => {
     expect(await discoverArtifacts(dir)).toEqual([]);
   });
 
-  it("descends into a subdirectory and finds what is in it", async () => {
-    const dir = buildDir("nested");
-    const produced = put(join(dir, "bin"), "service", "binary\n", 0o755);
+  it.skipIf(windowsGap !== undefined)(
+    named("descends into a subdirectory and finds what is in it"),
+    async () => {
+      const dir = buildDir("nested");
+      const produced = put(join(dir, "bin"), "service", "binary\n", 0o755);
 
-    const found = await discoverArtifacts(dir);
+      const found = await discoverArtifacts(dir);
 
-    expect(found.map((artifact) => artifact.path)).toEqual([produced]);
-  });
+      expect(found.map((artifact) => artifact.path)).toEqual([produced]);
+    },
+  );
 
-  it("does not descend into CMakeFiles or a dot-directory", async () => {
-    const dir = buildDir("skipped-dirs");
-    put(join(dir, "CMakeFiles"), "compiler-check", "binary\n", 0o755);
-    put(join(dir, ".cache"), "something", "binary\n", 0o755);
-    const kept = put(dir, "kept", "binary\n", 0o755);
+  it.skipIf(windowsGap !== undefined)(
+    named("does not descend into CMakeFiles or a dot-directory"),
+    async () => {
+      const dir = buildDir("skipped-dirs");
+      put(join(dir, "CMakeFiles"), "compiler-check", "binary\n", 0o755);
+      put(join(dir, ".cache"), "something", "binary\n", 0o755);
+      const kept = put(dir, "kept", "binary\n", 0o755);
 
-    const found = await discoverArtifacts(dir);
+      const found = await discoverArtifacts(dir);
 
-    expect(found.map((artifact) => artifact.path)).toEqual([kept]);
-  });
+      expect(found.map((artifact) => artifact.path)).toEqual([kept]);
+    },
+  );
 
-  it("does not walk past four levels of subdirectory", async () => {
-    // The bound exists so a symlink cycle or an unexpected tree cannot turn
-    // discovery into an unbounded walk. Depth 5 is past it, so this file is not
-    // reported — which is the cost of the bound, made visible.
-    const dir = buildDir("too-deep");
-    const deep = join(dir, "a", "b", "c", "d", "e");
-    put(deep, "unreachable", "binary\n", 0o755);
-    const reachable = put(join(dir, "a", "b", "c", "d"), "reachable", "binary\n", 0o755);
+  it.skipIf(windowsGap !== undefined)(
+    named("does not walk past four levels of subdirectory"),
+    async () => {
+      // The bound exists so a symlink cycle or an unexpected tree cannot turn
+      // discovery into an unbounded walk. Depth 5 is past it, so this file is not
+      // reported — which is the cost of the bound, made visible.
+      const dir = buildDir("too-deep");
+      const deep = join(dir, "a", "b", "c", "d", "e");
+      put(deep, "unreachable", "binary\n", 0o755);
+      const reachable = put(join(dir, "a", "b", "c", "d"), "reachable", "binary\n", 0o755);
 
-    const found = await discoverArtifacts(dir);
+      const found = await discoverArtifacts(dir);
 
-    expect(found.map((artifact) => artifact.path)).toEqual([reachable]);
-    expect(existsSync(join(deep, "unreachable"))).toBe(true);
-  });
+      expect(found.map((artifact) => artifact.path)).toEqual([reachable]);
+      expect(existsSync(join(deep, "unreachable"))).toBe(true);
+    },
+  );
 
   it("returns nothing for a directory that does not exist", async () => {
     // A build that never produced a directory is not an error about artifacts;
