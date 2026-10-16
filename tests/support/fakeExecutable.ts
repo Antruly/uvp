@@ -39,7 +39,8 @@ import { EXE, isWindows } from "../../src/toolchains/host.js";
  *   live inside the fake: baked into the shell script on Unix, and carried by a
  *   preload module on Windows — `NODE_OPTIONS`, which is the only lever a test
  *   has over a Node whose command line it does not choose. `installFakeTool` is
- *   this case, and it is the more expensive one.
+ *   this case, and it is the more expensive one: the copy is still Node, so it
+ *   can only be handed a command line Node would accept (below).
  *
  * ## What a copied Node cannot say, and what to do instead
  *
@@ -49,6 +50,26 @@ import { EXE, isWindows } from "../../src/toolchains/host.js";
  * banner for that reason, the honest repair is to *measure* what the tool says
  * and assert that the caller reported it — the relation is the claim, and the
  * string was only ever a way of writing it down.
+ *
+ * ## What a copied Node cannot be handed, which is the larger limit
+ *
+ * The copy is Node, so Node parses the arguments before the preload can run, and
+ * the arguments of the second case above are the *tool's*, not Node's. Measured
+ * on the lane that tried it:
+ *
+ *     node -S /tmp/ws -B /tmp/ws/build -DCMAKE_BUILD_TYPE=Debug
+ *     node: bad option: -S                       → exit 9, nothing imported
+ *     node --build /tmp/ws/build
+ *     node: bad option: --build                  → exit 9, nothing imported
+ *
+ * So `installFakeTool` stands in for a tool whose command line happens to be
+ * Node's — a `--version` probe is the one this suite relies on, and it does so
+ * with the measurement above rather than an assertion — but it cannot stand in
+ * for one that is handed its own flags. The launcher-chosen case has no such
+ * limit: there the program is the first argument, so Node finds a script before
+ * it finds an option. Two tests in `LocalToolchainProvider.test.ts` are skipped on
+ * Windows for this reason, named in their own titles, and the wall is filed as
+ * #22 rather than worked around here.
  *
  * ## What this module does not own
  *
@@ -169,6 +190,10 @@ export const installFakeExecutable = async (
  *
  * The returned `env` is not optional: a caller that drops it gets a copy of Node
  * that does not know what it is standing in for.
+ *
+ * On Windows the caller must also be one whose arguments this fake could have been
+ * given itself — the copy parses them as Node's, and exits 9 on anything else.
+ * See "What a copied Node cannot be handed" above.
  */
 export const installFakeTool = async (
   dir: string,
