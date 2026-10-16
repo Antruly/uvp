@@ -45,6 +45,11 @@ const TARGET = "src/example.ts";
 const STUB = `import { appendFileSync, readFileSync } from "node:fs";
 const text = readFileSync("${TARGET}", "utf8");
 appendFileSync("seen.jsonl", JSON.stringify(text) + "\\n");
+if (text.includes("TWO_CODES")) {
+  console.log("${TARGET}(1,1): error TS2375: the stub refuses this file.");
+  console.log("${TARGET}(2,1): error TS7027: and this one too.");
+  process.exit(1);
+}
 if (text.includes("COMPILE_ERROR")) {
   console.log("${TARGET}(1,1): error TS2375: the stub refuses this file.");
   process.exit(1);
@@ -89,6 +94,8 @@ const CASES = [
     includes: [
       "| src/example.ts | 2 | 1 | 1 | 0 |",
       "| **total** | **2** | **1** | **1** | **0** |",
+      "## The diagnostics named by the 1 that do not compile",
+      "| TS2375 | 1 |",
       "## The 1 survivor(s) that do not compile",
       "| src/example.ts:2:11 | TS2375 | `COMPILE_ERROR` |",
       "A mutant the compiler refuses is not a mutant the suite missed.",
@@ -97,7 +104,26 @@ const CASES = [
     covers: [
       "a survivor the compiler accepts is counted as compiling, and a killed mutant is not",
       "a survivor the compiler refuses is listed with the diagnostic the compiler named",
+      "the diagnostics the class is made of are tallied, not only listed",
       "each mutation is applied to the span its report names, in order",
+    ],
+  },
+  {
+    name: "a survivor naming two diagnostics is counted under both, and the rows say they overlap",
+    report: report([survivor(1, "TWO_CODES")]),
+    status: 0,
+    seenTexts: [PRISTINE, "const a = TWO_CODES;\nconst b = 2;\n"],
+    includes: [
+      "| src/example.ts | 1 | 0 | 1 | 0 |",
+      "## The diagnostics named by the 1 that do not compile",
+      "| TS2375 | 1 |",
+      "| TS7027 | 1 |",
+      "A mutant can name more than one code, so these rows do not sum to 1.",
+      "| src/example.ts:1:11 | TS2375+TS7027 | `TWO_CODES` |",
+    ],
+    covers: [
+      "a survivor refused with two diagnostics is counted under each of them, and the tally " +
+        "states that the rows overlap rather than implying they partition the class",
     ],
   },
   {
@@ -259,7 +285,7 @@ const main = async () => {
           );
         }
       }
-      for (const text of testCase.excludes) {
+      for (const text of testCase.excludes ?? []) {
         if (output.includes(text)) {
           failures.push(
             `${testCase.name}: the run printed ${JSON.stringify(text)}, which this case says it ` +
@@ -314,7 +340,8 @@ const main = async () => {
   console.log(
     `mutation survivor kinds: ${String(CASES.length)} fixture report(s) over ` +
       `${String(READINGS.length)} readings — compiling, refused-with-a-diagnostic and ` +
-      "undetermined are each counted and tabled as this check expects, a mutation is applied to " +
+      "undetermined are each counted and tabled as this check expects, the diagnostics behind " +
+      "them are tallied with a survivor naming two counted under both, a mutation is applied to " +
       "the span its report names and the file is restored after it, a moved file and a report " +
       "without a source stay unclassified, and a tree that does not typecheck is refused before " +
       "anything is classified",
