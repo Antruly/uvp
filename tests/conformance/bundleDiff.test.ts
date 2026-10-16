@@ -44,6 +44,27 @@ import { fixtureBinaryScript } from "./fixtureServer.js";
 
 const TIMEOUT = 30_000;
 
+/**
+ * What a Windows host cannot do, and where the work on it is tracked.
+ *
+ * Every describe below verifies a workspace, which launches the fake built
+ * binary `writeFakeBinary` writes: a `#!/bin/sh` script with no extension. A
+ * Windows host has no `/bin/sh`, and an extensionless file is not an image
+ * `CreateProcess` will start, so the launch fails with `ENOENT` before any of
+ * the comparison's own behaviour is exercised. The lane reports that as a skip
+ * rather than as a failure of the comparison — #18 has the measurement and the
+ * ways out. Nothing else in this file runs on Windows either: the three
+ * describes below are the whole file.
+ */
+const windowsGap =
+  process.platform === "win32"
+    ? "Windows cannot launch the fixture's fake built binary (see #18)"
+    : undefined;
+
+/** `title`, with the reason attached on the host that cannot run it. */
+const named = (title: string): string =>
+  windowsGap === undefined ? title : `${title} — skipped: ${windowsGap}`;
+
 let root: string;
 let services: ReturnType<typeof createUvpServices>;
 let handlers: ReturnType<typeof createToolHandlers>;
@@ -187,7 +208,7 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe("two passes of one service", () => {
+describe.skipIf(windowsGap !== undefined)(named("two passes of one service"), () => {
   it(
     "calls a repeat pass identical, and names the fields it refused to compare",
     async () => {
@@ -350,7 +371,7 @@ describe("two passes of one service", () => {
   );
 });
 
-describe("what the comparison will not read", () => {
+describe.skipIf(windowsGap !== undefined)(named("what the comparison will not read"), () => {
   it(
     "refuses a path with no file at it",
     async () => {
@@ -417,7 +438,7 @@ describe("what the comparison will not read", () => {
   );
 });
 
-describe("the file facts and the evidence", () => {
+describe.skipIf(windowsGap !== undefined)(named("the file facts and the evidence"), () => {
   it(
     "reports the bytes it read, and a digest of exactly those bytes",
     async () => {

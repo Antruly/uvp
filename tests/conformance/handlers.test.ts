@@ -54,6 +54,26 @@ import type { FixtureServer } from "./fixtureServer.js";
 const TIMEOUT = 30_000;
 const FROZEN_CLOCK = (): Date => new Date("2026-10-15T12:00:00.000Z");
 
+/**
+ * What a Windows host cannot do, and where the work on it is tracked.
+ *
+ * The tests marked below launch a workspace, which means launching the fake
+ * built binary `writeFakeBinary` writes — a `#!/bin/sh` script with no
+ * extension. Windows has no `/bin/sh`, and an extensionless file is not an image
+ * `CreateProcess` will start, so the launch fails with `ENOENT` and the test
+ * reports the kernel's answer instead of anything about uvp. #18 has the
+ * measurement and the ways out; every other test in this file needs no such
+ * binary and runs on Windows already.
+ */
+const windowsGap =
+  process.platform === "win32"
+    ? "Windows cannot launch the fixture's fake built binary (see #18)"
+    : undefined;
+
+/** `title`, with the reason attached on the host that cannot run it. */
+const named = (title: string): string =>
+  windowsGap === undefined ? title : `${title} — skipped: ${windowsGap}`;
+
 type Handlers = Readonly<Record<string, ReturnType<typeof createToolHandlers>[string]>>;
 
 interface Harness {
@@ -321,8 +341,8 @@ describe("build", () => {
 });
 
 describe("launch and stop", () => {
-  it(
-    "launches a real process, waits for a real probe, then stops it",
+  it.skipIf(windowsGap !== undefined)(
+    named("launches a real process, waits for a real probe, then stops it"),
     async () => {
       const port = await freePort();
       await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
@@ -352,8 +372,8 @@ describe("launch and stop", () => {
     TIMEOUT,
   );
 
-  it(
-    "reports `ready: false` instead of waiting forever when nothing listens",
+  it.skipIf(windowsGap !== undefined)(
+    named("reports `ready: false` instead of waiting forever when nothing listens"),
     async () => {
       const port = await freePort();
       await writeFakeBinary(
@@ -376,8 +396,8 @@ describe("launch and stop", () => {
     TIMEOUT,
   );
 
-  it(
-    "keeps a run it did not detach in this session's registry, so it can still be stopped",
+  it.skipIf(windowsGap !== undefined)(
+    named("keeps a run it did not detach in this session's registry, so it can still be stopped"),
     async () => {
       // `detach: false` says "do not let go of the pipes", not "this process is
       // no longer uvp's". Registering only the detached runs made the result's
@@ -1814,8 +1834,8 @@ describe("the retention caps", () => {
 });
 
 describe("the verification workflow", () => {
-  it(
-    "verifies a real service end to end and reports what it established",
+  it.skipIf(windowsGap !== undefined)(
+    named("verifies a real service end to end and reports what it established"),
     async () => {
       const port = await freePort();
       await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
@@ -1873,8 +1893,8 @@ describe("the verification workflow", () => {
     TIMEOUT,
   );
 
-  it(
-    "does not report `verified` when an assertion is wrong, and says which one",
+  it.skipIf(windowsGap !== undefined)(
+    named("does not report `verified` when an assertion is wrong, and says which one"),
     async () => {
       const port = await freePort();
       await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
@@ -1921,8 +1941,10 @@ describe("the verification workflow", () => {
     TIMEOUT,
   );
 
-  it(
-    "gives two identical passes one digest and two ids, and never the weaker pass the stronger one",
+  it.skipIf(windowsGap !== undefined)(
+    named(
+      "gives two identical passes one digest and two ids, and never the weaker pass the stronger one",
+    ),
     async () => {
       const base = {
         path: harness.workspace,
@@ -2020,91 +2042,94 @@ describe("the verification workflow", () => {
  * caller as a third state — and these are the two ends of that slope: part of
  * the goal unexamined, and all of it.
  */
-describe("a verification pass whose assertions could not all be evaluated", () => {
-  it(
-    "does not count an assertion it could not evaluate as a failure, and says so",
-    async () => {
-      // `target: "message"` is not a JSONPath, so the engine cannot walk it and
-      // compares nothing. Before this was modelled, the pass reported
-      // `assertions_failed: 1` and status `failed` — a finding about the
-      // service derived from a limit of the check, which is the direction of
-      // error this framework exists to prevent.
-      const port = await freePort();
-      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
+describe.skipIf(windowsGap !== undefined)(
+  named("a verification pass whose assertions could not all be evaluated"),
+  () => {
+    it(
+      "does not count an assertion it could not evaluate as a failure, and says so",
+      async () => {
+        // `target: "message"` is not a JSONPath, so the engine cannot walk it and
+        // compares nothing. Before this was modelled, the pass reported
+        // `assertions_failed: 1` and status `failed` — a finding about the
+        // service derived from a limit of the check, which is the direction of
+        // error this framework exists to prevent.
+        const port = await freePort();
+        await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
 
-      const output = await call("uvp_verify", {
-        path: harness.workspace,
-        run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
-        requests: [
-          {
-            name: "hello",
-            method: "GET",
-            path: "/hello",
-            assertions: [
-              { kind: "status_equals", expected: 200 },
-              { kind: "body_json_path_equals", target: "message", expected: "Hello, AI" },
-            ],
-          },
-        ],
-      });
-      expectConforms("uvp_verify", output);
-      // Not `failed`, which is the defect; and not `verified`, which would be
-      // the same defect wearing the other face. The pass examined part of what
-      // it was asked to examine, and `partial` is that fact.
-      expect(output["status"]).toBe("partial");
+        const output = await call("uvp_verify", {
+          path: harness.workspace,
+          run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+          requests: [
+            {
+              name: "hello",
+              method: "GET",
+              path: "/hello",
+              assertions: [
+                { kind: "status_equals", expected: 200 },
+                { kind: "body_json_path_equals", target: "message", expected: "Hello, AI" },
+              ],
+            },
+          ],
+        });
+        expectConforms("uvp_verify", output);
+        // Not `failed`, which is the defect; and not `verified`, which would be
+        // the same defect wearing the other face. The pass examined part of what
+        // it was asked to examine, and `partial` is that fact.
+        expect(output["status"]).toBe("partial");
 
-      const exchanges = output["exchanges"] as {
-        assertions_passed: number;
-        assertions_failed: number;
-        failures: string[];
-      }[];
-      expect(exchanges[0]?.assertions_passed).toBe(1);
-      expect(exchanges[0]?.assertions_failed).toBe(0);
-      // The reason belongs to the check, so it is not a failure of the service
-      // and has no place in the list of things the service did wrong.
-      expect(exchanges[0]?.failures).toEqual([]);
+        const exchanges = output["exchanges"] as {
+          assertions_passed: number;
+          assertions_failed: number;
+          failures: string[];
+        }[];
+        expect(exchanges[0]?.assertions_passed).toBe(1);
+        expect(exchanges[0]?.assertions_failed).toBe(0);
+        // The reason belongs to the check, so it is not a failure of the service
+        // and has no place in the list of things the service did wrong.
+        expect(exchanges[0]?.failures).toEqual([]);
 
-      // It is still stated. A pass that quietly dropped the question would be
-      // reporting less than it was asked about without saying which part.
-      const unverified = output["unverified"] as { question: string; reason: string }[];
-      expect(unverified).toHaveLength(1);
-      expect(unverified[0]?.question).toContain("body_json_path_equals");
-      expect(unverified[0]?.question).toContain("hello");
-      expect(unverified[0]?.reason).toContain("could not be evaluated");
-    },
-    TIMEOUT,
-  );
+        // It is still stated. A pass that quietly dropped the question would be
+        // reporting less than it was asked about without saying which part.
+        const unverified = output["unverified"] as { question: string; reason: string }[];
+        expect(unverified).toHaveLength(1);
+        expect(unverified[0]?.question).toContain("body_json_path_equals");
+        expect(unverified[0]?.question).toContain("hello");
+        expect(unverified[0]?.reason).toContain("could not be evaluated");
+      },
+      TIMEOUT,
+    );
 
-  it(
-    "reports a pass whose every assertion was unevaluable as unknown, not as verified",
-    async () => {
-      // The end of the same slope. Nothing was compared, so nothing was
-      // established, and the pass says so rather than reporting the absence of
-      // failures as success.
-      const port = await freePort();
-      await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
+    it(
+      "reports a pass whose every assertion was unevaluable as unknown, not as verified",
+      async () => {
+        // The end of the same slope. Nothing was compared, so nothing was
+        // established, and the pass says so rather than reporting the absence of
+        // failures as success.
+        const port = await freePort();
+        await writeFakeBinary(harness.workspace, "svc", fixtureBinaryScript(port));
 
-      const output = await call("uvp_verify", {
-        path: harness.workspace,
-        run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
-        requests: [
-          {
-            name: "hello",
-            method: "GET",
-            path: "/hello",
-            assertions: [{ kind: "body_json_path_exists", target: "message" }],
-          },
-        ],
-      });
-      expectConforms("uvp_verify", output);
-      expect(output["status"]).toBe("unknown");
-      const exchanges = output["exchanges"] as { assertions_passed: number }[];
-      expect(exchanges[0]?.assertions_passed).toBe(0);
-      expect((output["unverified"] as unknown[]).length).toBe(1);
-    },
-    TIMEOUT,
-  );
-});
+        const output = await call("uvp_verify", {
+          path: harness.workspace,
+          run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+          requests: [
+            {
+              name: "hello",
+              method: "GET",
+              path: "/hello",
+              assertions: [{ kind: "body_json_path_exists", target: "message" }],
+            },
+          ],
+        });
+        expectConforms("uvp_verify", output);
+        expect(output["status"]).toBe("unknown");
+        const exchanges = output["exchanges"] as { assertions_passed: number }[];
+        expect(exchanges[0]?.assertions_passed).toBe(0);
+        expect((output["unverified"] as unknown[]).length).toBe(1);
+      },
+      TIMEOUT,
+    );
+  },
+);
 
 /**
  * A pass that was stopped, kept out of the workflow's own describe because the
@@ -2114,7 +2139,7 @@ describe("a verification pass whose assertions could not all be evaluated", () =
  * method the `uvp_run` handler calls, and a signal that survives one path and not
  * the other is a signal that was never really threaded.
  */
-describe("a verification pass the caller stopped", () => {
+describe.skipIf(windowsGap !== undefined)(named("a verification pass the caller stopped"), () => {
   it(
     "treats an interrupt during the readiness wait as a cancellation, not as a service that never came up",
     async () => {
@@ -2154,7 +2179,7 @@ describe("a verification pass the caller stopped", () => {
  * quietly dropped — and the passes above answer a different question, namely
  * what a verdict means once the request was accepted.
  */
-describe("the assertion vocabulary at the boundary", () => {
+describe.skipIf(windowsGap !== undefined)(named("the assertion vocabulary at the boundary"), () => {
   it(
     "evaluates the kinds the contract used not to offer, and refuses a field it cannot honour",
     async () => {
@@ -2603,8 +2628,8 @@ describe("where a build happens", () => {
     TIMEOUT,
   );
 
-  it(
-    "verifies on this host when the call takes the escape it was offered",
+  it.skipIf(windowsGap !== undefined)(
+    named("verifies on this host when the call takes the escape it was offered"),
     async () => {
       const path = await declaringWorkspace({
         kind: "container",

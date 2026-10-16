@@ -31,6 +31,27 @@ import { toUvpError, type UvpError } from "../../src/domain/errors.js";
  * from a pid that may already be reused.
  */
 
+/**
+ * What a Windows host cannot do, and where the work on it is tracked.
+ *
+ * The two tests marked below wait for the service this file's `beforeAll` writes
+ * — `build/fake-svc`, a `#!/bin/sh` script set executable. Windows has no
+ * `/bin/sh` and does not treat an extensionless file as an image `CreateProcess`
+ * will start, so the run never starts a process and the tests report `ENOENT`
+ * rather than anything about who owns it. #18 has the measurement and the ways
+ * out. The third test in the same describe asserts the opposite — that nothing
+ * was started — and passes on Windows, which is why this is not a whole-suite
+ * skip.
+ */
+const windowsGap =
+  process.platform === "win32"
+    ? "Windows cannot launch this file's fake service, a `#!/bin/sh` script with no extension (see #18)"
+    : undefined;
+
+/** `title`, with the reason attached on the host that cannot run it. */
+const named = (title: string): string =>
+  windowsGap === undefined ? title : `${title} — skipped: ${windowsGap}`;
+
 const services = createUvpServices();
 const handlers = createToolHandlers(services);
 /** The handler, looked up by the contract's own name rather than by a string. */
@@ -115,72 +136,78 @@ describe("a run whose caller withdrew", () => {
     expect(existsSync(pidFile)).toBe(false);
   });
 
-  it("stops the service it started, and reports the withdrawal rather than the deadline", async () => {
-    // Both files are this test's own evidence, so neither a leftover from the test
-    // above nor a run of this test on its own can be mistaken for it.
-    await rm(pidFile, { force: true });
-    await rm(stopFile, { force: true });
+  it.skipIf(windowsGap !== undefined)(
+    named("stops the service it started, and reports the withdrawal rather than the deadline"),
+    async () => {
+      // Both files are this test's own evidence, so neither a leftover from the test
+      // above nor a run of this test on its own can be mistaken for it.
+      await rm(pidFile, { force: true });
+      await rm(stopFile, { force: true });
 
-    const { signal, clear } = abortAfter(400);
-    let failure: UvpError | undefined;
-    try {
-      failure = await failureOf(
-        run(
-          {
-            path: workspace,
-            args: [],
-            env: {},
-            ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
-            detach: true,
-          },
-          { signal },
-        ),
-      );
-    } finally {
-      clear();
-    }
+      const { signal, clear } = abortAfter(400);
+      let failure: UvpError | undefined;
+      try {
+        failure = await failureOf(
+          run(
+            {
+              path: workspace,
+              args: [],
+              env: {},
+              ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
+              detach: true,
+            },
+            { signal },
+          ),
+        );
+      } finally {
+        clear();
+      }
 
-    // The failure's own words travel with the code, because of a CI run that has
-    // never been explained: `expected 'execution_failure' to be 'cancelled'` in run
-    // 38805381480, 21.5 ms into the request — far too early to be the cancellation
-    // grace. The two mechanisms that could produce that code differ in exactly this
-    // text (a real failure from a second copy of the errors module keeps its
-    // message; an unrecognised error carries its own), so a repetition should print
-    // the one fact that tells them apart rather than send the next reader through
-    // the same search. See docs/roadmap.md#the-cancellation-flake.
-    expect(
-      failure?.code,
-      `${String(failure?.message)} | details: ${JSON.stringify(failure?.details)}`,
-    ).toBe("cancelled");
-    // The old wording was "the probe did not answer within 10000 ms", filed as an
-    // unknown about the service with the bound as its reason. That the caller
-    // stopped waiting is not a fact about the service.
-    expect(failure?.message).not.toMatch(/did not answer within/u);
-    expect(failure?.message).toMatch(/cancelled/u);
-    // The script really did run — otherwise "it was stopped" would be a claim
-    // about nothing — and the stop is the script's own account of it, not uvp's
-    // inference from a process's absence.
-    expect(existsSync(pidFile)).toBe(true);
-    expect(existsSync(stopFile), "the started service was left running").toBe(true);
-  });
+      // The failure's own words travel with the code, because of a CI run that has
+      // never been explained: `expected 'execution_failure' to be 'cancelled'` in run
+      // 38805381480, 21.5 ms into the request — far too early to be the cancellation
+      // grace. The two mechanisms that could produce that code differ in exactly this
+      // text (a real failure from a second copy of the errors module keeps its
+      // message; an unrecognised error carries its own), so a repetition should print
+      // the one fact that tells them apart rather than send the next reader through
+      // the same search. See docs/roadmap.md#the-cancellation-flake.
+      expect(
+        failure?.code,
+        `${String(failure?.message)} | details: ${JSON.stringify(failure?.details)}`,
+      ).toBe("cancelled");
+      // The old wording was "the probe did not answer within 10000 ms", filed as an
+      // unknown about the service with the bound as its reason. That the caller
+      // stopped waiting is not a fact about the service.
+      expect(failure?.message).not.toMatch(/did not answer within/u);
+      expect(failure?.message).toMatch(/cancelled/u);
+      // The script really did run — otherwise "it was stopped" would be a claim
+      // about nothing — and the stop is the script's own account of it, not uvp's
+      // inference from a process's absence.
+      expect(existsSync(pidFile)).toBe(true);
+      expect(existsSync(stopFile), "the started service was left running").toBe(true);
+    },
+  );
 
-  it("reports a readiness timeout as itself when the caller is still waiting", async () => {
-    // The control for the test above: the same request without a withdrawal. If
-    // the cancellation check were simply "the wait ended without an answer", this
-    // is the case that would notice, because a deadline is not a decision.
-    const result = (await run(
-      {
-        path: workspace,
-        args: [],
-        env: {},
-        ready: { port: silentPort, path: "/", timeout_ms: 700 },
-        detach: true,
-      },
-      { signal: new AbortController().signal },
-    )) as { ready: boolean; unknowns: readonly { reason: string }[] };
+  it.skipIf(windowsGap !== undefined)(
+    named("reports a readiness timeout as itself when the caller is still waiting"),
+    async () => {
+      // The control for the test above: the same request without a withdrawal. If
+      // the cancellation check were simply "the wait ended without an answer", this
+      // is the case that would notice, because a deadline is not a decision.
+      const result = (await run(
+        {
+          path: workspace,
+          args: [],
+          env: {},
+          ready: { port: silentPort, path: "/", timeout_ms: 700 },
+          detach: true,
+        },
+        { signal: new AbortController().signal },
+      )) as { ready: boolean; unknowns: readonly { reason: string }[] };
 
-    expect(result.ready).toBe(false);
-    expect(result.unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
-    await services.workspace.stop({ all: true, graceMs: 3_000, force: true });
-  });
+      expect(result.ready).toBe(false);
+      expect(result.unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
+      await services.workspace.stop({ all: true, graceMs: 3_000, force: true });
+    },
+  );
 });

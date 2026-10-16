@@ -612,6 +612,7 @@ implicit.
 |     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ✅  | Every third-party `uses:` under `.github/` is pinned to a commit SHA with the release named beside it, and `npm run verify:actions` fails one that is not — or that pins the same action at two SHAs. Each SHA was resolved with `gh api repos/<owner>/<repo>/git/ref/tags/v4`, never from memory, and each `# vX.Y.Z` label read from the tag list. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ✅  | A Windows lane runs the source projects: `windows-source` on `windows-latest`, in `CI required`, so a red Windows lane cannot read as green. Its first run reported 53 tests that could not run there, in three groups — five fixtures that stand in for a built binary by writing a `#!/bin/sh` script with no extension (45), an artifacts fixture that names its output the POSIX way (4), and a recorded command line rendered in POSIX dialect (4) — each skipped by name with its reason printed and an issue of its own tracking the fix. It also found that the test runner spawned `node_modules/.bin/vitest`, which Windows cannot execute at all, so the lane would have died before loading a test file. The `local-msvc` half is the row below. See [below](#windows-lane)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ⬜  | A Windows CI lane for `local-msvc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ✅  | The packaged tarball is a fact about its contents and a promise about them: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — fails if any digest differs, and fails when a path `package.json`'s `files[]` names is not delivered. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. It also found that no tarball had ever contained `THIRD_PARTY_NOTICES.md`, which tells a redistributor to keep it. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -2526,6 +2527,82 @@ either: the build logs it and still exits 0. And a fence is taken to be one whos
 delimiter starts within three spaces of the line start, per CommonMark, so a fence
 indented further inside a list item would read as prose and fail as a false
 positive. This checks the one cause that has been observed.
+
+### The Windows lane's first run {#windows-lane}
+
+No job had ever run on Windows, and that is a specific kind of gap rather than a
+missing convenience. Everything uvp said about the platform was read out of the
+source: the `cl` probe in the local provider, the `C:/…` rule in the build-output
+parser, `detached: process.platform !== "win32"` in the process runner, the `.exe`
+suffix the native probe looks for. None of them was wrong because nobody had
+looked — they were **`undetermined` on the platform they were about**, which is
+the state this repository's own rules say to report rather than to resolve by
+reading.
+
+The lane is `windows-source`: checkout, Node from `.nvmrc`, `npm ci`, `npm run
+test:fast`, on `windows-latest`, in `CI required`. It needs no C++ compiler and no
+libuvcpp, so it establishes the TypeScript half of uvp on Windows and nothing
+about a compiler there; the job name says so, and the `local-msvc` row above is
+still open, which is why there are two rows and not one.
+
+**It could not have run at all, and that was the first finding.** `npm run
+test:fast` goes through `scripts/run-tests.mjs`, which spawned
+`node_modules/.bin/vitest`. On Linux and macOS that path is a shell script; on
+Windows there is no such file to execute, only `vitest.cmd`, `vitest.ps1` and a
+`#!/bin/sh` script that Windows cannot start either. The lane would have died
+before loading a test file, and the failure would have read like a broken suite
+rather than a wrong path — the sort of thing a CI lane is for and a source
+reading never shows. The runner now resolves the Vitest entry from Vitest's own
+`package.json` and runs it through the Node already executing the script, which is
+the answer `scripts/lint.mjs` already gives for oxlint.
+
+**Then it ran, and 53 of the 798 source tests could not.** They are one platform
+assumption in three places, and the counting is the useful part of the finding:
+
+| how many | what it is                                                                                                                                                                                                                                                                                               | tracked by                                      |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 45       | the fixtures that stand in for a built binary write a `#!/bin/sh` script with no extension and set it executable — five of them independently: `writeFakeBinary`, `fixtureBinaryScript`, the container provider's fake runtime, `runCancellation`'s fake service, and a `cmake` symlinked to `/bin/true` | [#18](https://github.com/Antruly/uvp/issues/18) |
+| 4        | `artifacts.test.ts` names its outputs the POSIX way, and `discoverArtifacts` decides what a build produced from a mode bit on POSIX and an extension on Windows                                                                                                                                          | [#19](https://github.com/Antruly/uvp/issues/19) |
+| 4        | a recorded command line is rendered in POSIX dialect — `env LC_MESSAGES=C CMAKE_PREFIX_PATH='C:\…' cmake -S …` — and four assertions read the raw string, so they fail on the quoting rather than on the prefix                                                                                          | [#20](https://github.com/Antruly/uvp/issues/20) |
+
+The failure text is what makes the first group a fixture defect rather than a
+product one:
+
+```
+UvpFailure: C:\Users\RUNNER~1\AppData\Local\Temp\uvp-bundle-diff-5AvnvK\svc\build\svc
+could not be started: spawn … ENOENT
+ ❯ WorkspaceService.run src/application/WorkspaceService.ts:346:13
+```
+
+uvp resolves the binary as `join(buildDir, manifest.binary ?? manifest.name)`, and
+on Windows `CreateProcess` appends `.exe` to a name that has no extension — so a
+real CMake build producing `svc.exe` **is** found, with no change to uvp. That is
+derived from documented behaviour rather than observed, and it is the thing the
+lane will make observed once the fixtures can produce a binary Windows can start.
+
+**Each gap is skipped by name, not by count.** The 53 are `it.skipIf` and
+`describe.skipIf` with the reason in the title, so
+`scripts/lib/vitest-skipped-reporter.mjs` prints every one of them and names the
+issue that tracks it. A skipped test and a passing test must not look alike in a
+summary — that rule is in `docs/testing.md` and this is it being applied to a lane
+whose first honest answer was "not on this platform, for these reasons". The
+counts in the table are what should fall as the three fixes land, and each fix
+gets its own pull request so the lane can verify it: once the lane is on `main`,
+a Windows fix is proven by the run that follows it rather than by the argument
+that made it.
+
+**What it found about the code, not the fixtures.** Nothing yet, and that is worth
+stating plainly. The three groups are all tests standing in for something: the
+lane's Windows result so far is about how this suite builds its fixtures, and the
+product claims it was built to check remain where they were — inferred from
+reading, `undetermined` on Windows, until a run can reach them.
+
+**What is not in the lane.** `typecheck`, `lint` and `oxfmt`. `scripts/lint.mjs`
+spawns its resolved oxlint path directly, which is the same Windows problem the
+test runner had, so that fix belongs with the widening rather than before it.
+Running the built projects — the CLI and MCP binaries, the packaged tarball — is
+the other half, and needs a Windows lane that can compile, which is what the
+`local-msvc` row above means.
 
 ## Not planned
 
