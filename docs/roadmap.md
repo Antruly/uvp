@@ -421,7 +421,7 @@ implicit.
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and passed on every run since, local and CI. The mechanism is unknown and the row is here rather than in a commit message because an intermittent gate teaches people to re-run until it is green. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ⬜  | `tests/conformance/captureReplay.test.ts` has failed **twice** with `TransportFailure: socket hang up` from a request to a loopback fixture, both times inside a full local gate (2026-10-16T05:59:33Z, and again at 06:56Z the same day) and never in the runs of that file alone — three more of them while writing this row. The client keeps pooled connections, so this is the class where a peer closes a socket under a request — but reuse of a socket closed long ago was eliminated, the client's own idle close samples clean at 2400 reuses, and the mechanism is not established. A failure now prints what the fixture child was doing when the request died, which is the one end of the request a run can answer for itself. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                         |
+| ✅  | `tests/conformance/captureReplay.test.ts` has failed **four** times with `TransportFailure: socket hang up`, each from a request through a capture proxy: twice inside a full local gate (2026-10-16T05:59:33Z, 06:56Z) and twice from standalone runs on an idle machine, which ruled the gate's load out and settled that this row wanted a sample rather than a theory. The proxy's number had been handed out twice, and the client's global keep-alive pool still held a socket for that `host:port`; the mechanism is constructed rather than sampled below. Fixed at the reservation, where a number is now handed out once per process, with a test that measures its own strength. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                                                                          |
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens                                                                                                                                         |
 | ⬜  | The runner warns that Node.js 20 is deprecated, naming the actions it is about by the SHA pinned here: in run `38827824455` it named `cache@0057852b`, `checkout@11d5960a`, `setup-node@49933ea5`, `upload-artifact@ea165f8d` and `download-artifact@d3f86a10`. That list is what ran rather than what is deprecated — `github-script@v7` targets `node20` too and never appeared, because its one job runs only on pull requests — so the count is six, where the row this replaced said four. `runs.using` in each action's own `action.yml` says `node20` at the pinned SHA and `node24` at the major Dependabot proposes, so all six clear it, none of them from a release note. They run on Node 24 today and the warning is not yet a failure — exactly the state that ends in a red lane on a date nobody wrote down. Adopting the six is the human owner's decision, [the pins above](#action-pins); they are rehearsed — SHAs resolved, all 40 references replaced, `verify:actions` green, every input still declared — but not run.    |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -790,77 +790,127 @@ of the second prints `UvpFailure`, which is the whole difference between them.
 
 ### A socket hang-up in the conformance lane {#socket-hang-up}
 
-`tests/conformance/captureReplay.test.ts` has failed twice, on this machine, each
-time inside a full local gate and each time the same way: one test ends with
-`TransportFailure: socket hang up` from `src/application/httpClient.ts:414`. The
-first was `reports a body that changed as a difference, with the status still
-matching` (2026-10-16T05:59:33Z) and the second `reports a status that changed even
-though the body did not` (the same day at 06:56Z). Both logs live outside the
-repository, so the runs are described rather than linked. Between them the file
-passed four full gates and every standalone run of it — three more while this row
-was being written — and its twelve tests take about 250 ms.
+`tests/conformance/captureReplay.test.ts` has failed four times, on this machine,
+each time the same way: one test ends with `TransportFailure: socket hang up` from
+`src/application/httpClient.ts:414`. The first two were inside a full local gate —
+`reports a body that changed as a difference, with the status still matching`
+(2026-10-16T05:59:33Z) and `reports a status that changed even though the body did
+not` (the same day at 06:56Z) — and both logs live outside the repository, so those
+two runs are described rather than linked. The file's twelve tests take about 250 ms.
 
-**What the second occurrence adds is that it rules out the one-off.** Two failures
-in about ten full local gates, none in the runs of the file alone: whatever this
-is, it wants the load of a gate that is building C++ beside it, or it wants enough
-repetition that ten runs is not yet a sample. Those are different answers and this
-is not enough evidence to choose between them.
+**Repetition is what it wanted, and that is measured now rather than guessed.** The
+second occurrence was read here as leaving two answers open — "it wants the load of a
+gate that is building C++ beside it, or it wants enough repetition that ten runs is
+not yet a sample" — and repetition answered it. Two more failures, both from
+standalone runs of the file on an otherwise idle machine: iteration 20 of one
+300-run sweep and iteration 19 of another, with no gate and no CMake anywhere near
+them. So the load of a gate is where the first two happened to be observed rather
+than what produced them, and the rate is **two failures in thirty-nine runs** of the
+file alone.
 
-Both ends are Node's own defaults, which is what makes this a class rather than a
+**The failures never repeat a test.** Four occurrences, four different tests — the
+third and fourth each a test neither earlier one was. That is a shape rather than a
+coincidence, and it is what a request that dies once, and only once, leaves behind.
+
+**Both ends are Node's own defaults**, which is what makes this a class rather than a
 one-off. uvp's client calls `http.request` with no `agent`, so it gets
-`http.globalAgent`, keep-alive with no idle timeout since Node 19; the capture
-proxy is `http.createServer(...)` with no `keepAliveTimeout`, so it advertises
-`keep-alive: timeout=5`. Connections are reused, and a failure can therefore be
-a socket rather than a connection.
+`http.globalAgent`, keep-alive with no idle timeout since Node 19; the capture proxy
+is `http.createServer(...)` with no `keepAliveTimeout`, so it advertises
+`keep-alive: timeout=5`. Connections are reused, and a failure can therefore be a
+socket rather than a connection.
 
-**Eliminated: reusing a socket the server closed long ago.** Against a Node server
-with the default idle close, a request issued six seconds after the previous one
-did not reuse the dead socket at all — the agent dropped it, opened a new one and
-answered 200.
+**Eliminated: reusing a socket the server closed long ago — and why that was not
+enough.** Against a Node server with the default idle close, a request issued six
+seconds after the previous one did not reuse the dead socket at all — the agent
+dropped it, opened a new one and answered 200. A sweep that lowered `keepAliveTimeout`
+to sample the close cheaply said nothing, because below one second the server
+advertises `timeout=0`, and the client reads that as "never reuse"; it is kept here
+because "0 of 3000, so it is not the race" is the conclusion it invites and the wrong
+one. With a server advertising `timeout=2`, reuse survives an 800 ms gap and is gone
+by 1200 ms, so the client closes an idle pooled socket itself, a second before the
+server would. Twenty concurrent requests to establish a pool, a gap swept over the
+client's own close, then twenty more: 2400 of 4800 reused a pooled socket, and not one
+failed.
 
-**The first sweep said nothing, and the reason is worth keeping.** Sweeping
-`keepAliveTimeout` down to 50 ms to sample the close cheaply gave 3000 requests
-with `reused=false` on every one: below one second the server advertises
-`timeout=0`, and the client reads that as "never reuse". The sweep never sampled
-the boundary it was aimed at. It is recorded because "0 of 3000, so it is not the
-race" is the conclusion it invites and the wrong one.
+Every one of those probes held constant the one thing this lane does not: **the same
+server stayed behind the number.** A reused socket there was still pointed at the
+listener it had been opened to, which is why nothing failed and nothing could have.
+The class is not "a socket closed long ago". It is "a socket whose listener is gone
+and whose **number has since been given to a different server**", and socket reuse is
+only how it is reached.
 
-**Where the boundary is.** With a server advertising `timeout=2`, reuse survives
-an 800 ms gap and is gone by 1200 ms: the client closes an idle pooled socket
-itself, a second before the server would. So the window is not the server's FIN,
-and a request cannot be written into a socket the peer closed minutes ago.
+**The mechanism, constructed rather than sampled.** A twenty-line script with no uvp in
+it — server A on a number, one keep-alive request through the global agent, A closed,
+server B bound to that same number, one request — answers `{"reused":true,
+"code":"ECONNRESET"}`, message `socket hang up`, and the request after it is fine. Then
+the same thing through this lane's own tools: `uvp_capture_start` on a reserved number,
+one request through it, `uvp_capture_read {stop: true}`, and a second
+`uvp_capture_start` **on that same number**, whose first request dies with the
+identical `TransportFailure` while its second answers 200. The rare failure, on demand,
+in about a hundred milliseconds.
 
-**And 4800 samples across it produced nothing.** Twenty concurrent requests to
-establish twenty pooled sockets, a gap swept over the client's own close, then
-twenty more: 2400 of the 4800 reused a pooled socket, and not one failed. If this
-is the mechanism, it is rarer than one in 2400 reuses. The pool width is part of
-the model — the lane's own pattern is one socket at a time — and the probes were
-scratch scripts under `/tmp`, not lanes here, so nothing in this repository
-re-runs them.
+**And the failing run now says so itself.** The reserved numbers were logged for the
+length of one sweep — the logging was scratch and is not in the change — and five of
+the nineteen runs before the fourth failure had handed one out twice. That failure's
+own log carries both halves:
 
-**The first of those three is now observable.** A failing request through the
-proxy — and a replay that throws rather than returning an `outcome` — prints what
-each fixture child was doing at that moment: `running`, `exited with code 0`,
-`killed by SIGKILL`, with the last line the child said, capped and marked when
-truncated. The fixture is a child process and nothing here read its exit or its
-output after startup; its `stdout` and `stderr` are drained now, which also removes
-the case where an unread pipe fills and blocks it. Verified against all three
-branches before being kept: a healthy fixture says `running, last said "fixture
-listening …"`, one killed with `SIGKILL` says `killed by SIGKILL`, and one stopped
-through `stop()` — which sends `SIGTERM` and gets a clean exit — says `exited with
-code 0`. So the next occurrence answers its own first question: if the target was
-there, the failure was the proxy's or the kernel's, and if it was not, the exit
-says which way it went. The diagnostic is logged and the error is rethrown
-unchanged, because a diagnostic that changed the error under test would be a
-second defect.
+```
+[freePort] REPEAT 32316 handed out again; issued so far: 32721,32612,…,32316
+a request through the proxy to http://127.0.0.1:32316/hello failed: TransportFailure: socket hang up
+```
 
-**What is left** is therefore two ends rather than three: a connection closed as a
-request is written to it, by the proxy or by the kernel under the load of a gate
-that was running real CMake builds alongside. Nothing was changed on this evidence,
-and one candidate fix is named so the next person does not have to re-derive the
-trade: making the client open one connection per exchange would remove the class
-and would also change what `uvp_load_test` measures, which is not a trade an
-unreproduced failure should settle.
+The number handed out twice is the number the request died on, and it was handed out
+twice in consecutive calls — a capture proxy given the number the capture before it
+had just released. That is the construction above, arriving on its own.
+
+**Why the number was handed out twice.** `freePort` probes a candidate and returns it;
+a listener that has stopped makes its number genuinely free again, so the probe was
+not wrong — but nothing in the file remembered that this process had already given
+that number to someone. The window it walks is 512 numbers wide and this lane makes
+dozens of calls per run, so a collision is ordinary rather than exotic.
+
+**The fix is at the reservation, not in the transport.** `freePort` now remembers every
+number it has handed out and never hands one out twice in a process: the walk skips a
+number already issued the way it skips one already occupied. The client's pool is
+untouched, because the pool is the product's and the defect was the harness giving one
+identity to two servers. A test beside the lane draws eighty numbers with nothing bound
+and requires all of them distinct — against the reservation with the exclusion removed,
+**twenty of twenty runs fail**, and the walk simulated without it collides in 99.8% of
+runs — while with the fix the walk cannot repeat at all until all 512 numbers are
+spent. It skips, by name, where there is no window to walk, because a number drawn from
+port 0 cannot be remembered.
+
+**And the same sweep with the fix is clean.** Three hundred runs of the file, no
+failure, and no log containing a hang-up at all, against two failures in the
+thirty-nine runs before it. At the rate those thirty-nine measured, three hundred runs
+with none is about a one-in-seven-million chance, so this is the exclusion rather than
+the sampling.
+
+**The diagnostic stayed, because it answered its question.** A failing request through
+the proxy — and a replay that throws rather than returning an `outcome` — prints what
+each fixture child was doing at that moment: `running`, `exited with code 0`, `killed
+by SIGKILL`, with the last line the child said, capped and marked when truncated. The
+fixture is a child process and nothing here read its exit or its output after startup;
+its `stdout` and `stderr` are drained now, which also removes the case where an unread
+pipe fills and blocks it. Verified against all three branches before being kept: a
+healthy fixture says `running, last said "fixture listening …"`, one killed with
+`SIGKILL` says `killed by SIGKILL`, and one stopped through `stop()` — which sends
+`SIGTERM` and gets a clean exit — says `exited with code 0`. In the fourth failure it
+reported both fixtures `running`, which ruled the target out and left the client and
+the proxy; that is the half of the answer it was built for. The diagnostic is logged
+and the error is rethrown unchanged, because a diagnostic that changed the error under
+test would be a second defect.
+
+**What was not done, and one thing left open.** The candidate named here before — one
+connection per exchange — would remove the class by removing the pool, and would change
+what `uvp_load_test` measures; that trade is not worth taking for a defect whose cause
+is a harness handing one number to two servers, so the pool is untouched. A caller
+still has the hazard: stop a capture and start another on the same `listen_port` while
+holding a pooled client, and the first request through the new proxy can die the same
+way, because nothing on the server side can tell a stale socket from a fresh one.
+Retrying once on `req.reusedSocket` is the fix clients usually carry, and it would
+change the transport's observable behaviour, so it is named for the design discussion
+rather than taken here.
 
 ### The skip list, wherever a run sets its own reporters {#the-skip-list}
 

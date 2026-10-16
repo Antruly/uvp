@@ -31,6 +31,25 @@ import { createServer } from "node:net";
  * fixed guess would be worse than the race, and this file says so rather than
  * pretending the reservation is stronger than it is.
  *
+ * ## Why a number is handed out once
+ *
+ * A number is a server's identity to every client in this process. uvp's own
+ * client calls `http.request` with no `agent` and so gets `http.globalAgent`,
+ * keep-alive since Node 19 and pooled by `host:port` for the life of the process.
+ * A number handed out twice therefore hands a client's pooled socket to a server
+ * it was never opened to, and the first request written into it dies with
+ * `ECONNRESET: socket hang up`, while the one after it opens a fresh connection
+ * and succeeds.
+ *
+ * The bind probe cannot see that on its own: a listener that has stopped makes its
+ * number genuinely free again, so the probe is right that nothing holds it and
+ * wrong that nothing here has spent it. The window is 512 numbers wide and a lane
+ * makes dozens of calls, so this was not rare — a capture proxy put on the number
+ * the capture before it had just released killed one test in about twenty runs of
+ * `tests/conformance/captureReplay.test.ts`. Every number issued is remembered for
+ * the life of the process, and the walk skips a spent number the way it skips an
+ * occupied one.
+ *
  * A caller that needs the port to remain free should say so in the failure: a
  * test that asserts "connection refused" fails loudly if something did take it,
  * rather than passing for a reason it did not choose.
@@ -93,19 +112,43 @@ const anyFreePort = async (): Promise<number> =>
     });
   });
 
+/**
+ * Every number this process has handed out, for the life of the process.
+ *
+ * Never cleared, because the thing that makes a second hand-out dangerous — a
+ * client's pooled socket — outlives the listener it was opened to. The walk below
+ * consults it, and the port-0 path adds to it, so that a number the kernel picked
+ * out of the ephemeral range is not handed out again by the walk either.
+ */
+const issued: Set<number> = new Set();
+
+/** Hand a number out, and remember it for as long as this process runs. */
+const remember = (port: number): number => {
+  issued.add(port);
+  return port;
+};
+
+/** Whether this host has a window to reserve from, which the walk needs. */
+export const reservationWindowIsAvailable = ephemeralFloor !== undefined;
+
 export const freePort = async (): Promise<number> => {
-  if (ephemeralFloor === undefined) return await anyFreePort();
+  if (ephemeralFloor === undefined) return remember(await anyFreePort());
   const start = ephemeralFloor - WINDOW;
   // A random offset per call, so two workers reserving at the same moment are
   // unlikely to be looking at the same candidates in the same order.
   const offset = Math.floor(Math.random() * WINDOW);
   for (let step = 0; step < WINDOW; step += 1) {
     const port = start + ((offset + step) % WINDOW);
-    if (await probe(port)) return port;
+    if (issued.has(port)) continue;
+    if (await probe(port)) return remember(port);
   }
-  // Every candidate in the window is taken by something else on this machine.
-  // Falling back is better than failing: the caller's own bind says whether the
-  // number it gets is really free, and a port in the ephemeral range is what it
-  // would have had before this file looked at the range at all.
-  return await anyFreePort();
+  // Every candidate in the window is either taken by something else on this
+  // machine or already spent by this process. Falling back is better than
+  // failing: the caller's own bind says whether the number it gets is really
+  // free, and a port in the ephemeral range is what it would have had before this
+  // file looked at the range at all. This is also the one path that can hand a
+  // number out twice, because port 0 cannot be steered away from a spent one —
+  // which needs the window's 512 numbers to be spent first, and is why the walk
+  // is the guarantee and this is the fallback.
+  return remember(await anyFreePort());
 };
