@@ -1056,6 +1056,78 @@ therefore pin the reader to its own docblock rather than to a caller, and they b
 load-bearing the day one of those consumers spreads a manifest or asks whether a key
 is there. The sweep's other 207 survivors are still unread.
 
+**A third of the survivor table is damage the build refuses, which segments the
+queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the
+question the `workspaceManifest.ts` read above surfaced — with `checkers` empty, how
+much of the 344 is mutants the tree could never hold? — asked of the whole table
+rather than of one file. `scripts/mutation-survivor-kinds.mjs` applies each surviving
+mutant's own replacement text to the span its own report records, runs the project's
+`tsc --noEmit`, and restores the file from the report's embedded `source`, which is
+the authority for the restore rather than a copy taken when the run started. Over run
+[`38919206652`](https://github.com/Antruly/uvp/actions/runs/38919206652)'s report:
+**108 of the 344 do not compile** — `assertions.ts` 39 of 129, `evidenceHelpers.ts`
+28 of 70, `workspaceManifest.ts` 25 of 53, `evidence.ts` 10 of 13, `errors.ts` 4 of
+14, `bundleDiff.ts` 2 of 54, and none of `ToolchainProvider.ts`'s five or
+`unknown.ts`'s six. Of the **207** survivors in files whose read is still
+outstanding, **51** are in that class, so the queue the sweep's table presents is at
+most **156**.
+
+What the class is made of says more than its size, because the diagnostics are not
+one kind of thing. These counts are sites that name the code, and one mutant can name
+two of them — `TS18046+TS7027` is a row of the table the instrument prints — so the
+families overlap and do not sum to 108. `TS2322` (**37**) is a value of the wrong shape
+and `TS2375` (**15**) the `exactOptionalPropertyTypes` spread, both of which the type
+system forbids outright; `TS2739` (**13**) is an object literal that would lose
+properties; `TS2554` (**9**) is a call with the wrong number of arguments; `TS18046`
+(**8**) is a value of type `unknown` used as something else; `TS2367` (**7**) is a
+comparison the types say cannot hold. `TS7027` — unreachable code, **19** of the 108 —
+reads differently from all of those: it is `allowUnreachableCode: false` refusing a
+_dead branch_, so the mutant is a control-flow change the build rejects rather than a
+shape the types forbid.
+
+Where the dead branches sit is a derivation from the baseline rather than a reading of
+the diagnostic's name: the pristine tree compiles clean, so no region of it is already
+unreachable to the checker, so the region each of these 19 kills is one the checker
+still considered reachable in the unmutated tree. That is a starting point and not a
+verdict, and the gap between the two is worth stating rather than rounding off.
+**Reachable to the checker is not the same as reachable for some input.** Its
+reachability is intraprocedural and takes no view of what a callee can return, so a
+branch it cannot rule out can still be a branch no input takes — and for that mutant
+the difference is equivalence rather than an unasserted assertion, which is a
+different reason to stop reading it. Settling which of the 19 are which is the
+per-file work [#54](https://github.com/Antruly/uvp/issues/54) did for one file. What
+the family does establish is that the compiler is doing work a test could have done,
+which is why these are worth reading before the outright-forbidden 37. By mutator the
+class is dominated by `ConditionalExpression` (**38**), `StringLiteral` (**28**) and
+`ObjectLiteral` (**16**) — read from the report's own `mutatorName`, and these do sum
+to 108.
+
+A survivor that does not compile is not therefore one nobody needs to read, and the
+lane is why: the mutation group runs `src/` through Vitest, which strips types rather
+than checking them, so all 108 were run and survived anyway — `:106:66` above is one,
+a `Buffer` coercing through `JSON.parse`. What the classification establishes is
+narrower and was measured rather than inferred: **all 108 are refused by
+`tsconfig.build.json` as well**, the configuration `npm run compile` builds with, so
+they are damage no built tree could carry. The `typecheck` gate is a separate matter
+and does not need this measurement — it runs `tsc --noEmit` under `tsconfig.json`,
+which is the very command this instrument runs, so it was already the reason those
+108 could not have been merged. So the summary's line — a survivor is a place where
+the code can be wrong and the suite still passes — stays true and says less than it
+looks like: for these 108 the suite passing is a division of labour with the compiler
+rather than a gap in the suite. They are recorded here rather than pinned, and the way
+to stop them arriving in the table at all is the checker `checkers: []` above is still
+waiting on.
+
+The instrument is part of the change rather than a scratch file, because an
+instrument that no longer exists turns a measurement back into an argument:
+`scripts/mutation-survivor-kinds.mjs` takes any report, and
+`scripts/verify-mutation-survivor-kinds.mjs` holds it with a stub compiler that puts
+compiles, refused-with-a-diagnostic and undetermined in one fixture, asserts that each
+mutation landed on the span its report named, and is wired into `check:pr`. It is not
+wired into the weekly sweep: it costs a typecheck per mutant — **4 minutes 15
+seconds** for the 344 survivors of this report — and the report it needs is already an
+artifact of that job.
+
 **In that run the upper bound was tightly zero, and the line says so.** Over the
 936 kills of the retained report, **936 carry the suite's own summary** in their
 `statusReason` and the 344 survivors carry no `statusReason` at all, so no kill in
