@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,6 +25,7 @@ import {
   failedBuild,
   writeFakeBinary,
 } from "./fakeToolchain.js";
+import type { FakeToolchainOptions } from "./fakeToolchain.js";
 import { fixtureBinaryScript, startFixture } from "./fixtureServer.js";
 import type { FixtureServer } from "./fixtureServer.js";
 
@@ -2389,10 +2390,28 @@ describe("the dispatch table", () => {
  */
 
 /** A provider that answers as a container image would, without starting one. */
-const containerFixture = (image: string): ToolchainProvider => ({
-  ...createFakeToolchain({ id: "container", version: image }),
+const containerFixture = (
+  image: string,
+  options: FakeToolchainOptions = {},
+): ToolchainProvider => ({
+  ...createFakeToolchain({ ...options, id: "container", version: image }),
   identity: () => ({ id: "container", platform: "container", version: image }),
 });
+
+/**
+ * An image this host cannot examine at all: there is no runtime to start it.
+ *
+ * The refusal is the provider's own, as the real one's is, because the caller
+ * that has to handle it is the one that must not paraphrase it.
+ */
+const unexaminableImage = (image: string): ToolchainProvider =>
+  containerFixture(image, {
+    available: false,
+    missing: [{ id: "container_runtime", requiredFor: "running a build inside a container" }],
+    libuvcppUnavailable:
+      `The libuvcpp install inside ${image} could not be examined: the image is not present, ` +
+      "or no container runtime is available.",
+  });
 
 /**
  * Call a tool against a graph whose container toolchain is a fixture.
@@ -2406,13 +2425,14 @@ const callWithContainers = async (
   name: string,
   input: unknown,
   images: string[],
+  fixture: (image: string) => ToolchainProvider = containerFixture,
 ): Promise<Record<string, unknown>> => {
   const services = createUvpServices({
     providers: [createFakeToolchain()],
     now: FROZEN_CLOCK,
     containerToolchain: (image) => {
       images.push(image);
-      return containerFixture(image);
+      return fixture(image);
     },
   });
   return await handlerFor(createToolHandlers(services), name)(input, { signal: harness.signal });
@@ -2616,6 +2636,208 @@ describe("where a build happens", () => {
       // The pass says which toolchain it used, so nothing about it claims to be
       // what the manifest asked for.
       expect(output["provider"]).toMatchObject({ id: "fake" });
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * The doctor, on a workspace whose manifest names a toolchain.
+ *
+ * `uvp_doctor` is the command a caller runs *before* building, so a workspace
+ * that names a container has to be answerable here — otherwise the first thing
+ * that mentions the missing runtime is a build that was never going to start.
+ *
+ * The container provider is again a scripted fixture: it establishes which
+ * image was asked for and what the doctor did with an answer it did not get,
+ * and nothing about podman.
+ */
+describe("what the doctor says about a workspace that names a toolchain", () => {
+  it(
+    "reports the container it could not examine, in the provider's own words",
+    async () => {
+      const images: string[] = [];
+      const path = await declaringWorkspace({ kind: "container", image: "localhost/uvp-base:12" });
+
+      const output = await callWithContainers(
+        "uvp_doctor",
+        { workspace: path, features: ["tls", "db"] },
+        images,
+        unexaminableImage,
+      );
+      expectConforms("uvp_doctor", output);
+      expect(images).toEqual(["localhost/uvp-base:12"]);
+
+      // A host with no runtime says so in a report, which is the whole point of
+      // asking the doctor rather than starting a build.
+      const toolchains = output["toolchains"] as {
+        id: string;
+        available: boolean;
+        missing: { id: string; required_for: string }[];
+      }[];
+      const container = toolchains.find((entry) => entry.id === "container");
+      expect(container?.available).toBe(false);
+      expect(container?.missing.map((missing) => missing.id)).toEqual(["container_runtime"]);
+      // Reported beside it, not instead of it: "can I build here at all" needs
+      // both halves.
+      expect(toolchains.some((entry) => entry.id === "fake")).toBe(true);
+
+      // Nothing about the build was established, so nothing is claimed about it
+      // — including that the image lacks these features.
+      const features = output["features"] as { status: string; note?: string }[];
+      expect(features).toHaveLength(2);
+      for (const entry of features) {
+        expect(entry.status).toBe("undetermined");
+        expect(entry.note).toContain("localhost/uvp-base:12");
+      }
+
+      // `libuvcpp` has no way to say "not looked": `found` is a boolean every
+      // reader takes as a claim about the toolchain. So this host's install is
+      // what is reported, and the report says in as many words that it is not
+      // the one this workspace builds against.
+      expect((output["libuvcpp"] as Record<string, unknown>)["found"]).toBe(true);
+      expect(
+        (output["limitations"] as string[]).some((line) =>
+          line.includes("Nothing here describes localhost/uvp-base:12"),
+        ),
+      ).toBe(true);
+
+      // The envelope is stamped with the toolchain the workspace named, so a
+      // report about an image is not labelled as a result from this host.
+      expect(output["provider"]).toMatchObject({
+        id: "container",
+        version: "localhost/uvp-base:12",
+      });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "asks the image, not this host, for the libuvcpp a container workspace builds against",
+    async () => {
+      const images: string[] = [];
+      const path = await declaringWorkspace({ kind: "container", image: "localhost/uvp-base:12" });
+
+      const output = await callWithContainers(
+        "uvp_doctor",
+        { workspace: path, features: ["db"] },
+        images,
+        (image) =>
+          containerFixture(image, {
+            libuvcpp: {
+              found: true,
+              version: "1.6.0",
+              versionSource: "version_file",
+              installPrefix: "/opt/libuvcpp",
+              modules: [],
+              note: `Read from the image ${image}: paths are in-container.`,
+            },
+          }),
+      );
+      expectConforms("uvp_doctor", output);
+      expect(images).toEqual(["localhost/uvp-base:12"]);
+
+      const libuvcpp = output["libuvcpp"] as Record<string, unknown>;
+      expect(libuvcpp).toMatchObject({
+        found: true,
+        version: "1.6.0",
+        install_prefix: "/opt/libuvcpp",
+      });
+
+      // The host fixture this lane hands the graph reports every module, so a
+      // feature decided from the image's empty module list is the difference
+      // between asking the image and asking the host.
+      const features = output["features"] as { status: string; note?: string }[];
+      expect(features[0]?.status).toBe("unmet");
+      expect(features[0]?.note).toContain("UVCPP_ENABLE_DB");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "does not root a header probe at a path that exists only inside the image",
+    async () => {
+      const path = await declaringWorkspace({ kind: "container", image: "localhost/uvp-base:12" });
+      // A host directory that a probe would accept as proof of grpc: the
+      // install root's `include/<header>` is the second layout `headerProbeAt`
+      // tries, so rooting one at `path` would answer `satisfied`.
+      await mkdir(join(path, "include", "grpc"), { recursive: true });
+
+      const images: string[] = [];
+      const output = await callWithContainers(
+        "uvp_doctor",
+        { workspace: path, features: ["grpc"] },
+        images,
+        (image) =>
+          containerFixture(image, {
+            libuvcpp: { found: true, version: "1.7.0", installPrefix: path, modules: [] },
+          }),
+      );
+      expectConforms("uvp_doctor", output);
+
+      // libuvcpp has no configuration switch for grpc, so only the headers
+      // decide it — and the install root is inside the image. Probing this host
+      // instead would find the directory above and report a capability nothing
+      // checked.
+      const features = output["features"] as { feature: string; status: string }[];
+      expect(features[0]).toMatchObject({ feature: "grpc", status: "undetermined" });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a declaration it could not read, even when the call passed its own features",
+    async () => {
+      const images: string[] = [];
+      const path = await declaringWorkspace({ kind: "container" });
+      // `--features` overrides which features are assessed, and it does not
+      // override the file: a workspace that asks to be built somewhere uvp
+      // cannot identify is not a workspace to answer questions about.
+      expect(
+        await refusalOf(() =>
+          callWithContainers("uvp_doctor", { workspace: path, features: ["tls"] }, images),
+        ),
+      ).toBe("invalid_request");
+      expect(images).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "discloses that a report restricted to this host is not the one the workspace builds with",
+    async () => {
+      const images: string[] = [];
+      const path = await declaringWorkspace({ kind: "container", image: "localhost/uvp-base:12" });
+
+      const output = await callWithContainers(
+        "uvp_doctor",
+        { workspace: path, providers: ["fake"] },
+        images,
+        (image) =>
+          containerFixture(image, {
+            libuvcpp: {
+              found: true,
+              version: "1.6.0",
+              installPrefix: "/opt/libuvcpp",
+              modules: [],
+            },
+          }),
+      );
+      expectConforms("uvp_doctor", output);
+
+      // The restriction is honoured as a restriction on what is listed...
+      expect((output["toolchains"] as { id: string }[]).map((entry) => entry.id)).toEqual(["fake"]);
+      // ...and it does not move the subject of the rest of the report: the
+      // libuvcpp is still the image's, and the limitation says the container is
+      // missing from the list rather than letting one row speak for both.
+      expect((output["libuvcpp"] as Record<string, unknown>)["install_prefix"]).toBe(
+        "/opt/libuvcpp",
+      );
+      expect(
+        (output["limitations"] as string[]).some(
+          (line) => line.includes("restricted to fake") && line.includes("container"),
+        ),
+      ).toBe(true);
     },
     TIMEOUT,
   );

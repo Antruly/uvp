@@ -32,14 +32,20 @@ export const doctorContract = defineTool({
   title: "Inspect toolchain readiness",
   description:
     "Report which C++ toolchains, build systems, and libuvcpp builds are available on this host, " +
-    "including per-build feature modules. Read-only: it inspects and never installs. " +
-    "Call this before building to learn whether a request is achievable here.",
+    "including per-build feature modules. Given a workspace, it also reports the toolchain that " +
+    "workspace's uvp.json names — a container image's toolchain and the prerequisites this host " +
+    "is missing, before any build is attempted — and describes the libuvcpp and features that " +
+    "workspace will build against. Read-only: it inspects and never installs, and it never " +
+    "starts a build. Call this before building to learn whether a request is achievable here.",
   kind: "toolchain",
   inputSchema: z.object({
     workspace: z
       .string()
       .optional()
-      .describe("Workspace path to inspect for a pinned libuvcpp requirement."),
+      .describe(
+        "Workspace path to inspect: its pinned libuvcpp requirement, and the toolchain its " +
+          "uvp.json names, which the libuvcpp and feature sections then describe.",
+      ),
     providers: z
       .array(z.string())
       .optional()
@@ -119,6 +125,10 @@ export const doctorContract = defineTool({
     {
       description: "Check a workspace that pins a libuvcpp requirement",
       input: { workspace: "/home/dev/services/orders" },
+    },
+    {
+      description: "Check whether a container-declared workspace can be built on this host",
+      input: { workspace: "/home/dev/services/orders", features: ["tls"] },
     },
     {
       description: "Ask whether this libuvcpp build can do TLS and WebSocket",

@@ -1,12 +1,20 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { UvpFailure } from "../domain/errors.js";
+import { UvpFailure, isUvpFailure } from "../domain/errors.js";
 import { assessFeatures } from "./ToolchainProvider.js";
-import type { HeaderProbe, LibuvcppBuild, ToolchainProvider } from "./ToolchainProvider.js";
+import type {
+  HeaderProbe,
+  LibuvcppBuild,
+  ToolchainIdentity,
+  ToolchainProvider,
+} from "./ToolchainProvider.js";
 import type { UvpFeature } from "../domain/features.js";
+import type { ToolchainSelection } from "../domain/toolchain.js";
 import type { VerdictStatus } from "../domain/verdict.js";
+import { selectToolchain } from "./toolchainSelection.js";
 import { readWorkspaceManifest } from "./workspaceManifest.js";
+import type { WorkspaceManifest } from "./workspaceManifest.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import {
   commandSource,
@@ -31,6 +39,13 @@ import {
  * libuvcpp build whose feature set cannot be read is unknown, and uvp says that
  * too rather than reporting the feature as missing. Every remaining decision in
  * this file follows from keeping those two apart.
+ *
+ * A workspace can name the toolchain it is built with, and that is the third
+ * thing this service has to keep straight. `selectToolchain` is asked the same
+ * question `uvp build` asks, so a host without a container runtime learns it
+ * from a report rather than from a build that was never going to start — and
+ * what the report says about libuvcpp is about the toolchain the workspace
+ * named, not about whichever one happened to be registered first.
  */
 
 export interface DoctorInput {
@@ -43,6 +58,17 @@ export interface DoctorInput {
 export interface DoctorOptions {
   /** Providers by id. The first is the default when the caller names none. */
   readonly providers: readonly ToolchainProvider[];
+  /**
+   * The provider a workspace's own declaration names.
+   *
+   * Required, and not defaulted to the first registered provider. A workspace
+   * that names a container is asking about a toolchain this list does not hold,
+   * and a default here would answer with this host's facts under a workspace
+   * that said it must not be built here. Composition passes
+   * `UvpServices.toolchainFor`, the same function `uvp build` resolves its
+   * provider through, so both surfaces agree about where a workspace builds.
+   */
+  readonly toolchainFor: (selection: ToolchainSelection) => ToolchainProvider;
   /** The provider whose identity stamps the envelope when nothing else names one. */
   readonly headerProbe?: HeaderProbe | undefined;
   readonly signal?: AbortSignal | undefined;
@@ -126,19 +152,98 @@ interface RequestedFeatures {
  * An explicit request wins over a workspace's manifest. That is what lets a
  * caller ask "can this libuvcpp build do TLS?" before any project exists, which
  * is the question that decides whether creating one is worth doing.
+ *
+ * The manifest arrives already read rather than being read here. Both this
+ * function and the toolchain selection need it, and a file read twice is two
+ * answers about a workspace that can change between them — with the second read
+ * silently deciding where a build goes.
  */
-const requestedFeatures = async (
+const requestedFeatures = (
   workspace: string | undefined,
+  manifest: WorkspaceManifest | undefined,
   override: readonly UvpFeature[] | undefined,
-): Promise<RequestedFeatures> => {
+): RequestedFeatures => {
   if (override !== undefined && override.length > 0) {
     return { features: override, manifestPath: undefined };
   }
-  if (workspace === undefined) return { features: [], manifestPath: undefined };
-  const manifest = await readWorkspaceManifest(workspace);
-  return manifest === undefined
-    ? { features: [], manifestPath: undefined }
-    : { features: manifest.features, manifestPath: workspace };
+  if (workspace === undefined || manifest === undefined) {
+    return { features: [], manifestPath: undefined };
+  }
+  return { features: manifest.features, manifestPath: workspace };
+};
+
+/**
+ * Why the toolchain this workspace named could not be asked about libuvcpp.
+ *
+ * Both halves come from the provider that refused — its sentence and its remedy
+ * — because the reason a container cannot be examined is a fact about that
+ * provider's host, and a second wording of it here would be a second owner.
+ */
+interface Unexamined {
+  /** The image that could not be examined. */
+  readonly image: string;
+  /** The provider's own sentence about why. */
+  readonly reason: string;
+  /** The provider's own remedy. */
+  readonly blockedBy: string;
+}
+
+/**
+ * What the feature question is asked of.
+ *
+ * One record rather than five parameters, and the reason is not the count:
+ * `build` and `unexamined` come out of `#libuvcppOf` as one answer, so a state
+ * carrying one without the other is not a state this pair can be in.
+ */
+interface FeatureQuestion {
+  readonly wanted: RequestedFeatures;
+  readonly build: LibuvcppBuild;
+  readonly probe: HeaderProbe;
+  readonly unexamined: Unexamined | undefined;
+}
+
+/** Said of a host with no libuvcpp at all, where a missing install is the reason. */
+const NO_BUILD = "libuvcpp was not found, so no build could be inspected for this feature";
+
+/**
+ * Whether anything at all can be decided about these features.
+ *
+ * Two states with one shape: the toolchain the workspace named could not be
+ * examined, so this host's install is not the subject — or the selected toolchain
+ * has no libuvcpp. Neither is a finding about a feature, and both are owed to the
+ * caller as the reason rather than as a verdict.
+ */
+const undecidable = (
+  build: LibuvcppBuild,
+  unexamined: Unexamined | undefined,
+): { reason: string; blockedBy: string } | undefined => {
+  if (unexamined !== undefined) {
+    return { reason: unexamined.reason, blockedBy: unexamined.blockedBy };
+  }
+  return build.found ? undefined : { reason: NO_BUILD, blockedBy: NO_BUILD };
+};
+
+/**
+ * Every feature undetermined for the same reason, each recorded against it.
+ *
+ * Undetermined rather than unmet, always: a caller sent to rebuild libuvcpp for
+ * a build nobody looked at is the one outcome this state exists to prevent.
+ */
+const allUndetermined = (
+  features: readonly UvpFeature[],
+  block: { reason: string; blockedBy: string },
+  recorder: EvidenceRecorder,
+): DoctorFeature[] => {
+  for (const feature of features) {
+    recordUnknown(recorder, `Can this libuvcpp build provide ${feature}?`, "toolchain_missing", {
+      blockedBy: block.blockedBy,
+    });
+  }
+  return features.map((feature) => ({
+    feature,
+    status: "undetermined" as const,
+    note: block.reason,
+  }));
 };
 
 export class DoctorService {
@@ -157,7 +262,28 @@ export class DoctorService {
     recorder: EvidenceRecorder,
     signal: AbortSignal,
   ): Promise<DoctorReport> {
-    const providers = selectProviders(this.options.providers, input.providers);
+    // One read of `uvp.json`, two things out of it. The feature set and the
+    // toolchain declaration come from the same bytes, so a report cannot
+    // describe the features of one revision of a file and the build target of
+    // another.
+    const manifest =
+      input.workspace === undefined ? undefined : await readWorkspaceManifest(input.workspace);
+
+    // The same rule `uvp build` applies, and deliberately the same function: a
+    // declaration that cannot be read is refused rather than degraded, including
+    // when the caller passed `--features` and believes the manifest is beside the
+    // point of the question they asked.
+    const selection = selectToolchain({ manifest });
+    const selected = this.options.toolchainFor(selection);
+
+    // The toolchain the workspace named is added to the ones a caller can name,
+    // so `--provider container` reaches the image the manifest declares. It is
+    // not added twice when it is the host's own provider, which is what keeps
+    // `--provider local` reporting one row rather than two identical ones.
+    const available = this.options.providers.includes(selected)
+      ? this.options.providers
+      : [...this.options.providers, selected];
+    const providers = selectProviders(available, input.providers);
 
     if (providers.length === 0) {
       throw new UvpFailure({
@@ -167,25 +293,124 @@ export class DoctorService {
       });
     }
 
+    const { toolchains, limitations } = await this.#inspect(providers, recorder, signal);
+
+    // A caller's restriction is honoured as a restriction on what is reported,
+    // and it does not move the subject of the sections below: those answer what
+    // this workspace will build against, which the workspace decides and a flag
+    // does not. Saying so is what keeps a one-row report from reading as "and
+    // the container is not involved".
+    if (!providers.includes(selected)) {
+      limitations.push(
+        `This report was restricted to ${listIds(providers)}, and this workspace builds with ` +
+          `${selected.identity().id}, which is not among them. The libuvcpp and feature sections ` +
+          "below are still about the toolchain this workspace named.",
+      );
+    }
+
+    // Asked of the toolchain the workspace named, not of the first provider a
+    // caller listed. A container's build links against the libuvcpp inside the
+    // image, so this host's install is not an answer to the question the report
+    // is asked — and reporting it as one is how a workspace gets built against a
+    // library nobody described.
+    const { build, unexamined } = await this.#libuvcppOf(
+      selected,
+      selection,
+      input.workspace,
+      signal,
+    );
+
+    // A container's install prefix is a path inside the image. Rooting a probe
+    // at it would `stat` this host, where nothing is there, and answer `false`
+    // for every header-only feature — turning "this host cannot look" into "that
+    // build does not have it", which is the one inference `assessFeatures` keeps
+    // an `undetermined` state for.
+    const probe =
+      selection.kind === "container"
+        ? headerProbeAt(undefined)
+        : (this.options.headerProbe ?? headerProbeAt(build.installPrefix));
+    const wanted = requestedFeatures(input.workspace, manifest, input.features);
+
+    if (unexamined !== undefined) {
+      limitations.push(unexamined.reason);
+      // Said in the report's own voice as well as the provider's, because the
+      // section below is the one a reader checks first and it is not about the
+      // toolchain this workspace builds with.
+      limitations.push(
+        `Nothing here describes ${unexamined.image}: the libuvcpp below is this host's own install, ` +
+          "and this workspace does not build with it.",
+      );
+    } else if (!build.found) {
+      recordUnknown(
+        recorder,
+        "Which libuvcpp modules does the installed build provide?",
+        "toolchain_missing",
+        { blockedBy: "Install libuvcpp, or set UVCPP_ROOT to an unpacked release." },
+      );
+      if (build.note !== undefined) limitations.push(build.note);
+    }
+
+    const libuvcpp: DoctorLibuvcpp = {
+      found: build.found,
+      ...(build.version === undefined ? {} : { version: build.version }),
+      ...(build.versionSource === undefined ? {} : { version_source: build.versionSource }),
+      ...(build.installPrefix === undefined ? {} : { install_prefix: build.installPrefix }),
+      modules: [...build.modules],
+      ...(build.note === undefined ? {} : { note: build.note }),
+    };
+
+    if (wanted.features.length > 0) {
+      const assessment = await this.#assess(
+        { wanted, build, probe, unexamined },
+        recorder,
+        limitations,
+      );
+      return {
+        toolchains,
+        libuvcpp,
+        features: assessment,
+        limitations,
+        provider: selected.identity(),
+      };
+    }
+
+    return { toolchains, libuvcpp, features: [], limitations, provider: selected.identity() };
+  }
+
+  /**
+   * Ask every provider a caller named, and record what each one answers.
+   *
+   * The one half of the report that is about this host; everything downstream is
+   * about the toolchain the workspace named. Kept apart because that is also the
+   * difference a `--provider` restriction makes: it moves which rows appear here
+   * and it does not move the subject of what follows.
+   */
+  async #inspect(
+    providers: readonly ToolchainProvider[],
+    recorder: EvidenceRecorder,
+    signal: AbortSignal,
+  ): Promise<{ toolchains: DoctorToolchain[]; limitations: string[] }> {
     const toolchains: DoctorToolchain[] = [];
     const limitations: string[] = [];
 
     for (const provider of providers) {
-      const identityOfProvider = provider.identity();
+      const identity = provider.identity();
       const availability = await provider.inspectAvailability(signal);
 
       for (const missing of availability.missing) {
         recordUnknown(
           recorder,
-          `Is ${missing.id} available on ${identityOfProvider.id}?`,
+          `Is ${missing.id} available on ${identity.id}?`,
           "toolchain_missing",
-          { blockedBy: `Install ${missing.id}, then re-run uvp_doctor.` },
+          {
+            blockedBy: `Install ${missing.id}, then re-run uvp_doctor.`,
+          },
         );
       }
 
       record(recorder, {
         kind: "toolchain",
-        subject: { provider: identityOfProvider.id, platform: identityOfProvider.platform },
+        subject: { provider: identity.id, platform: identity.platform },
         observed: {
           available: availability.available,
           compilers: availability.compilers.map((compiler) => compiler.id),
@@ -200,7 +425,7 @@ export class DoctorService {
         },
         coverage: coverageComplete("toolchain availability"),
         sources: [
-          commandSource(`${identityOfProvider.id}:compiler --version`),
+          commandSource(`${identity.id}:compiler --version`),
           commandSource("cmake --version"),
         ],
         limitations: availability.limitations,
@@ -230,38 +455,55 @@ export class DoctorService {
       limitations.push(...availability.limitations);
     }
 
-    const firstProvider = providers[0];
-    if (firstProvider === undefined) throw new Error("unreachable: length checked above");
-    const build = await firstProvider.findLibuvcpp(input.workspace, signal);
+    return { toolchains, limitations };
+  }
 
-    const probe = this.options.headerProbe ?? headerProbeAt(build.installPrefix);
-    const wanted = await requestedFeatures(input.workspace, input.features);
-
-    if (!build.found) {
-      recordUnknown(
-        recorder,
-        "Which libuvcpp modules does the installed build provide?",
-        "toolchain_missing",
-        { blockedBy: "Install libuvcpp, or set UVCPP_ROOT to an unpacked release." },
-      );
-      if (build.note !== undefined) limitations.push(build.note);
+  /**
+   * The libuvcpp the selected toolchain builds against.
+   *
+   * A provider refuses rather than answers when it cannot run its toolchain at
+   * all — the port says so, and `LibuvcppBuild` has no way to say "not looked",
+   * because every caller reads `found: false` as a claim that there is nothing
+   * there. So the refusal is caught here, and what the report does with it is
+   * the doctor's own decision rather than a rewriting of the provider's:
+   *
+   *  - the refusal is kept in the provider's own words and returned, so the
+   *    sections about the build can say why they could not be answered;
+   *  - `libuvcpp` falls back to this host's install, which is a real
+   *    observation and is reported as one. It is not an answer about the image,
+   *    and the caller is told exactly that. The alternative — `found: false` —
+   *    would claim the image has no libuvcpp when nothing looked in it.
+   */
+  async #libuvcppOf(
+    selected: ToolchainProvider,
+    selection: ToolchainSelection,
+    workspace: string | undefined,
+    signal: AbortSignal,
+  ): Promise<{ build: LibuvcppBuild; unexamined?: Unexamined }> {
+    try {
+      return { build: await selected.findLibuvcpp(workspace, signal) };
+    } catch (cause) {
+      // Only the host's own provider is exempt: it cannot fail this way, and a
+      // catch that swallowed its errors would hide a real defect behind a
+      // "could not examine" sentence.
+      if (
+        selection.kind !== "container" ||
+        !isUvpFailure(cause) ||
+        cause.detail.code !== "toolchain_unavailable"
+      ) {
+        throw cause;
+      }
+      const host = this.options.providers[0];
+      if (host === undefined) throw cause;
+      return {
+        build: await host.findLibuvcpp(workspace, signal),
+        unexamined: {
+          image: selection.image,
+          reason: cause.message,
+          blockedBy: cause.detail.remediation.action,
+        },
+      };
     }
-
-    const libuvcpp: DoctorLibuvcpp = {
-      found: build.found,
-      ...(build.version === undefined ? {} : { version: build.version }),
-      ...(build.versionSource === undefined ? {} : { version_source: build.versionSource }),
-      ...(build.installPrefix === undefined ? {} : { install_prefix: build.installPrefix }),
-      modules: [...build.modules],
-      ...(build.note === undefined ? {} : { note: build.note }),
-    };
-
-    if (wanted.features.length > 0) {
-      const assessment = await this.#assess(wanted, build, probe, recorder, limitations);
-      return { toolchains, libuvcpp, features: assessment, limitations };
-    }
-
-    return { toolchains, libuvcpp, features: [], limitations };
   }
 
   /**
@@ -271,29 +513,22 @@ export class DoctorService {
    * build does not provide TLS" and "there is no build here to ask" are different
    * findings with different remedies, and reporting the first when the second is
    * true sends the caller to rebuild a library they do not have.
+   *
+   * A toolchain that could not be examined at all is the same third state one
+   * step earlier, and it must not be decided against the install that happens to
+   * be on this host: those modules describe a library the build will not use.
    */
   async #assess(
-    wanted: RequestedFeatures,
-    build: LibuvcppBuild,
-    probe: HeaderProbe,
+    question: FeatureQuestion,
     recorder: EvidenceRecorder,
     limitations: string[],
   ): Promise<DoctorFeature[]> {
-    if (!build.found) {
-      const note = "libuvcpp was not found, so no build could be inspected for this feature";
-      for (const feature of wanted.features) {
-        recordUnknown(
-          recorder,
-          `Can this libuvcpp build provide ${feature}?`,
-          "toolchain_missing",
-          {
-            blockedBy: note,
-          },
-        );
-      }
-      return wanted.features.map((feature) => ({ feature, status: "undetermined" as const, note }));
+    const block = undecidable(question.build, question.unexamined);
+    if (block !== undefined) {
+      return allUndetermined(question.wanted.features, block, recorder);
     }
 
+    const { wanted, build, probe } = question;
     const assessment = await assessFeatures(wanted.features, build.modules, probe);
     const features: DoctorFeature[] = [];
 
@@ -411,6 +646,15 @@ export interface DoctorFeature {
 }
 
 export interface DoctorReport {
+  /**
+   * The toolchain the workspace's own declaration names, whose identity stamps
+   * the envelope.
+   *
+   * Carried out of the service rather than read from a handler's first
+   * registered provider, because a report about a container build stamped
+   * `local` is a result that contradicts its own body.
+   */
+  provider: ToolchainIdentity;
   toolchains: DoctorToolchain[];
   libuvcpp: DoctorLibuvcpp;
   /**

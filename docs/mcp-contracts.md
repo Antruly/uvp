@@ -60,6 +60,14 @@ modules that build provides, and which capabilities each gap blocks. Run it
 first; every other tool's failure is easier to read with its output in hand.
 Takes an optional `features` list and an optional provider id.
 
+Point it at a workspace and it reads the same `toolchain` declaration `uvp_build`
+obeys: a workspace that names a container is reported with that image's toolchain
+beside this host's, so a host with no container runtime says so before a build
+rather than during one. The `libuvcpp` and `features` sections then describe the
+toolchain the workspace named, because that is the one the build will use — and
+when the image cannot be examined at all, they say so instead of answering from
+this host. `uvp_doctor` never starts a build and never pulls an image.
+
 ### Workspace
 
 **`uvp_workspace_create`** — Create a libuvcpp workspace.

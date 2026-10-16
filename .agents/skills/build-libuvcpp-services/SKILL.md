@@ -130,6 +130,13 @@ container-declared workspace with `unsupported_toolchain` before compiling
 anything, because a pass runs what it builds; pass `toolchain: "local"` to
 verify on this host.
 
+Check before you build. `uvp_doctor` with the workspace's path reads the same
+declaration: the image's toolchain appears beside this host's, and a missing
+runtime or a missing image is reported as the prerequisite it is — with the
+libuvcpp and feature sections describing what the workspace will build against,
+or saying that the image could not be examined. That is the answer to "can I
+build this here" without starting a build to find out.
+
 ## Ports
 
 `uvp_run` and `uvp_verify` need a port that is free. If you are starting several

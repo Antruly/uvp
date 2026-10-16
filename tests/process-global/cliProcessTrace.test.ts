@@ -133,7 +133,11 @@ describe("an in-process CLI call", () => {
     const [sigint, sigterm] = counts();
 
     const base = createUvpServices();
-    const watched = new WatchedDoctor({ providers: base.providers, now: base.now });
+    const watched = new WatchedDoctor({
+      providers: base.providers,
+      now: base.now,
+      toolchainFor: base.toolchainFor,
+    });
     const services: UvpServices = { ...base, doctor: watched };
 
     await runCli(["doctor", "--json"], { streams: quiet, services });

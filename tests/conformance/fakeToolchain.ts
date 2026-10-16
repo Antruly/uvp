@@ -10,7 +10,7 @@ import type {
   ToolchainIdentity,
   ToolchainProvider,
 } from "../../src/application/ToolchainProvider.js";
-import { cancelledFailure } from "../../src/domain/errors.js";
+import { UvpFailure, cancelledFailure } from "../../src/domain/errors.js";
 import { sha256 } from "../../src/domain/identity.js";
 
 /**
@@ -60,6 +60,15 @@ export interface FakeToolchainOptions {
   readonly buildSystems?: readonly string[];
   readonly missing?: readonly { id: string; requiredFor: string }[];
   readonly libuvcpp?: LibuvcppBuild;
+  /**
+   * Makes `findLibuvcpp` refuse, with this as the provider's sentence.
+   *
+   * The port says a provider that cannot run its toolchain at all refuses rather
+   * than answering `found: false`, because every caller reads that as a claim
+   * about the toolchain. A fixture that could only ever answer would leave the
+   * other half of the port untestable at the boundary that has to handle it.
+   */
+  readonly libuvcppUnavailable?: string;
   /** Replaces the default build outcome, or writes real files as a side effect. */
   readonly build?: (request: BuildRequest) => Promise<BuildOutcome>;
 }
@@ -175,6 +184,13 @@ export const createFakeToolchain = (options: FakeToolchainOptions = {}): Toolcha
     },
     findLibuvcpp: async (_workspacePath, signal) => {
       if (signal.aborted) throw cancelledFailure(DISCOVERY_CANCELLED);
+      if (options.libuvcppUnavailable !== undefined) {
+        throw new UvpFailure({
+          code: "toolchain_unavailable",
+          message: options.libuvcppUnavailable,
+          remediation: { action: "Make the toolchain runnable, then re-run." },
+        });
+      }
       return (
         options.libuvcpp ?? {
           found: true,

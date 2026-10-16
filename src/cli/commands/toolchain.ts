@@ -21,7 +21,8 @@ export const doctorCommand: CommandSpec = {
       name: "workspace",
       type: "string",
       value: "PATH",
-      description: "Also assess the feature set this workspace pins in uvp.json.",
+      description:
+        "Also report the toolchain this workspace's uvp.json names, and assess the features it pins.",
     },
     {
       name: "features",
@@ -41,6 +42,9 @@ export const doctorCommand: CommandSpec = {
     "Every requested feature is reported with a verdict. `undetermined` means the build has no",
     "configuration switch for that feature, so it could not be decided from headers — that is an",
     "answer, not a missing one.",
+    "With --workspace, the toolchain that workspace names is reported too. A container-declared",
+    "workspace is reported with the image's toolchain, or with the prerequisite this host is",
+    "missing, before any build is attempted.",
   ],
   input: (parsed) => {
     const workspace = asString(parsed, "workspace");

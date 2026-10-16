@@ -146,6 +146,10 @@ export const createUvpServices = (options: UvpServiceOptions = {}): UvpServices 
     // build being reported on. A probe pinned here — to `UVCPP_ROOT`, say —
     // would answer "absent" for every feature whenever that variable is unset,
     // turning an unknown into a wrong answer.
-    doctor: new DoctorService({ providers, now }),
+    //
+    // `toolchainFor` is the same function the build workflow resolves its
+    // provider through, so `uvp doctor` and `uvp build` cannot disagree about
+    // where a workspace is built — which is exactly what a doctor is for.
+    doctor: new DoctorService({ providers, now, toolchainFor }),
   };
 };

@@ -1,20 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "79ff940ce1ba0acc5b89cc7748dcec33bb67658566d82f2864d7124a2755d79c",
+  "digest": "09881b80866b685991a386c2f47518aef202c6771852a2b15622943f921413be",
   "tool_count": 15,
   "tools": [
     {
       "name": "uvp_doctor",
       "title": "Inspect toolchain readiness",
-      "description": "Report which C++ toolchains, build systems, and libuvcpp builds are available on this host, including per-build feature modules. Read-only: it inspects and never installs. Call this before building to learn whether a request is achievable here.",
+      "description": "Report which C++ toolchains, build systems, and libuvcpp builds are available on this host, including per-build feature modules. Given a workspace, it also reports the toolchain that workspace's uvp.json names — a container image's toolchain and the prerequisites this host is missing, before any build is attempted — and describes the libuvcpp and features that workspace will build against. Read-only: it inspects and never installs, and it never starts a build. Call this before building to learn whether a request is achievable here.",
       "kind": "toolchain",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "workspace": {
-            "description": "Workspace path to inspect for a pinned libuvcpp requirement.",
+            "description": "Workspace path to inspect: its pinned libuvcpp requirement, and the toolchain its uvp.json names, which the libuvcpp and feature sections then describe.",
             "type": "string"
           },
           "providers": {
@@ -416,6 +416,15 @@
           "description": "Check a workspace that pins a libuvcpp requirement",
           "input": {
             "workspace": "/home/dev/services/orders"
+          }
+        },
+        {
+          "description": "Check whether a container-declared workspace can be built on this host",
+          "input": {
+            "workspace": "/home/dev/services/orders",
+            "features": [
+              "tls"
+            ]
           }
         },
         {

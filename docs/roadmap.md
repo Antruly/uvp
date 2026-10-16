@@ -80,12 +80,12 @@ the start: `inspectAvailability` separate from use, gaps per capability rather
 than all-or-nothing, and `ToolchainClient` apart from `ToolchainProvider` so an
 inspection-only provider stays implementable.
 
-|     |                                                                                                                        |
-| --- | ---------------------------------------------------------------------------------------------------------------------- |
-| ✅  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly. See [below](#container-wiring) |
-| ⬜  | `uvp_doctor` reads the manifest's container toolchain, so a host with no runtime says so before a build                |
-| ⬜  | `remote-ssh/` — build and run on another machine, with the provider identity on every result                           |
-| ✅  | A provider conformance suite both of them must pass                                                                    |
+|     |                                                                                                                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly. See [below](#container-wiring)                  |
+| ✅  | `uvp_doctor` reads the manifest's container toolchain, so a host with no runtime says so before a build. See [below](#doctor-toolchain) |
+| ⬜  | `remote-ssh/` — build and run on another machine, with the provider identity on every result                                            |
+| ✅  | A provider conformance suite both of them must pass                                                                                     |
 
 The conformance suite came first, and it is what the two providers below were
 written against. Two providers that pass the same suite are swappable; two that
@@ -258,6 +258,102 @@ So `uvp_run` points at the same limitation `uvp_build` states, in the words of
 the thing that knows, and adding a second refusal here would replace a specific
 message with a general one. `uvp_verify` is the different case and is refused,
 because there the load failure would be read as a verdict about the service.
+
+### `uvp_doctor` and the toolchain a workspace names {#doctor-toolchain}
+
+The section above ends by deferring this: doctor took no path, so it could not
+see a workspace's declaration. It takes one now, and the rule it applies is not a
+second rule — `doctor()` calls `selectToolchain({ manifest })`, the same function
+`uvp build` resolves its provider through, and composition hands both surfaces
+the same `toolchainFor`. A doctor whose answer about where a workspace builds
+disagrees with the build's is not a doctor.
+
+That resolver is a **required** option rather than one defaulted to the first
+registered provider. The default is the trap: a workspace that names an image is
+asking about a toolchain this host's provider list may not hold, and answering
+with this host's facts under a workspace that said it must not be built here is
+the exact disagreement the row exists to remove. When a caller restricts the
+report with `--provider` and the restricted list does not include the selected
+provider, the report says so in `limitations` — the flag narrows what is
+_reported_, and it does not move the subject of the libuvcpp and feature sections,
+which the workspace decides.
+
+**The image that cannot be examined.** This was the one real decision. The port
+already answers it: a provider that cannot run its toolchain at all throws
+(`toolchain_unavailable`) rather than answering `found: false`, because `found:
+false` means "there is no libuvcpp here" and a caller reading it has no reason to
+open `limitations` — the note `LocalToolchainProvider` writes is for a reader who
+already knows to look. So the doctor catches that refusal, for a container
+selection and for that code alone, and does three things with it:
+
+- the toolchain entry for the image is reported as what it is, `available: false`
+  with `container_runtime` in `missing` and the reason it was looked for;
+- the libuvcpp section reports **this host's** install, labelled as such, with a
+  limitation in the report's own voice — `Nothing here describes <image>: the
+  libuvcpp below is this host's own install, and this workspace does not build
+  with it`;
+- every requested feature comes back `undetermined` with the provider's sentence,
+  never `unmet`, and each is recorded as a `toolchain_missing` unknown blocked by
+  the provider's own remedy.
+
+The third of those is the one that would have been easy to get wrong in the other
+direction. A container workspace on a host with no runtime is a host that cannot
+look, and "this build does not provide TLS" is a finding about a library the build
+will not use.
+
+**The probe is not rooted at the image's prefix.** The install prefix a container
+provider reports is a path _inside_ the image. Pointing `headerProbeAt` at it would
+`stat` this host, where nothing is there, and answer `false` for every header-only
+feature — converting "this host cannot look" into "that build does not have it",
+which is the one inference `assessFeatures` keeps an `undetermined` state for. A
+container selection therefore gets the probe that always answers `undefined`. The
+conformance lane pins this the way it deserves: the fixture creates
+`include/grpc` in the workspace and points the image's prefix at it, so a probe
+that followed the prefix would find the header and report `satisfied`.
+
+**The envelope stopped lying about it.** `DoctorReport` carries the selected
+provider's identity and the handler stamps that instead of the first provider's. A
+report whose libuvcpp section came out of an image and whose envelope says `local`
+is a result that contradicts its own body.
+
+**What the row did not add.** No new tool, no new effect, no new field: `workspace`
+already existed on the input, and the report's shape is unchanged. The doctor still
+never builds, never pulls an image and never starts a container — it reads the
+declaration and reports the prerequisite, which is the whole point of asking before
+a build rather than after one.
+
+**One extraction, because the change made the method too long.** Teaching
+`doctor()` the manifest's toolchain pushed it past oxlint's function-length limit
+(136 lines) and pushed `#assess` past it too (113), so the per-provider loop became
+`#inspect` — the one half of the report that is about this host, which is also the
+half a `--provider` restriction moves — and `#assess`'s two "nothing could be
+decided" exits became one `undecidable()` pair plus an `allUndetermined()` that
+records each feature against the same blocker. `#assess` also took its subject as
+one record rather than five parameters, since `build` and `unexamined` come out of
+`#libuvcppOf` together and are never apart. The file goes from one pre-existing
+warning to none, and the repository's total is where it was; the fix was the
+extraction rather than a raised limit, which is what the earlier rows in this file
+did for the same rule.
+
+**Evidence.** Five tests appended to
+`tests/conformance/handlers.test.ts` (the file goes 68 → 73), all at the
+production boundary through the registered handler: the unexaminable image in the
+provider's own words, the libuvcpp asked of the image rather than of this host
+(a fixture whose modules are empty and whose version differs, so the host's list
+cannot be what answered), the probe that must not follow the prefix, the refusal
+of a declaration that could not be read even when the call passed its own
+features, and the restricted report that discloses what it is restricted away
+from. Seven mutation arms were run against them and all seven were caught:
+
+| arm | what it breaks                                                     | tests that fail |
+| --- | ------------------------------------------------------------------ | --------------- |
+| M1  | `selectToolchain` replaced by a fixed `local` selection            | 5               |
+| M2  | `#libuvcppOf` asks the host's provider instead of the selected one | 3               |
+| M3  | the `toolchain_unavailable` refusal is no longer caught            | 1               |
+| M4  | the container probe rooted at the image's install prefix           | 1               |
+| M5  | the `--provider` restriction disclosure deleted                    | 1               |
+| M6  | the "nothing here describes `<image>`" limitation deleted          | 1               |
+| M7  | the handler stamps the first provider instead of the report's      | 1               |
 
 ## Milestone 3 — depth
 

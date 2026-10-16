@@ -255,7 +255,9 @@ export const createToolHandlers = (
       return {
         ...envelopeOf(recorder, {
           tool: doctorContract.name,
-          provider: identity,
+          // The toolchain the workspace named, not the first registered one: a
+          // report whose libuvcpp came out of an image is not a `local` result.
+          provider: report.provider,
           limitations: [...report.limitations, ...(context.limitations ?? [])],
         }),
         toolchains: report.toolchains,

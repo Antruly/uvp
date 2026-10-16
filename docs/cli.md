@@ -76,6 +76,24 @@ A feature uvp could not check is listed under `undetermined` with the reason, no
 folded into either side. See
 [libuvcpp feature mapping](libuvcpp-features.md#undetermined-is-a-real-answer).
 
+Pass `--workspace PATH` and the report describes the toolchain the workspace
+asks for, not only this host: a `uvp.json` that names a container is reported
+with that image's toolchain in the list — or, when this host has no runtime or
+the image is not present, with the prerequisite that is missing, which is the
+answer to "can I build this here" before a build that was never going to start.
+`libuvcpp` and `features` then come from what the workspace will build against,
+and when the image cannot be examined at all the report says so rather than
+answering from this host:
+
+```json
+{ "toolchain": { "kind": "container", "image": "localhost/uvp-base:12" } }
+```
+
+`--provider ID` restricts which toolchains are listed; it does not change what
+the `libuvcpp` and `features` sections are about, and the report says so when the
+two differ. A workspace whose declaration cannot be read is refused here too,
+rather than reported as if it built on this host.
+
 ## `uvp init`
 
 ```bash

@@ -1,7 +1,7 @@
 # uvp tool reference
 
 Generated from the tool contracts. 15 tools; catalog digest
-`79ff940ce1ba0acc5b89cc7748dcec33bb67658566d82f2864d7124a2755d79c`.
+`09881b80866b685991a386c2f47518aef202c6771852a2b15622943f921413be`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -27,7 +27,7 @@ they are where an unanswerable question and a truncation are declared.
 
 ## `uvp_doctor` — Inspect toolchain readiness
 
-Report which C++ toolchains, build systems, and libuvcpp builds are available on this host, including per-build feature modules. Read-only: it inspects and never installs. Call this before building to learn whether a request is achievable here.
+Report which C++ toolchains, build systems, and libuvcpp builds are available on this host, including per-build feature modules. Given a workspace, it also reports the toolchain that workspace's uvp.json names — a container image's toolchain and the prerequisites this host is missing, before any build is attempted — and describes the libuvcpp and features that workspace will build against. Read-only: it inspects and never installs, and it never starts a build. Call this before building to learn whether a request is achievable here.
 
 - **Kind:** toolchain
 - **Effects:** readsFilesystem, spawnsProcess
