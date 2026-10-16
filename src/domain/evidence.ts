@@ -1,8 +1,6 @@
 import { z } from "zod";
 
 import { canonicalJson, newId, sha256, shortDigest } from "./identity.js";
-import { residualUnknownSchema, sortUnknowns } from "./unknown.js";
-import type { ResidualUnknown } from "./unknown.js";
 
 /**
  * Evidence is the unit of delivery.
@@ -128,64 +126,3 @@ export const evidenceDigest = (evidence: Evidence): string =>
 /** Short, human-facing handle for an evidence record. */
 export const evidenceRef = (evidence: Evidence): string =>
   `${evidence.evidence_id}@${shortDigest(evidenceDigest(evidence))}`;
-
-export const EVIDENCE_BUNDLE_STATUSES = ["verified", "partial", "failed", "unknown"] as const;
-export type EvidenceBundleStatus = (typeof EVIDENCE_BUNDLE_STATUSES)[number];
-
-/**
- * A bundle shape that carries the records themselves.
- *
- * Nothing in this repository ships it, and that is the point of stating it here
- * rather than leaving the docblock to imply otherwise. The bundle a workflow tool
- * hands back is `verificationBundleSchema` in `src/contracts/`, assembled by
- * `VerificationService` and read by `bundleFile.ts`; it carries `EvidenceRef`s,
- * because `toEvidenceRef` drops `subject`, `observed` and `derived` on the way
- * out of the handler. This shape carries the whole `Evidence[]` instead, which is
- * the one difference that matters between them — `bundle_id`, `status`,
- * `unknowns` and `limitations` all appear in both.
- *
- * So which of the two is "the deliverable" is an open question rather than a
- * settled one, and it is not a question this file can answer by declaring itself
- * the answer: making the records reachable changes what every tool returns. The
- * roadmap row on the `docs/evidence.md` worked example carries the decision, and
- * `createEvidenceBundle` below has no caller until it is made.
- */
-export const evidenceBundleSchema = z.object({
-  bundle_id: z.string().regex(/^bun_[0-9a-f]{22}$/u),
-  goal: z.string(),
-  status: z.enum(EVIDENCE_BUNDLE_STATUSES),
-  created_at: z.string(),
-  evidence: z.array(evidenceSchema),
-  unknowns: z.array(residualUnknownSchema),
-  limitations: z.array(z.string()),
-});
-export type EvidenceBundle = z.infer<typeof evidenceBundleSchema>;
-
-export interface CreateEvidenceBundleInit {
-  readonly id?: string;
-  readonly goal: string;
-  readonly status: EvidenceBundleStatus;
-  readonly createdAt: string;
-  readonly evidence: readonly Evidence[];
-  readonly unknowns: readonly ResidualUnknown[];
-  readonly limitations?: readonly string[];
-}
-
-/**
- * Build the record-carrying bundle above.
- *
- * No production caller: the shipped bundle is assembled in `VerificationService`
- * against the contract's schema. Kept rather than deleted because deleting it is
- * the other half of the decision `evidenceBundleSchema` names, and a reader
- * comparing the two shapes should be able to see both.
- */
-export const createEvidenceBundle = (init: CreateEvidenceBundleInit): EvidenceBundle =>
-  evidenceBundleSchema.parse({
-    bundle_id: init.id ?? newId("bundle"),
-    goal: init.goal,
-    status: init.status,
-    created_at: init.createdAt,
-    evidence: [...init.evidence],
-    unknowns: sortUnknowns(init.unknowns),
-    limitations: [...(init.limitations ?? [])],
-  });

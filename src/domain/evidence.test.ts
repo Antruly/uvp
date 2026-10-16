@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 
-import {
-  createEvidence,
-  createEvidenceBundle,
-  evidenceDigest,
-  evidenceRef,
-  evidenceSchema,
-} from "./evidence.js";
+import { createEvidence, evidenceDigest, evidenceRef } from "./evidence.js";
 import { newId } from "./identity.js";
-import { createResidualUnknown } from "./unknown.js";
 
 /**
  * Evidence is the unit of delivery, and the two claims that carry the weight are
@@ -129,90 +121,5 @@ describe("evidenceRef", () => {
     expect(evidenceRef({ ...evidence, observed: changed.observed })).not.toBe(
       evidenceRef(evidence),
     );
-  });
-});
-
-describe("createEvidenceBundle", () => {
-  const unknown = (id: string) =>
-    createResidualUnknown({ id, question: "does it hold under load?", reason: "not_attempted" });
-
-  it("sorts unknowns by id, so a bundle is byte-stable across runs", () => {
-    // Unknowns are minted with random ids, so two runs of the same workflow
-    // produce them in a different order. A bundle whose bytes differ between
-    // runs cannot be diffed, and diffing is how a regression is noticed.
-    const bundle = createEvidenceBundle({
-      goal: "verify the service",
-      status: "partial",
-      createdAt: "2026-10-15T00:00:00.000Z",
-      evidence: [evidenceOf()],
-      unknowns: [
-        unknown("unk_ffffffffffffffffffffff"),
-        unknown("unk_0000000000000000000000"),
-        unknown("unk_8888888888888888888888"),
-      ],
-    });
-    expect(bundle.unknowns.map((entry) => entry.unknown_id)).toEqual([
-      "unk_0000000000000000000000",
-      "unk_8888888888888888888888",
-      "unk_ffffffffffffffffffffff",
-    ]);
-  });
-
-  it("keeps evidence in the order it was recorded", () => {
-    // The reverse of the unknowns rule: evidence order is the order of
-    // observation, which is itself information.
-    const first = evidenceOf({ id: "ev_ffffffffffffffffffffff" });
-    const second = evidenceOf({ id: "ev_0000000000000000000000" });
-    const bundle = createEvidenceBundle({
-      goal: "g",
-      status: "verified",
-      createdAt: "2026-10-15T00:00:00.000Z",
-      evidence: [first, second],
-      unknowns: [],
-    });
-    expect(bundle.evidence.map((entry) => entry.evidence_id)).toEqual([
-      "ev_ffffffffffffffffffffff",
-      "ev_0000000000000000000000",
-    ]);
-  });
-
-  it("allows a verified bundle with standing unknowns recorded", () => {
-    // Deliberate: `status` describes the steps that were attempted, and
-    // `unknowns` records the questions that were not. A pass does not make an
-    // unasked question disappear, and hiding it to keep the status tidy is the
-    // exact failure this model exists to prevent.
-    const bundle = createEvidenceBundle({
-      goal: "g",
-      status: "verified",
-      createdAt: "2026-10-15T00:00:00.000Z",
-      evidence: [evidenceOf()],
-      unknowns: [unknown("unk_0000000000000000000000")],
-    });
-    expect(bundle.status).toBe("verified");
-    expect(bundle.unknowns).toHaveLength(1);
-  });
-
-  it("rejects a status outside the four the contract admits", () => {
-    expect(() =>
-      createEvidenceBundle({
-        goal: "g",
-        status: "complete" as never,
-        createdAt: "2026-10-15T00:00:00.000Z",
-        evidence: [],
-        unknowns: [],
-      }),
-    ).toThrow();
-  });
-
-  it("produces a bundle that satisfies its own published schema", () => {
-    const bundle = createEvidenceBundle({
-      goal: "g",
-      status: "unknown",
-      createdAt: "2026-10-15T00:00:00.000Z",
-      evidence: [],
-      unknowns: [],
-    });
-    expect(z.array(evidenceSchema).safeParse(bundle.evidence).success).toBe(true);
-    expect(bundle).toMatchObject({ goal: "g", limitations: [] });
   });
 });
