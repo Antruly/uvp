@@ -23,6 +23,19 @@ import type { UvpFeature } from "../domain/features.js";
  * carried a `scheme` field could state it differently from the feature list
  * right next to it, and the feature list is what `uvp doctor --workspace`
  * already answers from.
+ *
+ * The other direction of the same claim is the rest of the file: the generator
+ * writes a well-formed manifest, and the reader is also pointed at directories
+ * nobody generated — a hand-edited `uvp.json`, a file whose fields have the
+ * wrong types, a `uvp.json` that is not an object at all. The reader's rule there
+ * is that every field is absent until it has been checked, so each of those has
+ * to degrade to a *stated* answer — absent, a default, or a problem — rather
+ * than to a wrong one. Those cases are written against the reader directly,
+ * because a generator cannot produce them.
+ *
+ * The cases are grouped by the thing they are a claim about rather than by the
+ * function that answers them, which is why the toolchain declaration is not
+ * tested under the transport it has nothing to do with.
  */
 
 const directories: string[] = [];
@@ -43,6 +56,20 @@ const writeWorkspace = async (
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, file.content);
   }
+  return root;
+};
+
+/** An empty directory to point the reader at. */
+const scratchRoot = async (): Promise<string> => {
+  const root = await mkdtemp(join(tmpdir(), "uvp-manifest-"));
+  directories.push(root);
+  return root;
+};
+
+/** A directory holding exactly this `uvp.json`, generator or not. */
+const manifestRoot = async (manifest: unknown): Promise<string> => {
+  const root = await scratchRoot();
+  await writeFile(join(root, "uvp.json"), JSON.stringify(manifest));
   return root;
 };
 
@@ -76,23 +103,35 @@ describe("the transport a workspace declares", () => {
     // cleartext, and it has to stay that way: the caller applies its own default
     // for a directory that is not a uvp workspace, and `undefined` is how it
     // knows to.
-    const root = await mkdtemp(join(tmpdir(), "uvp-manifest-"));
-    directories.push(root);
-    expect(await readWorkspaceManifest(root)).toBeUndefined();
+    expect(await readWorkspaceManifest(await scratchRoot())).toBeUndefined();
   });
+});
 
+describe("the toolchain declaration", () => {
   it("reads a container toolchain and the image it names", async () => {
-    const root = await writeWorkspace("hello-http", []);
-    await writeFile(
-      join(root, "uvp.json"),
-      JSON.stringify({
-        name: "svc",
-        toolchain: { kind: "container", image: "localhost/uvp-base:12" },
-      }),
-    );
+    const root = await manifestRoot({
+      name: "svc",
+      toolchain: { kind: "container", image: "localhost/uvp-base:12" },
+    });
     const manifest = await readWorkspaceManifest(root);
     expect(manifest?.toolchain).toEqual({ kind: "container", image: "localhost/uvp-base:12" });
     expect(manifest?.toolchainProblem).toBeUndefined();
+  });
+
+  it("reads a local toolchain that names nothing else as the local toolchain", async () => {
+    // Present rather than a problem: this is the declaration whose two halves
+    // agree, and it is what a workspace asks for when it wants to be built here.
+    // Asserting the whole manifest rather than the field, because "no problem"
+    // and "no key" are different claims and only one of them is this one.
+    const root = await manifestRoot({ name: "svc", toolchain: { kind: "local" } });
+    expect(await readWorkspaceManifest(root)).toStrictEqual({
+      name: "svc",
+      scheme: "http",
+      features: [],
+      unrecognisedFeatures: [],
+      toolchain: { kind: "local" },
+      path: join(root, "uvp.json"),
+    });
   });
 
   it("is not stated for a workspace that declares no toolchain", async () => {
@@ -105,36 +144,204 @@ describe("the transport a workspace declares", () => {
   });
 
   it.each([
-    ["a container with no image", { kind: "container" }],
-    ["a kind it does not know", { kind: "docker", image: "x" }],
-    ["a local toolchain that also names an image", { kind: "local", image: "x" }],
+    ["a value that is not an object", "container"],
+    ["null", null],
+    ["a kind that is not a name", { kind: "docker", image: "x" }],
     ["a kind that is not a string", { kind: 7 }],
-    ["the bare string", "container"],
+    ["a local toolchain that also names an image", { kind: "local", image: "x" }],
+    ["a local toolchain that names an empty image", { kind: "local", image: "" }],
+    ["a container toolchain that names no image", { kind: "container" }],
   ])("reports %s as a problem rather than as a fallback", async (_label, toolchain) => {
     // The one field of this file that is an instruction rather than an
     // observation, so the one field whose malformed value must not degrade to a
     // default: the default available here is "build on this host", which is the
     // opposite of what a workspace that named an image asked for.
-    const root = await writeWorkspace("hello-http", []);
-    await writeFile(join(root, "uvp.json"), JSON.stringify({ name: "svc", toolchain }));
-    const manifest = await readWorkspaceManifest(root);
+    //
+    // The reason is asserted to *exist* rather than to *say this*. An empty one
+    // is a refusal with nothing in it to act on, which is a real defect; a
+    // reworded one is not, and a test that fails on a reworded message measures
+    // the message. `errors.ts`'s two unreadable sentences are left unpinned for
+    // the same reason — and `toBeTypeOf("string")` here would not do, because the
+    // empty string is one.
+    const manifest = await readWorkspaceManifest(await manifestRoot({ name: "svc", toolchain }));
     expect(manifest?.toolchain).toBeUndefined();
-    expect(manifest?.toolchainProblem).toBeTypeOf("string");
+    expect(manifest?.toolchainProblem).toBeTruthy();
   });
 
+  it("names the value it found when the kind is not one it knows", async () => {
+    // The reason is what a caller reports when it refuses to build, so it has to
+    // carry the value that caused the refusal: a message saying only that the
+    // kind is wrong sends the reader back to the file with nothing to look for.
+    const root = await manifestRoot({ name: "svc", toolchain: { kind: "docker", image: "x" } });
+    expect((await readWorkspaceManifest(root))?.toolchainProblem).toContain("docker");
+  });
+});
+
+describe("the feature list", () => {
   it("drops a feature it does not recognise without losing the rest", async () => {
     // A feature name is a promise about the generated code, so an unknown one is
     // reported rather than mapped to the nearest known one — and a feature that
     // *is* known must survive next to it, because the unknown one is not a
     // reason to forget what the workspace actually declared.
-    const root = await writeWorkspace("hello-http", ["tls"]);
-    await writeFile(
-      join(root, "uvp.json"),
-      JSON.stringify({ name: "svc", features: ["tls", "quantum"], port: 8080 }),
-    );
+    const root = await manifestRoot({ name: "svc", features: ["tls", "quantum"], port: 8080 });
     const manifest = await readWorkspaceManifest(root);
     expect(manifest?.features).toEqual(["tls"]);
     expect(manifest?.unrecognisedFeatures).toEqual(["quantum"]);
     expect(manifest?.scheme).toBe("https");
+  });
+
+  it.each([
+    ["an absent `features`", { name: "svc" }],
+    ["a `features` that is a string", { name: "svc", features: "tls" }],
+    ["a `features` that is an object", { name: "svc", features: { 0: "tls" } }],
+  ])(
+    "reads %s as no features at all, and reports none as unrecognised",
+    async (_label, manifest) => {
+      // The fallback is an empty list, and a placeholder in it would land in
+      // `unrecognisedFeatures` — the list a caller shows the user — so both lists
+      // are asserted, not just the one the placeholder is not in.
+      const read = await readWorkspaceManifest(await manifestRoot(manifest));
+      expect(read?.features).toStrictEqual([]);
+      expect(read?.unrecognisedFeatures).toStrictEqual([]);
+      expect(read?.scheme).toBe("http");
+    },
+  );
+
+  it("skips a feature list entry that is not a name, rather than reporting it", async () => {
+    // An entry that is not a string is not a name the workspace declared, so it
+    // is not an unrecognised name either: reporting `7` would put a number in a
+    // list of strings and hand a caller something it cannot print as a feature.
+    const root = await manifestRoot({
+      name: "svc",
+      features: ["tls", 7, null, ["quantum"], "quantum"],
+    });
+    const read = await readWorkspaceManifest(root);
+    expect(read?.features).toStrictEqual(["tls"]);
+    expect(read?.unrecognisedFeatures).toStrictEqual(["quantum"]);
+    expect(read?.scheme).toBe("https");
+  });
+});
+
+describe("the fields a manifest carries", () => {
+  it("reads every field it states, and derives the transport from the features", async () => {
+    const root = await manifestRoot({
+      name: "svc",
+      binary: "svc-server",
+      port: 8080,
+      template: "hello-http",
+      features: ["tls", "quantum"],
+      requirements: { libuvcpp: "1.7.0" },
+      toolchain: { kind: "container", image: "localhost/uvp-base:12" },
+    });
+    expect(await readWorkspaceManifest(root)).toStrictEqual({
+      name: "svc",
+      binary: "svc-server",
+      port: 8080,
+      template: "hello-http",
+      scheme: "https",
+      features: ["tls"],
+      unrecognisedFeatures: ["quantum"],
+      requiredLibuvcpp: "1.7.0",
+      toolchain: { kind: "container", image: "localhost/uvp-base:12" },
+      path: join(root, "uvp.json"),
+    });
+  });
+
+  it("carries no key for a field the file did not state", async () => {
+    // `toStrictEqual` rather than `toEqual`, and that is load-bearing: the one
+    // difference between them is a key that is present with the value
+    // `undefined`, which is a claim the file did not make. A port of `undefined`
+    // and no port at all are different facts about a workspace, and every
+    // optional field here is spread only when it holds a value.
+    const root = await manifestRoot({ name: "svc" });
+    expect(await readWorkspaceManifest(root)).toStrictEqual({
+      name: "svc",
+      scheme: "http",
+      features: [],
+      unrecognisedFeatures: [],
+      path: join(root, "uvp.json"),
+    });
+  });
+
+  it("reads an empty string as a field that was not stated", async () => {
+    // `""` is not a name, an image or a version, and reporting it as one is how a
+    // caller ends up with a binary called the empty string.
+    const root = await manifestRoot({
+      name: "svc",
+      binary: "",
+      template: "",
+      requirements: { libuvcpp: "" },
+    });
+    expect(await readWorkspaceManifest(root)).toStrictEqual({
+      name: "svc",
+      scheme: "http",
+      features: [],
+      unrecognisedFeatures: [],
+      path: join(root, "uvp.json"),
+    });
+  });
+
+  it("reads a field of the wrong type as a field that was not stated", async () => {
+    // The name falls back to its default for the same reason the others vanish:
+    // `7` is not a name, and a workspace called `7` is a wrong answer where
+    // `app` is the documented one.
+    const root = await manifestRoot({
+      name: 7,
+      binary: 7,
+      port: "8080",
+      template: [],
+      requirements: { libuvcpp: 7 },
+    });
+    expect(await readWorkspaceManifest(root)).toStrictEqual({
+      name: "app",
+      scheme: "http",
+      features: [],
+      unrecognisedFeatures: [],
+      path: join(root, "uvp.json"),
+    });
+  });
+
+  it("reads a port only when it is a whole number", async () => {
+    // `8080.5` passes `typeof port === "number"` and is still not a port: reading
+    // it as one hands every downstream consumer a number no listener can bind.
+    const root = await manifestRoot({ name: "svc", port: 8080.5 });
+    expect(await readWorkspaceManifest(root)).toStrictEqual({
+      name: "svc",
+      scheme: "http",
+      features: [],
+      unrecognisedFeatures: [],
+      path: join(root, "uvp.json"),
+    });
+  });
+
+  it("reads the libuvcpp requirement from `requirements` and not from the top level", async () => {
+    const root = await manifestRoot({
+      name: "svc",
+      libuvcpp: "9.9.9",
+      requirements: "libuvcpp: 1.7.0",
+    });
+    expect((await readWorkspaceManifest(root))?.requiredLibuvcpp).toBeUndefined();
+  });
+
+  it("falls back to the name `app` for a manifest that states none", async () => {
+    const root = await manifestRoot({ features: ["websocket"] });
+    expect((await readWorkspaceManifest(root))?.name).toBe("app");
+  });
+});
+
+describe("a manifest that is not an object", () => {
+  it.each([
+    ["null", null],
+    ["an array", []],
+    ["a number", 42],
+    ["a string", "hello"],
+  ])("reads %s as no manifest at all", async (_label, contents) => {
+    // `JSON.parse` accepts all four, so the record check is the only thing
+    // standing between them and a manifest built out of nothing: every field read
+    // after it answers `undefined` for an array, so without the check a directory
+    // holding `[]` would answer as a cleartext workspace named `app`.
+    const root = await scratchRoot();
+    await writeFile(join(root, "uvp.json"), JSON.stringify(contents));
+    expect(await readWorkspaceManifest(root)).toBeUndefined();
   });
 });

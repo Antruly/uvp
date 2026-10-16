@@ -12,8 +12,9 @@
  * failure, and the run costs minutes per mutant. The targets below are the pure
  * decision logic — assertions over a real exchange, the feature assessment that
  * decides what a libuvcpp build provides, and the coverage algebra — where a
- * surviving mutant is a genuine gap and the whole group's 396 tests run in about
- * two seconds.
+ * surviving mutant is a genuine gap and the whole group runs in about two
+ * seconds — its size moves with the suite, so it is dated in `docs/testing.md`
+ * rather than repeated here.
  *
  * **The runner is `command`, and that is a deliberate trade.** The `vitest`
  * runner plans every non-static mutant against the tests that covered it, and

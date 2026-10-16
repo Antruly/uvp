@@ -1035,8 +1035,12 @@ because pinning them would make every later wording change a test failure.
 reached only its `createRecorder`, and 66 of the 70 are now pinned by
 `src/application/evidenceHelpers.test.ts` — a one-file re-run reports **81 of 85
 killed, 95.29%**. The four that survive are equivalent, because the callee re-checks
-the same optional the spread guards, and that was measured rather than argued. The
-other 260 survivors are still unread.
+the same optional the spread guards, and that was measured rather than argued.
+`workspaceManifest.ts`'s fifty-three have been read too
+([#54](https://github.com/Antruly/uvp/issues/54)): forty-nine were missing
+assertions and are pinned, the file moves from 58.59% to **96.88%** — 124 killed of
+128 — and the four that remain are equivalent mutants, each recorded with the
+measurement that says so. The other 207 survivors are still unread.
 [testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.
 
 What the choice gives up is stated rather than hidden. There is no per-test
