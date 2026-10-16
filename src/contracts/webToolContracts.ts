@@ -73,8 +73,20 @@ export const httpRequestContract = defineTool({
       .min(1)
       .default(30_000)
       .describe("Deadline for the whole call, redirect hops included."),
-    /** Return at most this many body bytes; the remainder is reported as truncated. */
-    max_body_bytes: z.number().int().min(1).default(1_048_576),
+    /**
+     * Return at most this many body bytes; the remainder is reported as truncated.
+     *
+     * The same input, and the same two-number rule, as `uvp_soap_call`'s envelope
+     * cap. This one also bounds what the client reads before the transport's own
+     * limit does; there it bounds only what is handed over, because a SOAP fault is
+     * parsed from the whole envelope either way.
+     */
+    max_body_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .default(1_048_576)
+      .describe("Return at most this many body bytes; the remainder is reported as truncated."),
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
@@ -372,6 +384,32 @@ export const soapCallContract = defineTool({
     soap_action: z.string().optional(),
     headers: headerMapSchema.default({}),
     timeout_ms: z.number().int().min(1).default(30_000),
+    /**
+     * Hand over at most this many bytes of the response envelope, cut before
+     * decoding; the remainder is reported as truncated.
+     *
+     * A byte count rather than the character count the fixed cap used to be: a cut
+     * between code units can split a surrogate pair — a loss no field here can name
+     * — while a cut between bytes can only land inside a character, which is exactly
+     * what `text_lossy: "truncated"` reports. The cut this makes, the decode
+     * `text_lossy` is about and the bytes `base64` carries are one buffer.
+     *
+     * The envelope is read whole whatever this says, because the fault is parsed
+     * from all of it, and the transport's own read limit caps it before this does
+     * — so this bounds what you are handed, not what the call reads. Asking for
+     * more bytes than the envelope has is therefore not an error and not a
+     * silence: the whole envelope arrives, with `truncated` false.
+     */
+    max_body_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .default(64 * 1024)
+      .describe(
+        "Hand over at most this many bytes of the response envelope, cut before decoding; the " +
+          "remainder is reported as truncated. The envelope is read whole either way, so this " +
+          "bounds what you are handed rather than what the call reads.",
+      ),
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
@@ -383,8 +421,9 @@ export const soapCallContract = defineTool({
      * The fault the envelope carried, when it carried one.
      *
      * Read from the whole envelope rather than from the `body.text` prefix, so a
-     * fault past the cut is still reported as the call's outcome and a fault
-     * string can name text the prefix does not reach.
+     * fault past the cut is still reported as the call's outcome — however few
+     * bytes `max_body_bytes` handed over — and a fault string can name text the
+     * prefix does not reach.
      */
     fault: z
       .object({
@@ -395,12 +434,13 @@ export const soapCallContract = defineTool({
       })
       .optional(),
     body: z.object({
+      /** The envelope's length in bytes as received, whatever `max_body_bytes` says. */
       bytes: z.number().int(),
       /**
-       * The response envelope decoded as UTF-8, cut to 64 KiB of the envelope's
-       * bytes before decoding when it is longer — which is what `truncated`
-       * reports, alongside an envelope the transport capped. The cut is on bytes,
-       * so the text can end on half a character; `text_lossy` says when it does.
+       * The response envelope decoded as UTF-8, cut to `max_body_bytes` of the
+       * envelope's bytes before decoding when it is longer — 64 KiB unless the
+       * caller asked for another cap. The cut is on bytes, so the text can end on
+       * half a character; `text_lossy` says when it does.
        */
       text: z.string().optional(),
       /**
@@ -409,6 +449,11 @@ export const soapCallContract = defineTool({
        * see the `uvp_http_request` output.
        */
       base64: z.string().optional(),
+      /**
+       * True when `text` is a prefix of the envelope: the cut `max_body_bytes`
+       * made, or the transport's own read limit, or both. False means the text is
+       * the whole envelope.
+       */
       truncated: z.boolean(),
       /**
        * Why that decode is not the body's bytes, when it is not. Absent means
@@ -416,6 +461,14 @@ export const soapCallContract = defineTool({
        * output for the two values.
        */
       text_lossy: z.enum(["truncated", "invalid-utf8"]).optional(),
+      /**
+       * A digest over the whole envelope as received — not over the prefix `text`
+       * shows — so it names the response rather than the part of it a cap let
+       * through: raising `max_body_bytes` leaves this and `bytes` unchanged, and
+       * two calls that asked for different amounts of the same envelope agree on
+       * both. Compare it against a re-encoding of `text` only when `truncated` is
+       * false.
+       */
       digest: z.string(),
     }),
     timing: timingSchema,

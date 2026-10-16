@@ -456,6 +456,31 @@ describe("the web primitives", () => {
   );
 
   it(
+    "probes a websocket and records the greeting the far end sent",
+    async () => {
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws`,
+        send: [{ payload: "hello" }],
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", output);
+      expect(output["upgraded"]).toBe(true);
+
+      const frames = output["frames"] as { direction: string; opcode: string; text?: string }[];
+      // The fixture greets before it reads anything, so a received frame exists
+      // even if what uvp sent were not counted. That is the property worth
+      // pinning: on an echo server the sent and received strings are identical,
+      // and only one of them is evidence about the far end.
+      expect(frames.some((frame) => frame.direction === "received")).toBe(true);
+      expect(frames.some((frame) => frame.direction === "sent")).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe("the SOAP call", () => {
+  it(
     "reports a SOAP fault as a protocol outcome, keeping the fault string",
     async () => {
       const output = await call("uvp_soap_call", {
@@ -548,6 +573,58 @@ describe("the web primitives", () => {
   );
 
   it(
+    "takes the envelope cap from the caller, and describes the same envelope at every cap",
+    async () => {
+      // The cap used to be fixed at 64 KiB, so a caller holding a fault from a
+      // longer envelope had no way to ask for the document it came from. It is an
+      // input now, and the row that closed asked what `bytes` and `digest` mean
+      // once a caller can ask for more than they were already given: they are the
+      // envelope's, not the prefix's, so asking for more changes how much of one
+      // body a caller sees and nothing about which body it is. Three caps over one
+      // route, because that agreement is the claim — the largest is past the
+      // envelope, which is also what says the default really was a cut, and the
+      // smallest cuts on a character boundary.
+      const bodyOf = async (max?: number): Promise<Record<string, unknown>> => {
+        const output = await call("uvp_soap_call", {
+          endpoint: `${fixture.origin}/soap/cut-envelope`,
+          soap_version: "1.1",
+          operation: "Long",
+          ...(max === undefined ? {} : { max_body_bytes: max }),
+        });
+        expectConforms("uvp_soap_call", output);
+        return output["body"] as Record<string, unknown>;
+      };
+
+      const whole = await bodyOf(1024 * 1024);
+      expect(Number(whole["bytes"])).toBeGreaterThan(64 * 1024);
+      expect(whole["truncated"]).toBe(false);
+      expect(Buffer.byteLength(whole["text"] as string, "utf8")).toBe(whole["bytes"]);
+      // Whole and whole again: the decode replaced nothing, so there is nothing to
+      // hand over beside a text that is already the bytes it came from.
+      expect(whole["text_lossy"]).toBeUndefined();
+      expect(whole["base64"]).toBeUndefined();
+
+      const capped = await bodyOf();
+      expect(capped["truncated"]).toBe(true);
+      expect(capped["text_lossy"]).toBe("truncated");
+      // The same body at a smaller cap. A caller who asked for too little can read
+      // the name of the response off the answer and ask again for the rest.
+      expect(capped["bytes"]).toBe(whole["bytes"]);
+      expect(capped["digest"]).toBe(whole["digest"]);
+
+      // A cap that lands on a character boundary is `truncated` and not lossy: the
+      // cap makes a cut, and only a cut inside a character loses anything.
+      const tiny = await bodyOf(32);
+      expect(tiny["truncated"]).toBe(true);
+      expect(tiny["bytes"]).toBe(whole["bytes"]);
+      expect(tiny["digest"]).toBe(whole["digest"]);
+      expect(tiny["text_lossy"]).toBeUndefined();
+      expect(tiny["text"]).toBe((whole["text"] as string).slice(0, 32));
+    },
+    TIMEOUT,
+  );
+
+  it(
     "sends a caller-supplied envelope verbatim rather than rebuilding one",
     async () => {
       // The input that decides what goes on the wire. Without this, a client
@@ -586,29 +663,6 @@ describe("the web primitives", () => {
       const body = output["body"] as { base64?: string; text_lossy?: string };
       expect(body.base64).toBeUndefined();
       expect(body.text_lossy).toBeUndefined();
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "probes a websocket and records the greeting the far end sent",
-    async () => {
-      const output = await call("uvp_websocket_probe", {
-        url: `ws://127.0.0.1:${String(fixture.port)}/ws`,
-        send: [{ payload: "hello" }],
-        max_frames: 2,
-        idle_timeout_ms: 2_000,
-      });
-      expectConforms("uvp_websocket_probe", output);
-      expect(output["upgraded"]).toBe(true);
-
-      const frames = output["frames"] as { direction: string; opcode: string; text?: string }[];
-      // The fixture greets before it reads anything, so a received frame exists
-      // even if what uvp sent were not counted. That is the property worth
-      // pinning: on an echo server the sent and received strings are identical,
-      // and only one of them is evidence about the far end.
-      expect(frames.some((frame) => frame.direction === "received")).toBe(true);
-      expect(frames.some((frame) => frame.direction === "sent")).toBe(true);
     },
     TIMEOUT,
   );

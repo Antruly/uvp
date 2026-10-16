@@ -336,7 +336,8 @@ export const soapCommand: CommandSpec = {
   summary: "Invoke a SOAP operation and report the result or the fault.",
   usage:
     "uvp soap ENDPOINT (--operation NAME [--namespace URI] [--param K=V]... | --body XML)\n" +
-    "         [--action ACTION] [--version 1.1|1.2] [--header NAME:VALUE]... [--timeout MS] [--json]",
+    "         [--action ACTION] [--version 1.1|1.2] [--header NAME:VALUE]... [--timeout MS]\n" +
+    "         [--max-bytes N] [--json]",
   positionals: [{ name: "ENDPOINT", description: "SOAP endpoint URL." }],
   flags: [
     { name: "operation", type: "string", value: "NAME", description: "Operation to invoke." },
@@ -367,6 +368,12 @@ export const soapCommand: CommandSpec = {
     { name: "action", type: "string", value: "ACTION", description: "SOAPAction header value." },
     headerFlags,
     timeoutFlag,
+    {
+      name: "max-bytes",
+      type: "number",
+      value: "N",
+      description: "Hand over at most this many envelope bytes; the rest is reported as truncated.",
+    },
   ],
   notes: [
     "A SOAP fault exits 1 — not 0, and not 2. The call reached the service and the service answered",
@@ -374,6 +381,9 @@ export const soapCommand: CommandSpec = {
     "",
     "A transport error exits 2, because no protocol outcome exists to report. The renderer says",
     "which of the two happened; the status alone does not, since a fault is usually an HTTP 500.",
+    "",
+    "--max-bytes bounds the envelope printed and carried in `body.text`, not what the call reads:",
+    "the fault is parsed from the whole envelope, so a fault past the cut is reported either way.",
   ],
   input: (parsed) => {
     const endpoint = requirePositional(
@@ -400,6 +410,7 @@ export const soapCommand: CommandSpec = {
       ...optional("soap_action", asString(parsed, "action")),
       ...headersSection(parsed),
       ...optional("timeout_ms", asNumber(parsed, "timeout")),
+      ...optional("max_body_bytes", asNumber(parsed, "max-bytes")),
     };
   },
   verdict: (output) => {

@@ -201,24 +201,6 @@ export interface HttpRequestInput {
 const FRAME_PAYLOAD_BYTES = 64 * 1024;
 
 /**
- * The most envelope bytes `uvp_soap_call` hands a caller as text.
- *
- * A byte count rather than the character count this used to cut at, so that the
- * envelope a caller receives, the decode `text_lossy` is about, and the bytes
- * `base64` carries are one buffer. Cutting characters is the one cut that can
- * land between the two halves of a surrogate pair, which produces text that
- * cannot be re-encoded to itself and that no field in the answer can name; a cut
- * between bytes can only land inside a character, which is exactly what
- * `text_lossy: "truncated"` reports. It is also the number `truncated` already
- * compared the body's byte length against, so the field and the cut agree now
- * rather than by coincidence on ASCII.
- *
- * There is no input for it — a caller cannot ask for more of the envelope — and
- * the roadmap carries that as its own row rather than as a hidden limit.
- */
-const SOAP_ENVELOPE_BYTES = 64 * 1024;
-
-/**
  * How far past the idle timeout the native probe's own ceiling sits.
  *
  * The probe ends on the frame cap or the idle timeout in every ordinary run, so
@@ -1118,6 +1100,7 @@ export class WebService {
       readonly soap_action: string | undefined;
       readonly headers: Readonly<Record<string, string>>;
       readonly timeout_ms: number;
+      readonly max_body_bytes: number;
     },
     recorder: EvidenceRecorder,
     signal: AbortSignal,
@@ -1218,13 +1201,18 @@ export class WebService {
       captureId: undefined,
     });
 
-    // The envelope as the caller receives it: cut, then decoded once, so the text
-    // handed over, the `text_lossy` about it and the bytes `base64` carries are
-    // one decode of one buffer. A caller can then recover what the decode replaced
-    // from the answer itself.
-    const kept = exchange.body.subarray(0, SOAP_ENVELOPE_BYTES);
+    // The envelope as the caller receives it: cut at the smaller of the cap the
+    // caller asked for and this uvp's own ceiling, then decoded once, so the text
+    // handed over, the `text_lossy` about it and the bytes `base64` carries are one
+    // decode of one buffer. A caller can then recover what the decode replaced from
+    // the answer itself. Same two-number rule as `request`'s body cap below, so
+    // "the smaller of what you asked for and what this uvp allows" has one meaning
+    // for both web tools; `max_body_bytes` in the contract owns why the cut is on
+    // bytes rather than characters.
+    const cap = Math.min(input.max_body_bytes, this.options.maxBodyBytes ?? input.max_body_bytes);
+    const kept = exchange.body.subarray(0, cap);
     const text = kept.toString("utf8");
-    const truncated = exchange.body.byteLength > SOAP_ENVELOPE_BYTES || exchange.bodyTruncated;
+    const truncated = exchange.body.byteLength > cap || exchange.bodyTruncated;
     // Why the decode is not the bytes it was given, which is a different fact from
     // `truncated`: a cut that landed on a character boundary lost nothing.
     const lossy = textLossiness(kept, text, truncated);

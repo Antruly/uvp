@@ -1806,6 +1806,7 @@
           },
           "max_body_bytes": {
             "default": 1048576,
+            "description": "Return at most this many body bytes; the remainder is reported as truncated.",
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
@@ -2746,6 +2747,13 @@
           },
           "timeout_ms": {
             "default": 30000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "max_body_bytes": {
+            "default": 65536,
+            "description": "Hand over at most this many bytes of the response envelope, cut before decoding; the remainder is reported as truncated. The envelope is read whole either way, so this bounds what you are handed rather than what the call reads.",
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991

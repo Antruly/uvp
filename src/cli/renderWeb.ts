@@ -222,8 +222,8 @@ export const renderSoap = (output: Record<string, unknown>): string[] => {
   const body = obj(output["body"]);
   const text = str(body["text"]);
   if (text !== "") lines.push("", `# response envelope, ${CONTENT_WARNING}:`, clip(text, 8_000));
-  // Both caps — the 64 KiB byte cut `uvp_soap_call` makes on the envelope, and
-  // the transport's own read limit — are reported by `truncated`, which used to
+  // Both caps — the cut `uvp_soap_call` makes at `max_body_bytes`, and the
+  // transport's own read limit — are reported by `truncated`, which used to
   // say "the log is a prefix" here, a sentence about the log renderer copied into
   // the SOAP one.
   if (bool(body["truncated"]) === true)
