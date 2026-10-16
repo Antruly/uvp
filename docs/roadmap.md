@@ -2609,12 +2609,20 @@ one. The four assertions read the record as raw text, and `NAME=(\S+)` returns
 for a POSIX path that has one, which is what the lane failed on and has nothing to
 do with Windows. `tests/support/recordedCommand.ts` reads the notation the record
 is written in, and the test stops joining a path list with a literal `:` where the
-product uses `delimiter`. The product question is not fixed and is not this
-change's to make: `renderCommand` writes `env NAME=value …` on every host, which
-no Windows shell runs, and never quotes the command's own arguments, which is what
-makes the line non-re-runnable on POSIX too when a path has a space. Both are
-recorded on [#20](https://github.com/Antruly/uvp/issues/20) with three costed
-options, one of which is a tool-output-schema change.
+product uses `delimiter`.
+
+The product half was a second change, still on
+[#20](https://github.com/Antruly/uvp/issues/20). `renderCommand` quoted the
+environment and not the command's own arguments, so the line was not re-runnable
+on POSIX once a path had a space in it — and the workspace is an argument, so that
+is the ordinary case for a path someone has. Every word is quoted now, by the one
+function that already owned the rule, and an empty argument is written `''`
+instead of disappearing into a separator. What is left is a statement rather than
+a defect: the line is POSIX notation on every host, which no Windows shell runs,
+and the docblock says so. The alternative — the record as data, `command`, `args`
+and `env` in place of one string — was rejected with its reason on the issue:
+`commands` is a declared provenance field, and every consumer would still have to
+render a string for `sources[].ref`.
 
 So 51 of the 53 have landed and 2 are skipped in these three groups; the lane's
 own total is 4, the other two being the reserved-port window and
