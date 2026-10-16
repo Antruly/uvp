@@ -255,8 +255,8 @@ The skips are `it.skipIf`/`describe.skipIf` with the reason in the **title**, so
 a pass. Each names its issue, which is where the removal is tracked; the count
 above is the number that should fall as those land.
 
-**The artifacts row and the fake-executable row are fixed, one of them only
-partly.** The artifacts fixture now names every file it means as a build output
+**All three rows are fixed, the fake-executable one only partly.** The artifacts
+fixture now names every file it means as a build output
 the way this host names one — `EXE` from `src/toolchains/host.ts`, which is the
 product's own answer to that question — so its 4 tests run on Windows and the
 skips that named #19 are gone. The five fake-executable fixtures now install a
@@ -268,10 +268,33 @@ Node, which reads `-S`/`--build` as its own bad options and exits 9 before any o
 the suite's code runs. Two tests are skipped by name for it and it is filed as
 [#22](https://github.com/Antruly/uvp/issues/22), which records the routes — a
 `run` seam on the local provider, as the container provider has, or an executable
-image that is not Node — and leaves the choice to a maintainer. So 47 of the 53
-have landed, leaving 6 skipped in these three groups; the lane's own total is 8,
-the other two being the reserved-port window (Linux only) and `runCancellation`'s
-stop marker, which is a `TerminateProcess` on Windows and says so in its title.
+image that is not Node — and leaves the choice to a maintainer.
+
+The recorded-command row was two problems wearing one issue number. The four
+assertions read the record as raw text, and `(?:^|\s)NAME=(\S+)` hands back
+`'C:\Users\…` for a Windows path — the opening quote is captured with the value —
+and truncates at the space for a POSIX path that has one. That is the reader, not
+the product, and it is what the lane actually failed on: `tests/support/recordedCommand.ts`
+now reads the notation the record is written in, splitting into words before it
+matches so that a `NAME=` inside another variable's value cannot be mistaken for
+an assignment. The same commit stops the test from joining a path list with a
+literal `:` where the product uses `delimiter`, which was a second, independent
+POSIX assumption in one of the four. The other problem is the record itself, and
+it is not fixed here: `renderCommand` writes `env NAME=value …` on every host,
+which is POSIX shell notation and not a line `cmd.exe` or PowerShell will run, and
+it quotes the environment but never the command's own arguments — so the line its
+docblock calls re-runnable is not reliably re-runnable on POSIX either, once a
+path has a space in it. That is a product question with a schema dimension
+(`commands: z.array(z.string())` is a declared output field, generated into
+`docs/public/tool-catalog.json` and consumed as provenance), so it stays open on
+[#20](https://github.com/Antruly/uvp/issues/20) with three costed options for a
+maintainer to choose between, and no product behaviour changed in this fix.
+
+So 51 of the 53 have landed, leaving 2 skipped in these three groups, both the
+`cmake` pair for #22; the lane's own total is 4, the other two being the
+reserved-port window — a host with no window below the ephemeral range has none
+to reserve from, and says so in the title — and `runCancellation`'s stop marker,
+which is a `TerminateProcess` on Windows and says so in its title too.
 
 The lane also found one defect it could not have run without: `scripts/run-tests.mjs`
 spawned `node_modules/.bin/vitest` directly, which on Windows is not a file that

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { toUvpError, type UvpError } from "../../domain/errors.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
+import { assignmentOf } from "../../../tests/support/recordedCommand.js";
 import { removeTree } from "../../../tests/support/temporaryTree.js";
 import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
 
@@ -64,22 +65,6 @@ const fakeInstall = (root: string, version: string): string => {
 };
 
 /**
- * The one thing a Windows host does differently here, and where it is tracked.
- *
- * **The recorded line.** `processRunner.ts` renders an environment assignment as
- * `NAME='C:\path'`, which is the correct POSIX spelling and not something a
- * Windows shell re-runs; `assignmentOf` below then reads the quotes as part of
- * the value. Four assertions compare the raw line, so they fail on the quoting
- * rather than on the prefix. Whether the record should be rendered in the host's
- * dialect, or say which dialect it is, is the open question in #20 — the fix is
- * not to teach this file a second regex, which is the defect showing through.
- */
-const recordGap =
-  process.platform === "win32"
-    ? "a recorded command line is rendered in POSIX dialect and read here as a raw string (see #20)"
-    : undefined;
-
-/**
  * The second thing a Windows host does differently here, and why it is not a bug
  * in this file's fake.
  *
@@ -130,7 +115,7 @@ const signal = new AbortController().signal;
  * A program, not a banner in a script: the provider chooses this command's
  * arguments itself, so the program is baked into the fake rather than passed to
  * it, and the two hosts bake it in differently. See
- * `tests/support/fakeExecutable.ts` for the two mechanisms, and `argvGap` below
+ * `tests/support/fakeExecutable.ts` for the two mechanisms, and `argvGap` above
  * for what a host that bakes it in through the environment still cannot do.
  */
 const SUCCEEDS_QUIETLY = fileURLToPath(
@@ -164,8 +149,14 @@ beforeAll(async () => {
   process.env["PATH"] = [bin, savedPath ?? ""].join(delimiter);
   savedRoot = process.env["UVCPP_ROOT"];
 
-  installPrefix = fakeInstall(root, "1.7.0");
-  otherPrefix = fakeInstall(join(root, "elsewhere"), "9.9.9");
+  // Both prefixes are paths `shellQuote` has to quote, on any host: one has a
+  // space, the other an apostrophe, which is the escape inside a quoted value.
+  // Without them the record happens to need no quoting on a POSIX host and the
+  // assertions below would stop covering the notation they read — the Windows
+  // lane was the only place the quote was ever exercised, which is exactly how
+  // the reader came to be wrong there and nowhere else.
+  installPrefix = fakeInstall(join(root, "an install"), "1.7.0");
+  otherPrefix = fakeInstall(join(root, "an other's install"), "9.9.9");
   // `UVCPP_ROOT` leads the search order, so with it set the install this file
   // built is the one discovery answers with — on any host, whatever else is
   // installed. The assertions below check the relation, and this makes the
@@ -197,10 +188,6 @@ const buildWithoutPrefix = async () =>
     signal,
   });
 
-/** A `NAME=value` assignment as it appears in a recorded command, if present. */
-const assignmentOf = (command: string, name: string): string | undefined =>
-  new RegExp(String.raw`(?:^|\s)${name}=(\S+)`, "u").exec(command)?.[1];
-
 describe("the libuvcpp a build points CMake at", () => {
   it("reads the fake install this file made, so the rest of the file means something", async () => {
     // The control. Without it, the assertions below could all hold on a host
@@ -212,101 +199,89 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(found.modules).toEqual(["UVCPP_HTTP_ENABLE", "UVCPP_WS_ENABLE"]);
   });
 
-  it.skipIf(recordGap !== undefined)(
-    named("points CMake at the install it reports, on both routes libuvcpp ships by", recordGap),
-    async () => {
-      const found = await provider.findLibuvcpp(workspacePath, signal);
-      const outcome = await buildWithoutPrefix();
-      const configure = outcome.commands[0] ?? "";
+  it("points CMake at the install it reports, on both routes libuvcpp ships by", async () => {
+    const found = await provider.findLibuvcpp(workspacePath, signal);
+    const outcome = await buildWithoutPrefix();
+    const configure = outcome.commands[0] ?? "";
 
-      // The relation the defect broke: what doctor describes and what the build
-      // uses are the same install. A caller who reads the one and runs the other
-      // gets the library they were told about.
+    // The relation the defect broke: what doctor describes and what the build
+    // uses are the same install. A caller who reads the one and runs the other
+    // gets the library they were told about.
+    expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBe(found.installPrefix);
+    // Both routes, because a prebuilt archive ships a `.pc` file and no CMake
+    // package config at all: the first finds a `cmake --install`ed prefix, the
+    // second finds the archive. Setting one leaves the other unfindable.
+    expect(assignmentOf(configure, "PKG_CONFIG_PATH")).toBe(
+      [join(installPrefix, "lib", "pkgconfig"), join(installPrefix, "lib64", "pkgconfig")].join(
+        delimiter,
+      ),
+    );
+  });
+
+  it("keeps an existing CMAKE_PREFIX_PATH, since a caller put it there", async () => {
+    // Appending rather than replacing: a caller who set a prefix path for a
+    // dependency of their own must still get it, and a build that silently
+    // dropped it would fail later, somewhere else, for a reason nobody could
+    // trace back to the build.
+    const existing = process.env["CMAKE_PREFIX_PATH"];
+    process.env["CMAKE_PREFIX_PATH"] = "/somewhere/caller/put";
+    try {
+      const configure = (await buildWithoutPrefix()).commands[0] ?? "";
+      const value = assignmentOf(configure, "CMAKE_PREFIX_PATH") ?? "";
+      expect(value.startsWith(`${installPrefix}${delimiter}`)).toBe(true);
+      expect(value).toContain("/somewhere/caller/put");
+    } finally {
+      if (existing === undefined) delete process.env["CMAKE_PREFIX_PATH"];
+      else process.env["CMAKE_PREFIX_PATH"] = existing;
+    }
+  });
+
+  it("takes a caller's prefix at its word rather than discovering its own", async () => {
+    // The `uvp build` path: it looked the install up and passes what it found.
+    // Discovery must not overrule it — a caller naming a specific build is
+    // naming it on purpose, and that install is the one its workspace's CMake
+    // will be judged against.
+    const outcome = await provider.createClient().build({
+      workspacePath,
+      buildDir,
+      buildType: "Debug",
+      clean: false,
+      timeoutMs: 60_000,
+      configureOnly: false,
+      libuvcppPrefix: otherPrefix,
+      signal,
+    });
+    const configure = outcome.commands[0] ?? "";
+    expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBe(otherPrefix);
+    expect(configure).not.toContain(installPrefix);
+  });
+
+  it("names no prefix it did not find, and carries the locale into the record", async () => {
+    // The other direction, written against discovery's own answer so that it
+    // holds on a host with no libuvcpp at all: when there is nothing to find,
+    // nothing is invented — no empty assignment, no guessed `/usr/local`.
+    const found = await provider.findLibuvcpp(workspacePath, signal);
+    const outcome = await buildWithoutPrefix();
+    const configure = outcome.commands[0] ?? "";
+
+    if (found.found) {
       expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBe(found.installPrefix);
-      // Both routes, because a prebuilt archive ships a `.pc` file and no CMake
-      // package config at all: the first finds a `cmake --install`ed prefix, the
-      // second finds the archive. Setting one leaves the other unfindable.
-      expect(assignmentOf(configure, "PKG_CONFIG_PATH")).toBe(
-        [join(installPrefix, "lib", "pkgconfig"), join(installPrefix, "lib64", "pkgconfig")].join(
-          ":",
-        ),
-      );
-    },
-  );
+    } else {
+      expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBeUndefined();
+    }
 
-  it.skipIf(recordGap !== undefined)(
-    named("keeps an existing CMAKE_PREFIX_PATH, since a caller put it there", recordGap),
-    async () => {
-      // Appending rather than replacing: a caller who set a prefix path for a
-      // dependency of their own must still get it, and a build that silently
-      // dropped it would fail later, somewhere else, for a reason nobody could
-      // trace back to the build.
-      const existing = process.env["CMAKE_PREFIX_PATH"];
-      process.env["CMAKE_PREFIX_PATH"] = "/somewhere/caller/put";
-      try {
-        const configure = (await buildWithoutPrefix()).commands[0] ?? "";
-        const value = assignmentOf(configure, "CMAKE_PREFIX_PATH") ?? "";
-        expect(value.startsWith(`${installPrefix}:`)).toBe(true);
-        expect(value).toContain("/somewhere/caller/put");
-      } finally {
-        if (existing === undefined) delete process.env["CMAKE_PREFIX_PATH"];
-        else process.env["CMAKE_PREFIX_PATH"] = existing;
-      }
-    },
-  );
-
-  it.skipIf(recordGap !== undefined)(
-    named("takes a caller's prefix at its word rather than discovering its own", recordGap),
-    async () => {
-      // The `uvp build` path: it looked the install up and passes what it found.
-      // Discovery must not overrule it — a caller naming a specific build is
-      // naming it on purpose, and that install is the one its workspace's CMake
-      // will be judged against.
-      const outcome = await provider.createClient().build({
-        workspacePath,
-        buildDir,
-        buildType: "Debug",
-        clean: false,
-        timeoutMs: 60_000,
-        configureOnly: false,
-        libuvcppPrefix: otherPrefix,
-        signal,
-      });
-      const configure = outcome.commands[0] ?? "";
-      expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBe(otherPrefix);
-      expect(configure).not.toContain(installPrefix);
-    },
-  );
-
-  it.skipIf(recordGap !== undefined)(
-    named("names no prefix it did not find, and carries the locale into the record", recordGap),
-    async () => {
-      // The other direction, written against discovery's own answer so that it
-      // holds on a host with no libuvcpp at all: when there is nothing to find,
-      // nothing is invented — no empty assignment, no guessed `/usr/local`.
-      const found = await provider.findLibuvcpp(workspacePath, signal);
-      const outcome = await buildWithoutPrefix();
-      const configure = outcome.commands[0] ?? "";
-
-      if (found.found) {
-        expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBe(found.installPrefix);
-      } else {
-        expect(assignmentOf(configure, "CMAKE_PREFIX_PATH")).toBeUndefined();
-      }
-
-      // The recorded command is what a caller re-runs to read a failure, and the
-      // environment is part of it: without `CMAKE_PREFIX_PATH` the re-run reports a
-      // missing library for a build that failed on something else entirely. The
-      // locale pin is there unconditionally, because it is not a fact about the
-      // install — it is the language the output is *read* in, so a record without it
-      // re-runs into a linker that answers in the host's language while every
-      // diagnostic uvp reports is English. `env NAME=value` is the POSIX spelling of
-      // both, and the two halves are asserted apart for that reason.
-      expect(configure.startsWith("env ")).toBe(true);
-      expect(assignmentOf(configure, "LC_MESSAGES")).toBe("C");
-      expect(configure.slice(configure.indexOf("cmake"))).toContain("cmake -S ");
-    },
-  );
+    // The recorded command is what a caller re-runs to read a failure, and the
+    // environment is part of it: without `CMAKE_PREFIX_PATH` the re-run reports a
+    // missing library for a build that failed on something else entirely. The
+    // locale pin is there unconditionally, because it is not a fact about the
+    // install — it is the language the output is *read* in, so a record without it
+    // re-runs into a linker that answers in the host's language while every
+    // diagnostic uvp reports is English. `env NAME=value` is the POSIX spelling of
+    // both, and the two halves are asserted apart for that reason.
+    expect(configure.startsWith("env ")).toBe(true);
+    expect(assignmentOf(configure, "LC_MESSAGES")).toBe("C");
+    expect(configure.slice(configure.indexOf("cmake"))).toContain("cmake -S ");
+  });
 
   it.skipIf(argvGap !== undefined)(
     named("records the compile as a second command, with the locale pin and no prefix", argvGap),
