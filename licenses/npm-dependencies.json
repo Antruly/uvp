@@ -23,11 +23,11 @@
     },
     {
       "name": "canonicalize",
-      "version": "3.0.0",
+      "version": "5.1.0",
       "license": "Apache-2.0",
       "direct": true,
       "optional": false,
-      "resolved_from": "https://registry.npmmirror.com/canonicalize/-/canonicalize-3.0.0.tgz"
+      "resolved_from": "https://registry.npmjs.org/canonicalize/-/canonicalize-5.1.0.tgz"
     },
     {
       "name": "zod",
