@@ -1040,7 +1040,16 @@ the same optional the spread guards, and that was measured rather than argued.
 ([#54](https://github.com/Antruly/uvp/issues/54)): forty-nine were missing
 assertions and are pinned, the file moves from 58.59% to **96.88%** — 124 killed of
 128 — and the four that remain are equivalent mutants, each recorded with the
-measurement that says so. The other 207 survivors are still unread.
+measurement that says so. The other 207 survivors are still unread, and
+[#56](https://github.com/Antruly/uvp/issues/56) has now measured which of them the
+tree could not hold at all: applying each survivor's own mutation to the span its
+report names and running the project's `tsc --noEmit` over the same report says
+**108 of the 344 do not compile**, **51** of them in the 207, and every one of the
+108 is refused by `tsconfig.build.json` too — so they are damage `npm run compile`
+catches rather than assertions the suite is missing, and the read queue the sweep's
+table presents is at most **156**. The instrument for it is committed
+(`scripts/mutation-survivor-kinds.mjs`, with a producer golden in `check:pr`) rather
+than left in a scratch directory.
 [testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.
 
 What the choice gives up is stated rather than hidden. There is no per-test

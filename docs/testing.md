@@ -1056,6 +1056,61 @@ therefore pin the reader to its own docblock rather than to a caller, and they b
 load-bearing the day one of those consumers spreads a manifest or asks whether a key
 is there. The sweep's other 207 survivors are still unread.
 
+**A third of the survivor table is damage the build refuses, which segments the
+queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the
+question the `workspaceManifest.ts` read above surfaced — with `checkers` empty, how
+much of the 344 is mutants the tree could never hold? — asked of the whole table
+rather than of one file. `scripts/mutation-survivor-kinds.mjs` applies each surviving
+mutant's own replacement text to the span its own report records, runs the project's
+`tsc --noEmit`, and restores the file from the report's embedded `source`, which is
+the authority for the restore rather than a copy taken when the run started. Over run
+[`38919206652`](https://github.com/Antruly/uvp/actions/runs/38919206652)'s report:
+**108 of the 344 do not compile** — `assertions.ts` 39 of 129, `evidenceHelpers.ts`
+28 of 70, `workspaceManifest.ts` 25 of 53, `evidence.ts` 10 of 13, `errors.ts` 4 of
+14, `bundleDiff.ts` 2 of 54, and none of `ToolchainProvider.ts`'s five or
+`unknown.ts`'s six. Of the **207** survivors in files whose read is still
+outstanding, **51** are in that class, so the queue the sweep's table presents is at
+most **156**.
+
+What the class is made of says more than its size, because the diagnostics are not
+one kind of thing. `TS2322` (**32**) is a value of the wrong shape and `TS2375`
+(**15**) the `exactOptionalPropertyTypes` spread, both of which the type system
+forbids outright; `TS2739` (**13**) is an object literal that would lose properties;
+`TS2367` (**6**) is a comparison the compiler can prove always false. `TS7027` —
+unreachable code, **18** of the 108 — reads differently from all of those: it is
+`allowUnreachableCode: false` refusing a _dead branch_, so the mutant is a
+control-flow change the build rejects rather than a shape the types forbid, and it is
+the family the compiler is doing work a test could have done. That follows from the
+baseline rather than from the name of the code: the pristine tree compiles clean, so
+no branch in it is unreachable, so the branch each of these 18 kills is one the
+unmutated tree reaches — which makes them distinguishable by some input by
+construction, and the suite not reaching for one is the survivor. By mutator the class
+is dominated by `ConditionalExpression` (**38**), `StringLiteral` (**28**) and
+`ObjectLiteral` (**16**).
+
+A survivor that does not compile is not therefore one nobody needs to read, and the
+lane is why: the mutation group runs `src/` through Vitest, which strips types rather
+than checking them, so all 108 were run and survived anyway — `:106:66` above is one,
+a `Buffer` coercing through `JSON.parse`. What the classification establishes is
+narrower and was measured rather than inferred: **all 108 are refused by
+`tsconfig.build.json` as well**, the configuration `npm run compile` and the
+`typecheck` gate use. So the summary's line — a survivor is a place where the code can
+be wrong and the suite still passes — stays true and says less than it looks like:
+for these 108 the suite passing is a division of labour with the compiler rather than
+a gap in the suite. They are recorded here rather than pinned, and the way to stop
+them arriving in the table at all is the checker `checkers: []` above is still
+waiting on.
+
+The instrument is part of the change rather than a scratch file, because an
+instrument that no longer exists turns a measurement back into an argument:
+`scripts/mutation-survivor-kinds.mjs` takes any report, and
+`scripts/verify-mutation-survivor-kinds.mjs` holds it with a stub compiler that puts
+compiles, refused-with-a-diagnostic and undetermined in one fixture, asserts that each
+mutation landed on the span its report named, and is wired into `check:pr`. It is not
+wired into the weekly sweep: it costs a typecheck per mutant — **4 minutes 15
+seconds** for the 344 survivors of this report — and the report it needs is already an
+artifact of that job.
+
 **In that run the upper bound was tightly zero, and the line says so.** Over the
 936 kills of the retained report, **936 carry the suite's own summary** in their
 `statusReason` and the 344 survivors carry no `statusReason` at all, so no kill in
