@@ -1047,7 +1047,12 @@ report names and running the project's `tsc --noEmit` over the same report says
 **108 of the 344 do not compile**, **51** of them in the 207, and every one of the
 108 is refused by `tsconfig.build.json` too — so they are damage `npm run compile`
 catches rather than assertions the suite is missing, and the read queue the sweep's
-table presents is at most **156**. The instrument for it is committed
+table presents is at most **156**. `assertions.ts`'s 129 have been read too
+([#62](https://github.com/Antruly/uvp/issues/62)): 84 of its 90 readable survivors are
+pinned, it moves from 66.41% to **94.27%** — 361 killed of 384 — and the six that
+remain are four equivalent mutants, each measured over a 121,908-input lattice, and
+the two rows [#61](https://github.com/Antruly/uvp/issues/61) is for. The other **78**
+survivors are still unread, **66** of them readable. The instrument for it is committed
 (`scripts/mutation-survivor-kinds.mjs`, with a producer golden in `check:pr`) rather
 than left in a scratch directory.
 [testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.
