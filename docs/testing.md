@@ -255,11 +255,23 @@ The skips are `it.skipIf`/`describe.skipIf` with the reason in the **title**, so
 a pass. Each names its issue, which is where the removal is tracked; the count
 above is the number that should fall as those land.
 
-**The artifacts row is fixed.** The fixture now names every file it means as a
-build output the way this host names one — `EXE` from `src/toolchains/host.ts`,
-which is the product's own answer to that question — so its 4 tests run on
-Windows and the skips that named #19 are gone. The three rows above stay as the
-first run counted them; 4 of the 53 have landed, leaving 49 skipped.
+**The artifacts row and the fake-executable row are fixed, one of them only
+partly.** The artifacts fixture now names every file it means as a build output
+the way this host names one — `EXE` from `src/toolchains/host.ts`, which is the
+product's own answer to that question — so its 4 tests run on Windows and the
+skips that named #19 are gone. The five fake-executable fixtures now install a
+program the host will start through one owner (`tests/support/fakeExecutable.ts`),
+so 43 of the 45 run. The other 2 are a _second_ wall behind the first, and it is
+worth stating plainly because it is not the shell-script problem: the local
+provider chooses `cmake`'s arguments itself, and on Windows the fake is a copy of
+Node, which reads `-S`/`--build` as its own bad options and exits 9 before any of
+the suite's code runs. Two tests are skipped by name for it and it is filed as
+[#22](https://github.com/Antruly/uvp/issues/22), which records the routes — a
+`run` seam on the local provider, as the container provider has, or an executable
+image that is not Node — and leaves the choice to a maintainer. So 47 of the 53
+have landed, leaving 6 skipped in these three groups; the lane's own total is 8,
+the other two being the reserved-port window (Linux only) and `runCancellation`'s
+stop marker, which is a `TerminateProcess` on Windows and says so in its title.
 
 The lane also found one defect it could not have run without: `scripts/run-tests.mjs`
 spawned `node_modules/.bin/vitest` directly, which on Windows is not a file that

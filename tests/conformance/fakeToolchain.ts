@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import type {
@@ -12,6 +12,12 @@ import type {
 } from "../../src/application/ToolchainProvider.js";
 import { UvpFailure, cancelledFailure } from "../../src/domain/errors.js";
 import { sha256 } from "../../src/domain/identity.js";
+import {
+  installFakeExecutable,
+  type FakeExecutable,
+  type FakeProgram,
+} from "../support/fakeExecutable.js";
+import { FIXTURE_SCRIPT } from "./fixtureServer.js";
 
 /**
  * A toolchain that answers from a script instead of from a compiler.
@@ -136,23 +142,39 @@ export const failedBuild = (request: BuildRequest): BuildOutcome => ({
  * Write an executable `build/<name>` into a workspace.
  *
  * `uvp_run` resolves the binary as `<build_dir>/<manifest.binary ?? manifest.name>`
- * and spawns it. A shell script that starts a real listener is therefore enough
- * to exercise launch, readiness, and the whole verification workflow without a
+ * and spawns it. A program that starts a real listener is therefore enough to
+ * exercise launch, readiness, and the whole verification workflow without a
  * toolchain — which is what lets this lane cover `uvp_run` and `uvp_verify` at
- * all. The script is written by this fixture and executed by the test host's own
- * shell, the same way a built artifact would be.
+ * all. What is installed is a fake the *host* will start: `tests/support/`
+ * owns that question, including the name this host gives it and the way the
+ * program reaches it.
+ *
+ * The program is named by the caller rather than written here, because the port
+ * it listens on is the caller's: it arrives as the program's first argument.
+ * `installFakeExecutable` returns the arguments the launcher has to pass, and a
+ * caller that drops them gets a Node with nothing to run — which is why the
+ * result is spread into the tool call rather than used for its path alone.
  */
 export const writeFakeBinary = async (
   workspacePath: string,
   name: string,
-  script: string,
-): Promise<string> => {
+  program: FakeProgram,
+): Promise<FakeExecutable> => {
   const buildDir = join(workspacePath, "build");
   await mkdir(buildDir, { recursive: true });
-  const path = join(buildDir, name);
-  await writeFile(path, script, { mode: 0o755 });
-  return path;
+  return await installFakeExecutable(buildDir, name, program);
 };
+
+/** The fixture service, as a workspace's built binary on a given port. */
+export const writeFakeService = async (
+  workspacePath: string,
+  name: string,
+  port: number,
+): Promise<FakeExecutable> =>
+  await writeFakeBinary(workspacePath, name, {
+    module: FIXTURE_SCRIPT,
+    args: [String(port)],
+  });
 
 export const createFakeToolchain = (options: FakeToolchainOptions = {}): ToolchainProvider => {
   const identity: ToolchainIdentity = {

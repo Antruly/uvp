@@ -2565,13 +2565,31 @@ assumption in three places, and the counting is the useful part of the finding:
 | 4        | `artifacts.test.ts` names its outputs the POSIX way, and `discoverArtifacts` decides what a build produced from a mode bit on POSIX and an extension on Windows                                                                                                                                          | [#19](https://github.com/Antruly/uvp/issues/19) |
 | 4        | a recorded command line is rendered in POSIX dialect — `env LC_MESSAGES=C CMAKE_PREFIX_PATH='C:\…' cmake -S …` — and four assertions read the raw string, so they fail on the quoting rather than on the prefix                                                                                          | [#20](https://github.com/Antruly/uvp/issues/20) |
 
-**The artifacts row is fixed, and the rest of the table is what the first run
-counted.** `artifacts.test.ts` now names each file it means as a build output the
+**The artifacts row and the fake-executable row are fixed, one of them only
+partly.** `artifacts.test.ts` now names each file it means as a build output the
 way this host names one, taking that answer from `EXE` in `src/toolchains/host.ts`
 rather than spelling it again — so its 4 tests run on Windows and the skips that
-named #19 are gone. The two remaining rows are still skipped by name until their
-own fixes land, which is what makes the count a thing that falls rather than a
-claim that it did.
+named #19 are gone. The five fixtures behind the 45 now install a program the host
+will start through one owner, `tests/support/fakeExecutable.ts`, so 43 of them
+run.
+
+The other 2 run into a second wall, and it is not the shell-script one: the local
+provider chooses `cmake`'s arguments itself (`-S … -B …`, then `--build …`), and
+on Windows the fake is a copy of Node, which reads those as its own options before
+any of the suite's code can run —
+
+```
+node -S /tmp/ws -B /tmp/ws/build -DCMAKE_BUILD_TYPE=Debug
+node: bad option: -S                      → exit 9, no program run
+```
+
+— so the configure the assertions read never happens. They are skipped by name,
+with the measurement in the title, and the wall is filed as
+[#22](https://github.com/Antruly/uvp/issues/22): a `run` seam on the local
+provider, as the container provider has, would carry them, and that is a product
+change for a maintainer to decide rather than a test to invent. So 47 of the 53
+have landed and 6 are skipped in these three groups; the lane's own total is 8,
+the other two being the reserved-port window and `runCancellation`'s stop marker.
 
 The failure text is what makes the first group a fixture defect rather than a
 product one:

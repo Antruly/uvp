@@ -1,10 +1,13 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { toUvpError, type UvpError } from "../../domain/errors.js";
+import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
+import { removeTree } from "../../../tests/support/temporaryTree.js";
 import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
 
 /**
@@ -26,13 +29,17 @@ import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
  * `/usr/local`, a host with one reachable only through `UVCPP_ROOT`, and a host
  * with none at all — and it cannot pass by naming a prefix uvp invented.
  *
- * **Nothing here compiles anything.** `cmake` on `PATH` is a symlink to `/bin/true`
- * for the duration of this file, so the build runs the real code path — the real
- * discovery, the real environment construction, the real `spawn` — and returns
- * its real result, without requiring a compiler on the machine that runs it. The
- * evidence asserted is the recorded command line, which is the same evidence a
- * caller receives when a build fails: what uvp actually ran, and under what
- * environment.
+ * **Nothing here compiles anything.** `cmake` on `PATH` is a program that takes
+ * whatever arguments it is given, exits 0 and says nothing, for the duration of
+ * this file, so the build runs the real code path — the real discovery, the real
+ * environment construction, the real `spawn` — and returns its real result,
+ * without requiring a compiler on the machine that runs it. The evidence asserted
+ * is the recorded command line, which is the same evidence a caller receives when
+ * a build fails: what uvp actually ran, and under what environment.
+ *
+ * That program is installed by `tests/support/fakeExecutable.ts` rather than
+ * linked to `/bin/true` here, because what this host will start as `cmake` is not
+ * the same file on every host — see that module for the two mechanisms.
  */
 
 /** A fake install prefix, laid out the way libuvcpp's archive is. */
@@ -57,14 +64,7 @@ const fakeInstall = (root: string, version: string): string => {
 };
 
 /**
- * The two things a Windows host does differently here, and where each is tracked.
- *
- * **The fake `cmake`.** This file puts a `cmake` on `PATH` as a symlink to
- * `/bin/true`, which is a POSIX path and a POSIX way to say "takes the arguments,
- * exits 0, says nothing". Windows has no `/bin/true` for the link to reach, the
- * spawn fails, and the build records one command instead of two — so the file's
- * own control, that this workspace builds successfully, fails before anything
- * about prefixes is asked. #18.
+ * The one thing a Windows host does differently here, and where it is tracked.
  *
  * **The recorded line.** `processRunner.ts` renders an environment assignment as
  * `NAME='C:\path'`, which is the correct POSIX spelling and not something a
@@ -74,13 +74,38 @@ const fakeInstall = (root: string, version: string): string => {
  * dialect, or say which dialect it is, is the open question in #20 — the fix is
  * not to teach this file a second regex, which is the defect showing through.
  */
-const cmakeGap =
-  process.platform === "win32"
-    ? "Windows cannot follow this file's `cmake` symlink to `/bin/true` (see #18)"
-    : undefined;
 const recordGap =
   process.platform === "win32"
     ? "a recorded command line is rendered in POSIX dialect and read here as a raw string (see #20)"
+    : undefined;
+
+/**
+ * The second thing a Windows host does differently here, and why it is not a bug
+ * in this file's fake.
+ *
+ * The provider chooses this command's arguments — `-S <ws> -B <build>` to
+ * configure, `--build <build>` to compile. On Windows the `cmake` on `PATH` is a
+ * copy of the Node running this suite (`tests/support/fakeExecutable.ts`), and
+ * Node reads its own command line before any of the suite's code can run, so it
+ * answers the provider's arguments itself:
+ *
+ *     node -S /tmp/ws -B /tmp/ws/build -DCMAKE_BUILD_TYPE=Debug
+ *     node: bad option: -S                        → exit 9
+ *     node --build /tmp/ws/build
+ *     node: bad option: --build                   → exit 9
+ *
+ * Nothing is imported in that run, which is why the program the fake carries
+ * never executes and the configure the assertions read never happened. A fake
+ * that receives the arguments *it* is handed (a service `uvp_run` starts) has no
+ * such problem: the program is the first argument, so Node finds a script before
+ * it finds an option. This is the price of the provider choosing the argv, and the
+ * ways out are a `run` seam on this provider — which is what the container
+ * provider already has — or an executable image that is not Node. #22 records
+ * both and leaves the choice to a maintainer.
+ */
+const argvGap =
+  process.platform === "win32"
+    ? "the provider chooses `cmake`'s argv, and a Node-backed fake reads `-S`/`--build` as its own bad options (exit 9, no program run) — see #22"
     : undefined;
 
 /** `title`, with the reason attached on the host that cannot run it. */
@@ -94,27 +119,49 @@ let installPrefix: string;
 let otherPrefix: string;
 let savedPath: string | undefined;
 let savedRoot: string | undefined;
+let savedNodeOptions: string | undefined;
 
 /** The signal a build under test is given. Real, and never aborted. */
 const signal = new AbortController().signal;
 
-beforeAll(() => {
+/**
+ * The `cmake` this file puts on `PATH`, as the program it runs.
+ *
+ * A program, not a banner in a script: the provider chooses this command's
+ * arguments itself, so the program is baked into the fake rather than passed to
+ * it, and the two hosts bake it in differently. See
+ * `tests/support/fakeExecutable.ts` for the two mechanisms, and `argvGap` below
+ * for what a host that bakes it in through the environment still cannot do.
+ */
+const SUCCEEDS_QUIETLY = fileURLToPath(
+  new URL("../../../tests/support/fixtures/succeedsQuietly.mjs", import.meta.url),
+);
+
+beforeAll(async () => {
   root = mkdtempSync(join(realpathSync(tmpdir()), "uvp-provider-"));
   workspacePath = join(root, "ws");
   buildDir = join(workspacePath, "build");
   mkdirSync(workspacePath, { recursive: true });
 
-  // `cmake` as `/bin/true`: it takes the arguments, exits 0, and says nothing.
+  // A `cmake` whose arguments mean nothing to it: exits 0 and says nothing. On
+  // Windows it is a copy of Node answering its own `bad option` for the build
+  // commands — that is `argvGap`, and it is why two tests below are skipped there.
   const bin = join(root, "bin");
-  mkdirSync(bin, { recursive: true });
-  const cmake = join(bin, "cmake");
-  // A symlink to `/bin/true`, which is executable already: no mode is set here,
-  // because a process's `execvp` follows the link and finds the real file's
-  // permissions, and setting them on a link is not a thing a filesystem does.
-  symlinkSync("/bin/true", cmake);
+  const cmake = await installFakeTool(bin, "cmake", { module: SUCCEEDS_QUIETLY });
 
   savedPath = process.env["PATH"];
-  process.env["PATH"] = `${bin}:${savedPath ?? ""}`;
+  savedNodeOptions = process.env["NODE_OPTIONS"];
+  // On a host where the fake is a copy of Node rather than a script, the program
+  // reaches it through the environment: the provider chooses the command line, so
+  // there is nowhere else for a test to put it. Set before the first provider
+  // call, because the child inherits this process's environment at spawn time.
+  if (cmake.env["NODE_OPTIONS"] !== undefined) {
+    process.env["NODE_OPTIONS"] = cmake.env["NODE_OPTIONS"];
+  }
+  // Joined with the separator this host uses rather than with `:` — a `PATH` is
+  // one of the few things no two platforms spell the same way, and a literal here
+  // would put a Windows directory and the rest of the path into one entry.
+  process.env["PATH"] = [bin, savedPath ?? ""].join(delimiter);
   savedRoot = process.env["UVCPP_ROOT"];
 
   installPrefix = fakeInstall(root, "1.7.0");
@@ -126,12 +173,14 @@ beforeAll(() => {
   process.env["UVCPP_ROOT"] = installPrefix;
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (savedPath === undefined) delete process.env["PATH"];
   else process.env["PATH"] = savedPath;
   if (savedRoot === undefined) delete process.env["UVCPP_ROOT"];
   else process.env["UVCPP_ROOT"] = savedRoot;
-  rmSync(root, { recursive: true, force: true });
+  if (savedNodeOptions === undefined) delete process.env["NODE_OPTIONS"];
+  else process.env["NODE_OPTIONS"] = savedNodeOptions;
+  await removeTree(root);
 });
 
 const provider = new LocalToolchainProvider();
@@ -259,8 +308,8 @@ describe("the libuvcpp a build points CMake at", () => {
     },
   );
 
-  it.skipIf(cmakeGap !== undefined)(
-    named("records the compile as a second command, with the locale pin and no prefix", cmakeGap),
+  it.skipIf(argvGap !== undefined)(
+    named("records the compile as a second command, with the locale pin and no prefix", argvGap),
     async () => {
       // `cmake --build` does not search for anything: the configure already wrote the
       // paths into the build tree, so a prefix here would be noise in the record, and
@@ -335,14 +384,14 @@ describe("a call whose signal was already aborted", () => {
     expect(failure.message).toContain("cancelled");
   });
 
-  it.skipIf(cmakeGap !== undefined)(
-    named("names a cancelled build, rather than a workspace that does not compile", cmakeGap),
+  it.skipIf(argvGap !== undefined)(
+    named("names a cancelled build, rather than a workspace that does not compile", argvGap),
     async () => {
-      // The control: this workspace has no `CMakeLists.txt`, and `cmake` here is
-      // `/bin/true`, so the same build with a live signal reports success. A
-      // `succeeded: false` reached by aborting would therefore be a claim about code
-      // that nothing compiled, and the control is what rules out a second reason for
-      // it to fail.
+      // The control: this workspace has no `CMakeLists.txt`, and `cmake` here is a
+      // program that always exits 0, so the same build with a live signal reports
+      // success. A `succeeded: false` reached by aborting would therefore be a claim
+      // about code that nothing compiled, and the control is what rules out a second
+      // reason for it to fail.
       expect((await buildWithoutPrefix()).succeeded).toBe(true);
 
       const failure = await failureOf(() =>

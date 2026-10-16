@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,8 +11,8 @@ import type { ToolContract } from "../../src/contracts/toolContractTypes.js";
 import { toUvpError } from "../../src/domain/errors.js";
 import { sha256 } from "../../src/domain/identity.js";
 import { freePort } from "../support/ports.js";
-import { createFakeToolchain, writeFakeBinary } from "./fakeToolchain.js";
-import { fixtureBinaryScript } from "./fixtureServer.js";
+import { removeTree } from "../support/temporaryTree.js";
+import { createFakeToolchain, writeFakeService } from "./fakeToolchain.js";
 
 /**
  * Comparing two verification reports, end to end.
@@ -43,27 +43,6 @@ import { fixtureBinaryScript } from "./fixtureServer.js";
  */
 
 const TIMEOUT = 30_000;
-
-/**
- * What a Windows host cannot do, and where the work on it is tracked.
- *
- * Every describe below verifies a workspace, which launches the fake built
- * binary `writeFakeBinary` writes: a `#!/bin/sh` script with no extension. A
- * Windows host has no `/bin/sh`, and an extensionless file is not an image
- * `CreateProcess` will start, so the launch fails with `ENOENT` before any of
- * the comparison's own behaviour is exercised. The lane reports that as a skip
- * rather than as a failure of the comparison — #18 has the measurement and the
- * ways out. Nothing else in this file runs on Windows either: the three
- * describes below are the whole file.
- */
-const windowsGap =
-  process.platform === "win32"
-    ? "Windows cannot launch the fixture's fake built binary (see #18)"
-    : undefined;
-
-/** `title`, with the reason attached on the host that cannot run it. */
-const named = (title: string): string =>
-  windowsGap === undefined ? title : `${title} — skipped: ${windowsGap}`;
 
 let root: string;
 let services: ReturnType<typeof createUvpServices>;
@@ -127,21 +106,21 @@ const REQUESTS: readonly [Record<string, unknown>, Record<string, unknown>] = [
 /**
  * One real pass over a real service.
  *
- * The fixture binary takes its port as an argument baked into the script, so the
- * script is rewritten per pass and the port differs every time: `service.endpoint`
- * is then a field that genuinely differs between any two passes in this lane,
- * which is what makes "and it was not compared" an assertion with something
- * behind it.
+ * The fixture takes its port as the program's first argument, and the launcher
+ * passes it because the arguments belong to the caller: `run.args` is where the
+ * port travels, and it differs on every pass. `service.endpoint` is therefore a
+ * field that genuinely differs between any two passes in this lane, which is what
+ * makes "and it was not compared" an assertion with something behind it.
  */
 const verify = async (
   name: string,
   port: number,
   requests: readonly Record<string, unknown>[] = REQUESTS,
 ): Promise<Record<string, unknown>> => {
-  await writeFakeBinary(workspace(name), name, fixtureBinaryScript(port));
+  const service = await writeFakeService(workspace(name), name, port);
   return await conforming("uvp_verify", {
     path: workspace(name),
-    run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+    run: { args: service.args, port, ready_path: "/healthz", timeout_ms: 15_000 },
     requests,
     goal: "the fixture answers as declared",
   });
@@ -205,10 +184,10 @@ beforeAll(async () => {
 }, TIMEOUT);
 
 afterAll(async () => {
-  await rm(root, { recursive: true, force: true });
+  await removeTree(root);
 });
 
-describe.skipIf(windowsGap !== undefined)(named("two passes of one service"), () => {
+describe("two passes of one service", () => {
   it(
     "calls a repeat pass identical, and names the fields it refused to compare",
     async () => {
@@ -371,7 +350,7 @@ describe.skipIf(windowsGap !== undefined)(named("two passes of one service"), ()
   );
 });
 
-describe.skipIf(windowsGap !== undefined)(named("what the comparison will not read"), () => {
+describe("what the comparison will not read", () => {
   it(
     "refuses a path with no file at it",
     async () => {
@@ -438,7 +417,7 @@ describe.skipIf(windowsGap !== undefined)(named("what the comparison will not re
   );
 });
 
-describe.skipIf(windowsGap !== undefined)(named("the file facts and the evidence"), () => {
+describe("the file facts and the evidence", () => {
   it(
     "reports the bytes it read, and a digest of exactly those bytes",
     async () => {
