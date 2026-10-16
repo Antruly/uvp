@@ -58,7 +58,7 @@
       },
       {
         "name": "uvp:lockfile-sha512",
-        "value": "3bd2cc2e81af14f40cd6ff394de1f955857df31121cad0412adb0bf90b644b1c0cd730069e86c9df795bf68e29faf1b06f5d2b596eab56410920b6b49a8e06e8"
+        "value": "0ee0b368278ed5ccef1f229f34f10a309aff6fe88eaa713e86b68f792eff068a1a8151778b81565437eaa1f2ab788d0e63e89c4d077db2738638a70a0141784a"
       },
       {
         "name": "uvp:closure",
@@ -124,23 +124,23 @@
       ]
     },
     {
-      "bom-ref": "canonicalize@3.0.0",
+      "bom-ref": "canonicalize@5.1.0",
       "type": "library",
       "name": "canonicalize",
-      "version": "3.0.0",
+      "version": "5.1.0",
       "scope": "required",
-      "purl": "pkg:npm/canonicalize@3.0.0",
+      "purl": "pkg:npm/canonicalize@5.1.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmmirror.com/canonicalize/-/canonicalize-3.0.0.tgz"
+          "url": "https://registry.npmjs.org/canonicalize/-/canonicalize-5.1.0.tgz"
         }
       ],
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "c982df1f20cc21747246ab0a0512d7d36deb8852e95d8d9839f76da8a5d9459cbdaac7ce27d53ee05f5864becc1332f9fb388ddb1da7941bd8fd5a22dc40658c"
+          "content": "6da6fdf9679f6658ea43c8d3d2a4705664f2cc0514eb72bded02100f76a0ca7201adbeac6b9336780cbc1eff0ade9e15f7e38d55864ab46625e0383eff91ae9b"
         }
       ],
       "licenses": [
@@ -185,7 +185,7 @@
       "ref": "uvp-agents@0.1.0",
       "dependsOn": [
         "@modelcontextprotocol/server@2.3.1",
-        "canonicalize@3.0.0",
+        "canonicalize@5.1.0",
         "zod@4.4.3"
       ]
     },
@@ -203,7 +203,7 @@
       ]
     },
     {
-      "ref": "canonicalize@3.0.0",
+      "ref": "canonicalize@5.1.0",
       "dependsOn": []
     },
     {
@@ -211,5 +211,5 @@
       "dependsOn": []
     }
   ],
-  "serialNumber": "urn:uuid:56591366-f05c-583e-97fe-7b0358817a50"
+  "serialNumber": "urn:uuid:6bb72067-242b-5b76-b9b4-4d5358f39ac3"
 }
