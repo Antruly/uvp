@@ -55,6 +55,21 @@ const resolveOxlint = () => {
 
 const OXLINT = resolveOxlint();
 
+/**
+ * Start oxlint, through the Node already running this script.
+ *
+ * `OXLINT` is `node_modules/oxlint/bin/oxlint`, which is a JavaScript file behind
+ * a `#!/usr/bin/env node` line. Handing that path to `spawnSync` asks the host to
+ * start it as an image, and only a POSIX host reads a shebang: on Windows libuv's
+ * `search_path` tries the literal name **only when it has an extension**, so a
+ * name without one is searched as `NAME.com` and then `NAME.exe`, and the spawn
+ * fails with `ENOENT` for a file that is sitting right there. Node's own layer
+ * does not make up the difference — it consults `ComSpec` only when `options.shell`
+ * is set, and this call passes no shell. `scripts/run-tests.mjs` starts Vitest the
+ * same way, which is why the Windows lane can run either of them.
+ */
+const runOxlint = (args, options) => spawnSync(process.execPath, [OXLINT, ...args], options);
+
 /** How many entries of a listing to print before saying how many were left. */
 const LISTING_LIMIT = 8;
 
@@ -181,8 +196,8 @@ const processSnapshot = () => {
   return found.length === 0 ? ["  no build process was running in this repository"] : found;
 };
 
-const version = (binary, args) => {
-  const result = spawnSync(binary, args, { encoding: "utf8" });
+/** The first line of what a finished run reported, or why it could not run. */
+const versionOf = (result) => {
   if (result.error) return `unavailable (${result.error.message})`;
   return (result.stdout ?? result.stderr ?? "").trim().split("\n")[0] || "no version reported";
 };
@@ -197,10 +212,13 @@ const namedOpenFailures = (output) => {
 };
 
 const args = process.argv.slice(2);
-const run = spawnSync(OXLINT, args, { cwd: REPO_ROOT, encoding: "utf8" });
+const run = runOxlint(args, { cwd: REPO_ROOT, encoding: "utf8" });
 if (run.error) {
-  console.error(`Cannot run ${OXLINT}: ${run.error.message}`);
-  console.error("Install first: npm ci");
+  // Resolution is the step that fails when the dependency is absent, and it says
+  // `Install first: npm ci` where that is the answer. A spawn failure here is a
+  // different thing — the entry was found and could not be started — so this
+  // reports what the spawn actually said rather than guessing at a reinstall.
+  console.error(`Cannot run ${OXLINT} through ${process.execPath}: ${run.error.message}`);
   process.exit(2);
 }
 process.stdout.write(run.stdout ?? "");
@@ -216,7 +234,7 @@ console.error(
     `  argv:    ${args.length === 0 ? "(no arguments)" : args.join(" ")}`,
     `  cwd:     ${REPO_ROOT}`,
     `  when:    ${new Date().toISOString()}`,
-    `  oxlint:  ${version(OXLINT, ["--version"])}`,
+    `  oxlint:  ${versionOf(runOxlint(["--version"], { encoding: "utf8" }))}`,
     `  node:    ${process.version}`,
     describeLine(DIST_DIR),
     named.length === 0
