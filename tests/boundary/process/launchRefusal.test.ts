@@ -1,5 +1,13 @@
 import { execFile } from "node:child_process";
-import { chmodSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -8,6 +16,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { EXIT_NO } from "../../../src/cli/exitCodes.js";
 import { parseUvpError } from "../../../src/domain/errors.js";
+import { isWindows } from "../../../src/toolchains/host.js";
 import { freePort } from "../../support/ports.js";
 
 /**
@@ -67,6 +76,8 @@ const UNBUILT = join(SCRATCH, "unbuilt");
 const NOT_EXECUTABLE = join(SCRATCH, "not-executable");
 /** A workspace whose binary is there and runnable — the positive control. */
 const LAUNCHABLE = join(SCRATCH, "launchable");
+/** A workspace whose binary is runnable, and held open for writing. */
+const HELD_OPEN = join(SCRATCH, "held-open");
 
 /**
  * A workspace as uvp recognises one, minus the build.
@@ -100,6 +111,26 @@ writeWorkspace(LAUNCHABLE, "svc");
 // reports is the process that is actually running, and nothing outlives it.
 writeFileSync(join(LAUNCHABLE, "build", "svc"), "#!/bin/sh\nexec sleep 60\n");
 chmodSync(join(LAUNCHABLE, "build", "svc"), 0o755);
+
+// The same program, in a workspace whose binary the lane itself holds open for
+// writing during the invocation. `r+` rather than `w`: the file has to stay the
+// program it is, and a read-write handle is what the kernel counts.
+writeWorkspace(HELD_OPEN, "svc");
+writeFileSync(join(HELD_OPEN, "build", "svc"), "#!/bin/sh\nexec sleep 60\n");
+chmodSync(join(HELD_OPEN, "build", "svc"), 0o755);
+
+/**
+ * `title`, on the host that cannot check it.
+ *
+ * `ETXTBSY` is a POSIX refusal — `execve` declining a file another process holds
+ * open for writing — and Windows' `CreateProcess` has no such rule, so the same
+ * workspace launches there and the assertion has nothing to be true of. The test
+ * says so in its own title rather than being quietly absent from the list.
+ */
+const named = (title: string): string =>
+  isWindows
+    ? `${title} — skipped: Windows has no ETXTBSY, and a write handle does not stop CreateProcess`
+    : title;
 
 /** Whether the operating system still knows this pid. No signal is delivered. */
 const aliveInTheOs = (pid: number): boolean => {
@@ -206,6 +237,45 @@ describe("a launch that never happened", () => {
     expect(error.code).toBe("launch_failed");
     expect(error.message).toContain(join(NOT_EXECUTABLE, "build", "svc"));
   });
+
+  it.skipIf(isWindows)(
+    named("reports a binary the kernel refuses because it is open for writing"),
+    async () => {
+      // The third way a launch is refused, and the one that arrived in CI as a
+      // bare `Error`: a file some process holds open for writing cannot be
+      // `execve`d, and Node reports *that* errno by throwing from `spawn` rather
+      // than by emitting `error` — so the throw happened before the supervisor had
+      // a handle to reject through, and it escaped `WorkspaceService.run` with no
+      // code, no remedy, and no path (the message is `spawn ETXTBSY`; the errno is
+      // the whole of it). See #33.
+      //
+      // No race is needed to reach it, which is why this refusal is asserted
+      // rather than waited for: holding the handle open *is* the precondition. The
+      // control is in the same test — the same workspace, the same binary, the
+      // handle closed — so the refusal is demonstrably about the write handle and
+      // not about the workspace.
+      const binary = join(HELD_OPEN, "build", "svc");
+      const held = openSync(binary, "r+");
+      try {
+        const refusal = await invoke(["run", HELD_OPEN, "--json"]);
+        expect(refusal.exit).toBe(EXIT_NO);
+        expect(refusal.stdout.trim()).toBe("");
+        const error = failureOf(refusal, "uvp run <held-open>");
+        expect(error.code).toBe("launch_failed");
+        // The path, which is the fact the host's own message could not carry.
+        expect(error.message).toContain(binary);
+      } finally {
+        closeSync(held);
+      }
+
+      const launched = await invoke(["run", HELD_OPEN, "--json"]);
+      expect(launched.exit).toBe(0);
+      expect(launched.stderr.trim()).toBe("");
+      const pid = Number((JSON.parse(launched.stdout) as { pid?: unknown }).pid);
+      expect(Number.isInteger(pid) && pid > 0, `no pid in ${launched.stdout}`).toBe(true);
+      process.kill(pid, "SIGKILL");
+    },
+  );
 
   it("refuses immediately with --port, rather than spending the readiness budget", async () => {
     // The distinction this lane exists for. When the fork fails there is nothing
