@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ import { sha256 } from "../../src/domain/identity.js";
 import { toUvpError } from "../../src/domain/errors.js";
 import { NativeProbeRunner } from "../../src/toolchains/native/NativeProbeRunner.js";
 import { freePort } from "../support/ports.js";
+import { removeTree } from "../support/temporaryTree.js";
 import {
   createFakeToolchain,
   createProviderWithoutLibuvcpp,
@@ -249,7 +250,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fixture?.stop();
-  for (const root of temporaryRoots) await rm(root, { recursive: true, force: true });
+  for (const root of temporaryRoots) await removeTree(root);
   temporaryRoots = [];
 });
 

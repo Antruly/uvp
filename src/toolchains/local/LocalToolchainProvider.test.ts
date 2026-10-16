@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { toUvpError, type UvpError } from "../../domain/errors.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
+import { removeTree } from "../../../tests/support/temporaryTree.js";
 import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
 
 /**
@@ -172,14 +173,14 @@ beforeAll(async () => {
   process.env["UVCPP_ROOT"] = installPrefix;
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (savedPath === undefined) delete process.env["PATH"];
   else process.env["PATH"] = savedPath;
   if (savedRoot === undefined) delete process.env["UVCPP_ROOT"];
   else process.env["UVCPP_ROOT"] = savedRoot;
   if (savedNodeOptions === undefined) delete process.env["NODE_OPTIONS"];
   else process.env["NODE_OPTIONS"] = savedNodeOptions;
-  rmSync(root, { recursive: true, force: true });
+  await removeTree(root);
 });
 
 const provider = new LocalToolchainProvider();

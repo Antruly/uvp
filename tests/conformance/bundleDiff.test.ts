@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import type { ToolContract } from "../../src/contracts/toolContractTypes.js";
 import { toUvpError } from "../../src/domain/errors.js";
 import { sha256 } from "../../src/domain/identity.js";
 import { freePort } from "../support/ports.js";
+import { removeTree } from "../support/temporaryTree.js";
 import { createFakeToolchain, writeFakeService } from "./fakeToolchain.js";
 
 /**
@@ -183,7 +184,7 @@ beforeAll(async () => {
 }, TIMEOUT);
 
 afterAll(async () => {
-  await rm(root, { recursive: true, force: true });
+  await removeTree(root);
 });
 
 describe("two passes of one service", () => {

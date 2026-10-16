@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import type { BuildRequest } from "../../application/ToolchainProvider.js";
 import { toUvpError } from "../../domain/errors.js";
 import type { UvpError } from "../../domain/errors.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
+import { removeTree } from "../../../tests/support/temporaryTree.js";
 import { CONFIG_HEADER_RELATIVE_PATHS } from "../libuvcppConfig.js";
 import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { ContainerToolchainProvider, RUNTIME_CANDIDATES } from "./ContainerToolchainProvider.js";
@@ -109,12 +110,12 @@ beforeAll(async () => {
   process.env["PATH"] = [bin, savedPath ?? ""].join(delimiter);
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (savedPath === undefined) delete process.env["PATH"];
   else process.env["PATH"] = savedPath;
   if (savedNodeOptions === undefined) delete process.env["NODE_OPTIONS"];
   else process.env["NODE_OPTIONS"] = savedNodeOptions;
-  rmSync(root, { recursive: true, force: true });
+  await removeTree(root);
 });
 
 /** The command line a recorded call amounts to, in the form a caller reads. */

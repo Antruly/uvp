@@ -12,6 +12,7 @@ import { runContract } from "../../src/contracts/projectToolContracts.js";
 import { toUvpError, type UvpError } from "../../src/domain/errors.js";
 import { isWindows } from "../../src/toolchains/host.js";
 import { installFakeExecutable } from "../support/fakeExecutable.js";
+import { removeTree } from "../support/temporaryTree.js";
 
 /**
  * What an interrupted `uvp_run` is allowed to say.
@@ -92,7 +93,7 @@ afterAll(async () => {
   // Whatever the tests left: a run that was cancelled mid-wait is stopped by the
   // call itself, and this is the belt for the one that got as far as a result.
   await services.workspace.stop({ all: true, graceMs: 3_000, force: true });
-  await rm(workspace, { recursive: true, force: true });
+  await removeTree(workspace);
 });
 
 /** The failure a call reported, or `undefined` if it answered instead. */
