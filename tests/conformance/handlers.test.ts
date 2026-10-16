@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import type {
   NativeProbeAvailability,
   NativeWebSocketProbe,
 } from "../../src/application/NativeWebSocketProbe.js";
+import type { ToolchainProvider } from "../../src/application/ToolchainProvider.js";
 import { createToolHandlers, handlerFor } from "../../src/composition/toolHandlers.js";
 import { createUvpServices } from "../../src/composition/uvpServices.js";
 import { TOOL_CONTRACTS, toolContract } from "../../src/contracts/toolContracts.js";
@@ -2368,4 +2369,254 @@ describe("the dispatch table", () => {
       expect(failure.remediation.action).toContain("uvp_verify");
     }
   });
+});
+
+/**
+ * Where a build happens, asked at the boundary that decides it.
+ *
+ * `src/application/toolchainSelection.test.ts` covers the rule itself. This
+ * block covers the wiring: that the handler reads the manifest, asks the service
+ * graph for the provider the rule named, reports *that* provider's identity, and
+ * carries the limitations that come with it. A rule that is correct while
+ * nothing calls it is the shape of bug this lane exists to catch — the selection
+ * would be right and the build would still run on this host.
+ *
+ * The container provider here is a scripted fixture, not a container. It
+ * establishes the boundary — which image was asked for, and whether one was
+ * asked for at all — and nothing about what a real image's compilers do.
+ * `ContainerToolchainProvider.test.ts` and the `toolchain` lane cover the real
+ * one.
+ */
+
+/** A provider that answers as a container image would, without starting one. */
+const containerFixture = (image: string): ToolchainProvider => ({
+  ...createFakeToolchain({ id: "container", version: image }),
+  identity: () => ({ id: "container", platform: "container", version: image }),
+});
+
+/**
+ * Call a tool against a graph whose container toolchain is a fixture.
+ *
+ * `images` is the point of returning it: the wiring question is not only "which
+ * provider answered" but "was a container started at all". A selection that
+ * quietly fell back to this host would still answer with a build result, and the
+ * result alone would not say which of the two happened.
+ */
+const callWithContainers = async (
+  name: string,
+  input: unknown,
+  images: string[],
+): Promise<Record<string, unknown>> => {
+  const services = createUvpServices({
+    providers: [createFakeToolchain()],
+    now: FROZEN_CLOCK,
+    containerToolchain: (image) => {
+      images.push(image);
+      return containerFixture(image);
+    },
+  });
+  return await handlerFor(createToolHandlers(services), name)(input, { signal: harness.signal });
+};
+
+/** The refusal a call projects to at the adapter boundary. */
+const refusalOf = async (run: () => Promise<unknown>): Promise<string> => {
+  try {
+    await run();
+  } catch (cause) {
+    return toUvpError(cause).code;
+  }
+  throw new Error("the call was expected to refuse and it answered");
+};
+
+/**
+ * A workspace created by the tool, then given a `toolchain` field.
+ *
+ * Written over the manifest the generator produced rather than assembled from
+ * nothing, so the build below reads a file uvp itself wrote plus the one field
+ * under test.
+ */
+const declaringWorkspace = async (toolchain: unknown): Promise<string> => {
+  const root = await mkdtemp(join(tmpdir(), "uvp-toolchain-"));
+  temporaryRoots.push(root);
+  const path = join(root, "svc");
+  expectConforms(
+    "uvp_workspace_create",
+    await call("uvp_workspace_create", {
+      path,
+      name: "svc",
+      template: "hello-http",
+      features: [],
+      port: 8080,
+    }),
+  );
+  const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as Record<
+    string,
+    unknown
+  >;
+  await writeFile(join(path, "uvp.json"), JSON.stringify({ ...manifest, toolchain }));
+  return path;
+};
+
+describe("where a build happens", () => {
+  it(
+    "builds inside the image the workspace declared, and reports that provider",
+    async () => {
+      const images: string[] = [];
+      const path = await declaringWorkspace({
+        kind: "container",
+        image: "localhost/uvp-base:12",
+      });
+
+      const output = await callWithContainers("uvp_build", { path }, images);
+      expectConforms("uvp_build", output);
+
+      expect(images).toEqual(["localhost/uvp-base:12"]);
+      // The envelope's `provider` is the selected one. Reporting this host's
+      // compiler on a result the image produced would attribute the build to a
+      // toolchain that did not run it, which is the one thing that field exists
+      // to prevent.
+      expect(output["provider"]).toMatchObject({
+        id: "container",
+        version: "localhost/uvp-base:12",
+      });
+
+      const limitations = output["limitations"] as string[];
+      expect(limitations.some((line) => line.includes("localhost/uvp-base:12"))).toBe(true);
+      // The limitation a caller acts on: the artifacts are real and are linked
+      // against a library path that exists only inside the image.
+      expect(limitations.some((line) => line.includes("fail to start on this host"))).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "builds on this host when the call refuses the image its workspace asked for",
+    async () => {
+      const images: string[] = [];
+      const path = await declaringWorkspace({
+        kind: "container",
+        image: "localhost/uvp-base:12",
+      });
+
+      const output = await callWithContainers("uvp_build", { path, toolchain: "local" }, images);
+      expectConforms("uvp_build", output);
+
+      expect(images).toEqual([]);
+      expect(output["provider"]).toMatchObject({ id: "fake" });
+      const limitations = output["limitations"] as string[];
+      expect(limitations.some((line) => line.includes("uvp-base:12"))).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a call that demands a container no workspace named an image for",
+    async () => {
+      // A flag cannot designate an image: if it could, the image a build ran in
+      // would be chosen by the caller of the moment rather than by the file the
+      // workspace ships.
+      const images: string[] = [];
+      expect(
+        await refusalOf(() =>
+          callWithContainers(
+            "uvp_build",
+            { path: harness.workspace, toolchain: "container" },
+            images,
+          ),
+        ),
+      ).toBe("missing_requirement");
+      expect(images).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a declaration it could not read rather than building on this host",
+    async () => {
+      // The three-way distinction this repository keeps: the file asked for
+      // something and the something is unreadable, so the answer is a refusal
+      // rather than the default. Building here would be the opposite of what the
+      // workspace asked for, presented as a successful build.
+      const images: string[] = [];
+      const path = await declaringWorkspace({ kind: "container" });
+      expect(await refusalOf(() => callWithContainers("uvp_build", { path }, images))).toBe(
+        "invalid_request",
+      );
+      expect(images).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses to verify a workspace it would build inside a container",
+    async () => {
+      // A pass builds and then runs what it built, and the second half cannot be
+      // honoured from here. Refused before the build, because "the service never
+      // came up" would be a verdict about a service and this is not one.
+      const path = await declaringWorkspace({
+        kind: "container",
+        image: "localhost/uvp-base:12",
+      });
+      const images: string[] = [];
+      const port = await freePort();
+      try {
+        await callWithContainers(
+          "uvp_verify",
+          {
+            path,
+            run: { port, timeout_ms: 15_000 },
+            requests: [{ name: "hello", method: "GET", path: "/hello", assertions: [] }],
+            goal: "the declared service answers",
+          },
+          images,
+        );
+        expect.unreachable("uvp_verify answered for a workspace it would build in a container");
+      } catch (cause) {
+        const failure = toUvpError(cause);
+        expect(failure.code).toBe("unsupported_toolchain");
+        // The escape has to be in the remedy, because a refusal whose way out is
+        // not stated is a refusal a caller works around by guessing.
+        expect(failure.remediation.action).toContain("local");
+      }
+      expect(images).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "verifies on this host when the call takes the escape it was offered",
+    async () => {
+      const path = await declaringWorkspace({
+        kind: "container",
+        image: "localhost/uvp-base:12",
+      });
+      const port = await freePort();
+      await writeFakeBinary(path, "svc", fixtureBinaryScript(port));
+
+      const images: string[] = [];
+      const output = await callWithContainers(
+        "uvp_verify",
+        {
+          path,
+          toolchain: "local",
+          run: { port, ready_path: "/healthz", timeout_ms: 15_000 },
+          requests: [
+            {
+              name: "hello",
+              method: "GET",
+              path: "/hello",
+              assertions: [{ kind: "status_equals", expected: 200 }],
+            },
+          ],
+        },
+        images,
+      );
+      expectConforms("uvp_verify", output);
+      expect(images).toEqual([]);
+      // The pass says which toolchain it used, so nothing about it claims to be
+      // what the manifest asked for.
+      expect(output["provider"]).toMatchObject({ id: "fake" });
+    },
+    TIMEOUT,
+  );
 });

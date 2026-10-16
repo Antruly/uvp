@@ -161,6 +161,32 @@ edits, and builds again. `phase` is `configure`, `compile`, or `link`, and the
 distinction is worth having — a configure failure is a missing libuvcpp, a link
 failure is a missing module.
 
+### Where the build happens
+
+A workspace can pin the toolchain it is built with, in its `uvp.json`:
+
+```json
+{ "toolchain": { "kind": "container", "image": "localhost/uvp-base:12" } }
+```
+
+`uvp build` then runs inside that image, which **starts a container on this
+host**. The image has to be present already — uvp never pulls one — and the
+workspace is mounted at its own absolute path, so the paths in the diagnostics
+and the artifact list are the paths you can open. `--toolchain` never names an
+image; it only chooses a side:
+
+```bash
+uvp build ./svc --toolchain container   # insist on one the workspace named
+uvp build ./svc --toolchain local       # refuse the one it named
+```
+
+`--toolchain container` fails with `missing_requirement` when `uvp.json` names
+no image, and a `toolchain` field that cannot be read is `invalid_request`
+rather than a build on this host. `uvp verify` refuses a container-declared
+workspace with `unsupported_toolchain` before compiling anything — a pass runs
+what it builds, and a binary built in an image carries an in-image `RUNPATH` —
+so checking one on this host means `uvp verify ./svc --toolchain local`.
+
 ## `uvp run` and `uvp stop`
 
 ```bash

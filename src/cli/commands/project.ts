@@ -13,6 +13,7 @@ import { EXIT_NO, EXIT_WRONG } from "../exitCodes.js";
 import { parseAssertionList } from "../assertionSyntax.js";
 import type { AssertionInput } from "../assertionSyntax.js";
 import { bool, str } from "../readOutput.js";
+import { TOOLCHAIN_KINDS, isToolchainKind } from "../../domain/toolchain.js";
 
 /**
  * The build, run, stop, and verify commands.
@@ -31,6 +32,26 @@ import { bool, str } from "../readOutput.js";
 
 const buildType = (parsed: ParsedArgv): string | undefined => asString(parsed, "build-type");
 const generator = (parsed: ParsedArgv): string | undefined => asString(parsed, "generator");
+
+/**
+ * `--toolchain`, checked here rather than by the contract.
+ *
+ * The contract's refusal would name `toolchain` as a field of a JSON object the
+ * caller never typed. It is the same reason `--http-version` is checked in this
+ * file: a flag's error should be about the flag. The values come from the shared
+ * vocabulary rather than a second literal list, so a kind added there cannot be
+ * one this flag refuses to pass.
+ */
+const toolchainKind = (parsed: ParsedArgv): string | undefined => {
+  const kind = asString(parsed, "toolchain");
+  if (kind === undefined) return undefined;
+  if (!isToolchainKind(kind)) {
+    flagError(
+      `--toolchain ${kind} is not a toolchain uvp has. Use ${TOOLCHAIN_KINDS.join(" or ")}.`,
+    );
+  }
+  return kind;
+};
 
 /**
  * `--tls` / `--no-tls` for a verification pass.
@@ -135,10 +156,18 @@ export const buildCommand: CommandSpec = {
   tool: "uvp_build",
   summary: "Configure and compile a workspace with CMake.",
   usage:
-    "uvp build PATH [--build-dir PATH] [--build-type TYPE] [--generator NAME] [--clean] [--json]",
+    "uvp build PATH [--build-dir PATH] [--build-type TYPE] [--generator NAME] [--toolchain KIND] [--clean] [--json]",
   positionals: [{ name: "PATH", description: "Workspace directory." }],
   flags: [
     ...sharedBuildFlags,
+    {
+      name: "toolchain",
+      type: "string",
+      value: "KIND",
+      description:
+        "Where to build: local or container. Defaults to what uvp.json declares, and to this host " +
+        "when it declares nothing. The image itself is named in uvp.json, never here.",
+    },
     { name: "target", type: "string", value: "NAME", description: "Build one target." },
     { name: "clean", type: "boolean", description: "Discard the build directory first." },
     { name: "jobs", type: "number", value: "N", description: "Parallel compile jobs." },
@@ -165,6 +194,7 @@ export const buildCommand: CommandSpec = {
       ...optional("build_dir", asString(parsed, "build-dir")),
       ...optional("build_type", buildType(parsed)),
       ...optional("generator", generator(parsed)),
+      ...optional("toolchain", toolchainKind(parsed)),
       ...optional("target", asString(parsed, "target")),
       ...optional("jobs", asNumber(parsed, "jobs")),
       ...optional("timeout_ms", asNumber(parsed, "timeout")),
@@ -315,7 +345,7 @@ export const verifyCommand: CommandSpec = {
   usage:
     "uvp verify PATH --port PORT --request METHOD PATH [--assert ASSERTION]… [--json]\n" +
     "           [--build-type TYPE] [--generator NAME] [--ready-path PATH] [--timeout MS]\n" +
-    "           [--keep-running] [--goal TEXT] [--tls] [--no-tls]",
+    "           [--keep-running] [--goal TEXT] [--toolchain KIND] [--tls] [--no-tls]",
   positionals: [{ name: "PATH", description: "Workspace directory." }],
   flags: [
     ...sharedBuildFlags.slice(1),
@@ -381,6 +411,15 @@ export const verifyCommand: CommandSpec = {
       value: "TEXT",
       description: "What this pass is meant to establish.",
     },
+    {
+      name: "toolchain",
+      type: "string",
+      value: "KIND",
+      description:
+        "Where to build. Defaults to what uvp.json declares. `local` checks a container-declared " +
+        "workspace with this host's compilers; a pass cannot use a container, because it runs " +
+        "what it builds.",
+    },
     verifyTlsFlag,
   ],
   notes: [
@@ -437,6 +476,7 @@ export const verifyCommand: CommandSpec = {
       })),
       ...optional("keep_running", asBoolean(parsed, "keep-running")),
       ...optional("goal", asString(parsed, "goal")),
+      ...optional("toolchain", toolchainKind(parsed)),
       ...optional("verify_tls", asBoolean(parsed, "tls")),
     };
   },

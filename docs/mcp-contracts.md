@@ -75,6 +75,24 @@ that `uvp_doctor` found. A compile failure is a normal result carrying
 phase-tagged diagnostics, not an error — an agent can read the diagnostics and
 try again. `untrusted` because compiler output is the compiler's words, not uvp's.
 
+A workspace may declare where it is built, in its `uvp.json`:
+
+```json
+{ "toolchain": { "kind": "container", "image": "localhost/uvp-base:12" } }
+```
+
+That build runs inside the image, so it starts a container on this host — which
+is why it is the workspace's file that says so and not an argument. `toolchain`
+on the call requires a container or refuses one, and never names an image: a
+`"container"` from a caller fails with `missing_requirement` when no workspace
+named one, and a `"local"` checks a container-declared workspace with this host's
+compilers. The result's `provider` is the toolchain that actually ran, so a
+container build reports the image, and its `limitations` carry the two things
+that follow: the artifacts are linked against the image's libuvcpp at an in-image
+path and may not start here, and anything the build wrote outside the workspace
+was discarded with the container. `uvp_verify` refuses a container-declared
+workspace with `unsupported_toolchain`, because a pass runs what it builds.
+
 ### Runtime
 
 **`uvp_run`** — Run a built service.
@@ -214,6 +232,14 @@ one — so the default is visible rather than silent. With `verify_tls: true` a
 rejected chain ends the exchange like any other request that could not complete:
 it lands in `unverified` with the reason code, the exchange reports no `status`,
 and the pass is `unknown` rather than `failed`, because nothing was evaluated.
+
+It takes the same `toolchain` as `uvp_build`, and answers it differently, because
+a pass runs what it builds. A workspace that declares a container toolchain is
+refused with `unsupported_toolchain` before anything is compiled — a binary built
+inside an image carries an in-image RUNPATH and does not start here, and "the
+service never came up" would be a verdict about a service. Passing
+`toolchain: "local"` is the way past it, and the bundle then reports `local` in
+its provider rather than the image.
 
 **`uvp_bundle_diff`** — Compare two verification reports.
 Takes two paths to reports `uvp_verify` wrote and says what moved between them:

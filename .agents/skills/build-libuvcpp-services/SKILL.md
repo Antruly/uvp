@@ -101,6 +101,35 @@ Read `unknowns` and `limitations` on every result before concluding anything.
 `limitations` is where truncation and timeouts are declared; a `verified` status
 with a truncated body in `limitations` is a statement about a prefix.
 
+## Building inside a container image
+
+A workspace can pin the toolchain it is built with, in its `uvp.json`:
+
+```json
+{ "toolchain": { "kind": "container", "image": "localhost/uvp-base:12" } }
+```
+
+`uvp_build` then runs inside that image, which **starts a container on the
+machine**. Two consequences you have to plan around, both reported in the
+result's `limitations`:
+
+- The artifact is linked against the image's libuvcpp at an in-image path
+  (`RUNPATH=/opt/libuvcpp/lib`). `uvp_run` on this host fails with
+  `error while loading shared libraries: libuvcpp.so` — that is the limitation,
+  not a broken build. Run it inside the image.
+- Only the workspace is mounted, at its own absolute path. Anything the build
+  wrote elsewhere was discarded with the container.
+
+The image must be present already: uvp never pulls one, so an image that is not
+there is a refusal rather than a download. The image reference is the only place
+a container is named — `uvp_build`'s `toolchain` takes `"container"` or
+`"local"` and never an image. `"container"` requires one the workspace named;
+`"local"` refuses one the workspace named, which is how you check a
+container-declared workspace with this host's compilers. `uvp_verify` refuses a
+container-declared workspace with `unsupported_toolchain` before compiling
+anything, because a pass runs what it builds; pass `toolchain: "local"` to
+verify on this host.
+
 ## Ports
 
 `uvp_run` and `uvp_verify` need a port that is free. If you are starting several

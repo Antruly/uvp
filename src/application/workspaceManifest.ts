@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { isUvpFeature, type UvpFeature } from "../domain/features.js";
+import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js";
 
 /**
  * The `uvp.json` a workspace carries.
@@ -36,6 +37,20 @@ export interface WorkspaceManifest {
   /** Feature names that were present but not recognised, kept so they can be reported. */
   readonly unrecognisedFeatures: readonly string[];
   readonly requiredLibuvcpp?: string;
+  /**
+   * The toolchain this workspace asks to be built with.
+   *
+   * This is the one field of a `uvp.json` that is an instruction rather than an
+   * observation, and it is why it is reported the way it is: every other field
+   * here degrades to "unknown" when it cannot be read, but a toolchain
+   * declaration that degrades to "local" is a build that happens on this host
+   * when the workspace said it must not. `toolchainProblem` is what keeps that
+   * from being silent — a caller that finds it must refuse rather than fall
+   * back, and `selectToolchain` is where that refusal is written once.
+   */
+  readonly toolchain?: ToolchainSelection;
+  /** Why `toolchain` is absent although the file carried a `toolchain` field. */
+  readonly toolchainProblem?: string;
   readonly path: string;
 }
 
@@ -44,6 +59,43 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined;
+
+/**
+ * Read the `toolchain` field, or say why it could not be read.
+ *
+ * Never both, and never neither: a declaration that is present must produce
+ * either a selection or a reason. The two shapes that would otherwise slip
+ * through are a container with no image (nothing to build in) and a local
+ * toolchain beside an image (a declaration whose halves disagree), and both are
+ * reported rather than resolved — picking the half that works is how a workspace
+ * ends up built somewhere it did not ask for.
+ */
+const readToolchain = (
+  value: unknown,
+): { readonly toolchain?: ToolchainSelection; readonly problem?: string } => {
+  if (value === undefined) return {};
+  if (!isRecord(value)) {
+    return { problem: "`toolchain` is present and is not an object." };
+  }
+  const kind = value["kind"];
+  if (!isToolchainKind(kind)) {
+    return {
+      problem: `\`toolchain.kind\` is ${JSON.stringify(kind)} rather than one of local, container.`,
+    };
+  }
+  const image = asString(value["image"]);
+  if (kind === "local") {
+    return image === undefined && !("image" in value)
+      ? { toolchain: { kind: "local" } }
+      : {
+          problem:
+            "`toolchain` asks for the local toolchain and names an image, which would be ignored.",
+        };
+  }
+  return image === undefined
+    ? { problem: "`toolchain` asks for a container toolchain and names no image." }
+    : { toolchain: { kind: "container", image } };
+};
 
 export const readWorkspaceManifest = async (
   root: string,
@@ -75,6 +127,7 @@ export const readWorkspaceManifest = async (
   const template = asString(parsed["template"]);
   const requiredLibuvcpp = asString(requirements["libuvcpp"]);
   const port = parsed["port"];
+  const { toolchain, problem: toolchainProblem } = readToolchain(parsed["toolchain"]);
 
   return {
     name: asString(parsed["name"]) ?? "app",
@@ -89,6 +142,8 @@ export const readWorkspaceManifest = async (
     features,
     unrecognisedFeatures: unrecognised,
     ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),
+    ...(toolchain === undefined ? {} : { toolchain }),
+    ...(toolchainProblem === undefined ? {} : { toolchainProblem }),
     path: join(root, manifestName),
   };
 };

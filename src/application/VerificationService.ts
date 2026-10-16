@@ -21,6 +21,9 @@ import type { ToolTlsReport, WebService } from "./WebService.js";
 import type { WorkspaceService } from "./WorkspaceService.js";
 import type { SessionStore } from "./sessionStore.js";
 import { readWorkspaceManifest } from "./workspaceManifest.js";
+import { selectToolchain } from "./toolchainSelection.js";
+import type { ToolchainKind } from "../domain/toolchain.js";
+import { UvpFailure } from "../domain/errors.js";
 
 /**
  * The verification workflow.
@@ -80,6 +83,11 @@ export interface VerifyInput {
   readonly requests: readonly VerifyRequest[];
   readonly keep_running: boolean;
   readonly goal: string | undefined;
+  /**
+   * Where to build, when the call says. The workspace's manifest decides when it
+   * does not, through the one rule that answers this for every workflow.
+   */
+  readonly toolchain: ToolchainKind | undefined;
   /**
    * Whether the certificate on an HTTPS exchange has to verify.
    *
@@ -201,6 +209,32 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
   // that still builds — cleartext is then the only thing that could be on the
   // port, and saying so is more honest than a scheme uvp invented.
   const manifest = await readWorkspaceManifest(input.path);
+
+  // A pass builds a workspace and then starts what it built, and the second half
+  // cannot honour a container: the binary would be linked against the image's
+  // libuvcpp at an in-image path, so it does not start here. Refusing is the
+  // honest answer, and it is refused *before* the build rather than after it —
+  // "the service never came up" is a verdict about a service, and this is not
+  // one. Passing `toolchain: "local"` is how a caller says they know, and the
+  // bundle then says `local` in its provider, so nothing about the pass claims
+  // to be what the manifest asked for.
+  if (selectToolchain({ manifest, requested: input.toolchain }).kind === "container") {
+    const image =
+      manifest?.toolchain?.kind === "container" ? manifest.toolchain.image : "its image";
+    throw new UvpFailure({
+      code: "unsupported_toolchain",
+      message:
+        `This workspace declares the container toolchain ${image}, and a verification pass cannot ` +
+        "run what that build produces: a binary built inside an image carries an in-image " +
+        "RUNPATH and does not start on this host.",
+      remediation: {
+        action:
+          "Build with uvp_build and launch the binary inside the image, or pass " +
+          'toolchain: "local" to check this workspace with this host\'s own compilers.',
+      },
+      details: { declared: manifest?.toolchain ?? null },
+    });
+  }
 
   const buildResult = await context.workspace.build({
     path: input.path,

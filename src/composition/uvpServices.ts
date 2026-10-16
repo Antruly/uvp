@@ -4,7 +4,9 @@ import { WebService } from "../application/WebService.js";
 import { CaptureService } from "../application/CaptureService.js";
 import { DoctorService } from "../application/DoctorService.js";
 import { LocalToolchainProvider } from "../toolchains/local/LocalToolchainProvider.js";
+import { ContainerToolchainProvider } from "../toolchains/container/ContainerToolchainProvider.js";
 import { startSupervised } from "../toolchains/processRunner.js";
+import type { ToolchainSelection } from "../domain/toolchain.js";
 import { NativeProbeRunner } from "../toolchains/native/NativeProbeRunner.js";
 import { NativeHttp3ProbeRunner } from "../toolchains/native/NativeHttp3ProbeRunner.js";
 import type { NativeWebSocketProbe } from "../application/NativeWebSocketProbe.js";
@@ -29,6 +31,16 @@ export interface UvpServiceOptions {
   readonly now?: (() => Date) | undefined;
   /** Providers by id; the first is the default. Defaults to the local toolchain. */
   readonly providers?: readonly ToolchainProvider[] | undefined;
+  /**
+   * How a container toolchain is built, given the image a workspace named.
+   *
+   * Injected for the reason every collaborator here is: the lane that is about
+   * *which* toolchain a call selects is not about podman, and a lane that had to
+   * have a container runtime to ask that question would skip on this host rather
+   * than answer it. The lane that *is* about the real provider names this
+   * explicitly, so its coverage is a statement rather than an inference.
+   */
+  readonly containerToolchain?: ((image: string) => ToolchainProvider) | undefined;
   /**
    * The libuvcpp stack's WebSocket probe. Defaults to the supervised process.
    *
@@ -55,6 +67,27 @@ export interface UvpServices {
   readonly providers: readonly ToolchainProvider[];
   /** The provider whose identity stamps results and whose client builds. */
   readonly primary: ToolchainProvider;
+  /**
+   * The provider a selection names.
+   *
+   * `local` answers with `primary` rather than with a freshly constructed
+   * `LocalToolchainProvider`, which is what keeps a lane that hands this graph a
+   * fake toolchain able to stand in for the host. A container image gets a
+   * provider of its own, constructed once per image and kept: a provider holds
+   * the runtime it resolved, and re-resolving it per call would be a second
+   * answer to a question the first one already answered.
+   */
+  readonly toolchainFor: (selection: ToolchainSelection) => ToolchainProvider;
+  /**
+   * A build service bound to one provider.
+   *
+   * A service per provider rather than one service that takes a provider per
+   * call, because the port's rule is that a client is bound to its toolchain for
+   * its lifetime — `identity()` is stamped onto every result the service
+   * produces, and a client that could change hands mid-session would make that
+   * stamp a claim about the last call rather than about the build.
+   */
+  readonly workspaceFor: (provider: ToolchainProvider) => WorkspaceService;
   readonly workspace: WorkspaceService;
   readonly web: WebService;
   readonly capture: CaptureService;
@@ -70,14 +103,37 @@ export const createUvpServices = (options: UvpServiceOptions = {}): UvpServices 
   }
 
   const store = new SessionStore(now);
-  const client = primary.createClient();
+
+  const buildContainer =
+    options.containerToolchain ??
+    ((image: string): ToolchainProvider => new ContainerToolchainProvider({ image }));
+  const containers = new Map<string, ToolchainProvider>();
+  const toolchainFor = (selection: ToolchainSelection): ToolchainProvider => {
+    if (selection.kind === "local") return primary;
+    const existing = containers.get(selection.image);
+    if (existing !== undefined) return existing;
+    const created = buildContainer(selection.image);
+    containers.set(selection.image, created);
+    return created;
+  };
+
+  const workspaces = new Map<ToolchainProvider, WorkspaceService>();
+  const workspaceFor = (provider: ToolchainProvider): WorkspaceService => {
+    const existing = workspaces.get(provider);
+    if (existing !== undefined) return existing;
+    const created = new WorkspaceService(store, provider.createClient(), startSupervised, now);
+    workspaces.set(provider, created);
+    return created;
+  };
 
   return {
     now,
     store,
     providers,
     primary,
-    workspace: new WorkspaceService(store, client, startSupervised, now),
+    toolchainFor,
+    workspaceFor,
+    workspace: workspaceFor(primary),
     web: new WebService({
       store,
       now,

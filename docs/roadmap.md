@@ -80,11 +80,12 @@ the start: `inspectAvailability` separate from use, gaps per capability rather
 than all-or-nothing, and `ToolchainClient` apart from `ToolchainProvider` so an
 inspection-only provider stays implementable.
 
-|     |                                                                                              |
-| --- | -------------------------------------------------------------------------------------------- |
-| 🟡  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly       |
-| ⬜  | `remote-ssh/` — build and run on another machine, with the provider identity on every result |
-| ✅  | A provider conformance suite both of them must pass                                          |
+|     |                                                                                                                        |
+| --- | ---------------------------------------------------------------------------------------------------------------------- |
+| ✅  | `container/` — build inside a pinned image, reporting the host-filesystem gap honestly. See [below](#container-wiring) |
+| ⬜  | `uvp_doctor` reads the manifest's container toolchain, so a host with no runtime says so before a build                |
+| ⬜  | `remote-ssh/` — build and run on another machine, with the provider identity on every result                           |
+| ✅  | A provider conformance suite both of them must pass                                                                    |
 
 The conformance suite came first, and it is what the two providers below were
 written against. Two providers that pass the same suite are swappable; two that
@@ -129,22 +130,29 @@ reading `uvcpp_version.h` from the directory the config header was actually foun
 in; building with the workspace bind-mounted at the same absolute path; and
 creating the build directory before mounting it.
 
-**Not in, and not for want of code:** the provider is still not reachable from the
-CLI or the MCP surface. Nothing constructs it outside tests, so there is no
-`uvp build --toolchain container` and no tool contract declaring what starting a
-container would do to the machine. The three questions this section used to list
-are down to one:
+**In, since the wiring landed:** the three questions this section listed are
+answered, and [the section below](#container-wiring) says how. What a call may
+ask for, what a workspace may declare, and what each of the two surfaces does
+with it are settled, and `uvp build` on a workspace whose `uvp.json` names an
+image now starts that image on the host and reports the image's own identity.
 
-- **Authority.** Still open. Which flag or manifest key names the image, and
-  whether naming one is enough to make uvp start a container on the user's
-  behalf. The `effects` block of whatever contract carries this has to declare
-  it, and "runs a process on this host" is a different declaration from "contacts
-  a network endpoint".
-- **Verification.** Answered for the provider, and not by argument: a real podman
-  started a real image and real cmake compiled a generated workspace in it, and
-  the binary it produced was checked on the host. What remains unverified is the
-  _wiring_, which does not exist yet, and which still deserves the same treatment
-  once it does.
+**Not in:** `uvp_doctor` still reports only the host's toolchain. It takes no
+path and reads no manifest, so a host with no container runtime and no image is
+still described as ready — the gap shows up at the first `uvp build` rather than
+before it. That is the row below this one in the table.
+
+- **Authority.** Answered. The image is named by the workspace, in `uvp.json`'s
+  `toolchain` key, and by nothing else: a call may _require_ a container or
+  refuse one, but cannot designate an image. See
+  [below](#container-wiring) for why that split is the one that keeps the answer
+  in the file a workspace ships.
+- **Verification.** Answered for the provider and now for the wiring: a real
+  podman built a real generated workspace inside `localhost/uvp-conformance-image:local`
+  through the CLI, the result reported `container
+  localhost/uvp-conformance-image:local`, and the claim its `limitations` carry
+  was then checked on the artifact rather than asserted —
+  `RUNPATH=/opt/libuvcpp/lib`, `libuvcpp.so => not found`, and the binary refuses
+  to start.
 - **The build obligations.** Done. They ran, and the first run found a defect —
   see below.
 
@@ -174,10 +182,82 @@ are down to one:
   fixed by one: it is what "compiled against an image's library" means. It
   matters because `uvp build` reports artifacts, and an artifact that cannot be
   executed where it was written back to is a limitation a caller should be told.
+  Both halves are now reported on the result rather than prevented, and the three
+  lines above are what the first statement was checked against.
 
-Until the wiring lands, the honest description of `container/` is: implemented,
-conformant in all twelve ways when a runtime and an image are present and in the
-five that need neither when they are not, and reachable from nothing.
+The honest description of `container/` is now: implemented, conformant in all
+twelve ways when a runtime and an image are present and in the five that need
+neither when they are not, reachable from both surfaces, and unable to answer
+`uvp_doctor`.
+
+### Wiring `container/` into both surfaces {#container-wiring}
+
+Three questions had to be answered before the provider could be reachable, and
+only the first was a design question in the ordinary sense.
+
+**Who names the image.** The workspace, in `uvp.json`, and only the workspace.
+A call gets two words — `container` and `local` — and neither of them carries an
+image reference. `container` from a call is a _requirement_ ("build this in a
+container") and is refused with `missing_requirement` when no workspace named
+one; `local` is a _refusal_ ("not in a container, whatever the workspace says")
+and is how a caller checks a container-declared workspace with this host's
+compilers. One word per direction, and no way to spell an image on a command
+line, because an image chosen by the caller of the moment is an image chosen by
+whoever ran the command rather than by the file the workspace ships.
+
+`--toolchain docker` is refused rather than ignored. `docker` is a runtime, not
+a toolchain, and a validator that accepted it and fell back would be a flag that
+appears to work.
+
+**What an unreadable declaration means.** `readWorkspaceManifest` reports
+`toolchainProblem` instead of dropping the field, and the selection rule turns
+that into `invalid_request`. This is the one field of `uvp.json` that is an
+instruction rather than an observation, so it is the one field whose malformed
+value must not degrade to a default — the default here is "build on this host",
+which is the opposite of what a workspace that named an image asked for. The
+refusal is raised even when the call asked for `local`: a call cannot paper over
+a file it did not write.
+
+**What a verification pass does.** `uvp_verify` refuses with
+`unsupported_toolchain` and names `toolchain: "local"` as the way past it. A pass
+builds a workspace and then starts what it built, and the second half is exactly
+what a container build cannot deliver — the artifact carries an in-image RUNPATH.
+The refusal is raised _before_ the build, because "the service never came up" is a
+verdict about a service and this is not one. Passing the escape makes the bundle
+report `local` in its provider, so nothing about the pass claims to be what the
+manifest asked for.
+
+**No new effect was needed.** The build contract already declares
+`spawnsProcess`, and starting an image is starting a process; "contacts a
+registry" would be the different declaration the section above once worried
+about, and the provider does not do it — an image that is not present is a
+refusal, never a pull. The contract's own `description` says a container build
+starts a container, so the sentence a client reads without opening the schema
+carries it too.
+
+**What was deliberately not done.** The RUNPATH limitation is _reported_ on the
+result rather than prevented, because there is nothing to prevent: the artifact
+is correct where it was built, and a build that refused to produce it would be
+declining to do the thing it was asked. `uvp_doctor`'s container awareness is its
+own row rather than a corner of this one, because doctor takes no path today and
+giving it one changes what the tool is.
+
+**And one thing that needed nothing.** `uvp_run` was left alone, which was a
+decision rather than an omission, and it was wrong on the first guess and right
+on the second. A container-built artifact launched by hand _does_ fail here, and
+the failure is the dynamic loader's own:
+
+```
+run          run_fb9db8a7ad0341dfb13d28  pid 3742356
+ready        no  (still_running: no)
+stderr       …/svc: error while loading shared libraries: libuvcpp.so: cannot open shared object file: No such file or directory
+evidence     launch:partial
+```
+
+So `uvp_run` points at the same limitation `uvp_build` states, in the words of
+the thing that knows, and adding a second refusal here would replace a specific
+message with a general one. `uvp_verify` is the different case and is refused,
+because there the load failure would be read as a verdict about the service.
 
 ## Milestone 3 — depth
 

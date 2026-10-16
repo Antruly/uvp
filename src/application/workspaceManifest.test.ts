@@ -81,6 +81,47 @@ describe("the transport a workspace declares", () => {
     expect(await readWorkspaceManifest(root)).toBeUndefined();
   });
 
+  it("reads a container toolchain and the image it names", async () => {
+    const root = await writeWorkspace("hello-http", []);
+    await writeFile(
+      join(root, "uvp.json"),
+      JSON.stringify({
+        name: "svc",
+        toolchain: { kind: "container", image: "localhost/uvp-base:12" },
+      }),
+    );
+    const manifest = await readWorkspaceManifest(root);
+    expect(manifest?.toolchain).toEqual({ kind: "container", image: "localhost/uvp-base:12" });
+    expect(manifest?.toolchainProblem).toBeUndefined();
+  });
+
+  it("is not stated for a workspace that declares no toolchain", async () => {
+    // Absent, not `local`: the reader reports what the file says, and "the file
+    // does not say" is a different fact from "the file says this host". The
+    // default is applied once, by the selection rule, to both cases alike.
+    const manifest = await readWorkspaceManifest(await writeWorkspace("hello-http", []));
+    expect(manifest?.toolchain).toBeUndefined();
+    expect(manifest?.toolchainProblem).toBeUndefined();
+  });
+
+  it.each([
+    ["a container with no image", { kind: "container" }],
+    ["a kind it does not know", { kind: "docker", image: "x" }],
+    ["a local toolchain that also names an image", { kind: "local", image: "x" }],
+    ["a kind that is not a string", { kind: 7 }],
+    ["the bare string", "container"],
+  ])("reports %s as a problem rather than as a fallback", async (_label, toolchain) => {
+    // The one field of this file that is an instruction rather than an
+    // observation, so the one field whose malformed value must not degrade to a
+    // default: the default available here is "build on this host", which is the
+    // opposite of what a workspace that named an image asked for.
+    const root = await writeWorkspace("hello-http", []);
+    await writeFile(join(root, "uvp.json"), JSON.stringify({ name: "svc", toolchain }));
+    const manifest = await readWorkspaceManifest(root);
+    expect(manifest?.toolchain).toBeUndefined();
+    expect(manifest?.toolchainProblem).toBeTypeOf("string");
+  });
+
   it("drops a feature it does not recognise without losing the rest", async () => {
     // A feature name is a promise about the generated code, so an unknown one is
     // reported rather than mapped to the nearest known one — and a feature that

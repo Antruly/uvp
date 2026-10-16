@@ -1,7 +1,7 @@
 # uvp tool reference
 
 Generated from the tool contracts. 15 tools; catalog digest
-`9cb608ec065eaf152c0c5bc44f4af59bec7a3a2f9cf8ea05f3eee5b0ed076a12`.
+`79ff940ce1ba0acc5b89cc7748dcec33bb67658566d82f2864d7124a2755d79c`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -60,7 +60,7 @@ Example:
 
 ## `uvp_build` — Build a workspace
 
-Configure and build a uvp workspace with CMake, returning structured compiler diagnostics, phase timings, and the digests of the produced artifacts. Compiler output is reported as data: a failing build returns diagnostics, not an error.
+Configure and build a uvp workspace with CMake, returning structured compiler diagnostics, phase timings, and the digests of the produced artifacts. A workspace that declares a container toolchain in uvp.json is built inside that image, which starts a container on this host. Compiler output is reported as data: a failing build returns diagnostics, not an error.
 
 - **Kind:** build
 - **Effects:** readsFilesystem, writesFilesystem, spawnsProcess

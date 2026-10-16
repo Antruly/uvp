@@ -4,6 +4,7 @@ import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { UVP_FEATURES } from "../domain/features.js";
+import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 
 const workspaceIdSchema = z.string().regex(/^wsp_[0-9a-f]{22}$/u);
 const runIdSchema = z.string().regex(/^run_[0-9a-f]{22}$/u);
@@ -85,6 +86,21 @@ export const workspaceCreateContract = defineTool({
  * Build output is where most of uvp's evidence comes from. A build that fails
  * is a successful tool call: the diagnostics are the result. Only a failure to
  * run the toolchain at all is an error.
+ *
+ * ## Where the build happens
+ *
+ * A workspace whose `uvp.json` declares `{"toolchain": {"kind": "container",
+ * "image": "..."}}` is built inside that image, which starts a container on this
+ * host: the workspace is mounted at the same absolute path, the image's cmake
+ * compiles it, and the artifacts land back in the caller's build directory. The
+ * `spawnsProcess` effect below is what declares that — a container start is a
+ * process on this host, not a network endpoint, and uvp never pulls an image:
+ * one that is not present is reported as missing, with the runtime's own tooling
+ * named as the way to fetch it.
+ *
+ * The `toolchain` input can require a container and can refuse one. It cannot
+ * choose an image, because that is the one decision this tool deliberately
+ * leaves to a file inside the workspace — see `selectToolchain` for why.
  */
 export const buildContract = defineTool({
   name: "uvp_build",
@@ -92,12 +108,22 @@ export const buildContract = defineTool({
   description:
     "Configure and build a uvp workspace with CMake, returning structured compiler diagnostics, " +
     "phase timings, and the digests of the produced artifacts. " +
+    "A workspace that declares a container toolchain in uvp.json is built inside that image, " +
+    "which starts a container on this host. " +
     "Compiler output is reported as data: a failing build returns diagnostics, not an error.",
   kind: "build",
   inputSchema: z.object({
     path: z.string().min(1),
     build_dir: z.string().optional().describe("Defaults to <path>/build."),
     build_type: z.enum(["Debug", "RelWithDebInfo", "Release"]).default("Debug"),
+    toolchain: z
+      .enum(TOOLCHAIN_KINDS)
+      .optional()
+      .describe(
+        "Where to build. Defaults to what the workspace's uvp.json declares, and to this host " +
+          "when it declares nothing. `container` insists on the image uvp.json names and fails " +
+          "if it names none; `local` refuses a container the workspace asked for.",
+      ),
     generator: z.enum(["ninja", "unix-makefiles", "msbuild"]).optional(),
     target: z.string().optional(),
     clean: z.boolean().default(false),
@@ -423,6 +449,23 @@ export const verifyContract = defineTool({
     /** Keep the service running after the pass, for interactive follow-up. */
     keep_running: z.boolean().default(false),
     goal: z.string().optional(),
+    /**
+     * Where to build, when the workspace's own declaration is not what the
+     * caller wants. `local` is the only value that can do anything here: a pass
+     * builds a workspace and then starts what it built, so it refuses a
+     * container rather than pretending to honour one. It is declared with both
+     * kinds because a flag whose vocabulary is half a vocabulary is a flag
+     * callers have to guess at, and because `container` is exactly the value
+     * whose refusal this field exists to explain.
+     */
+    toolchain: z
+      .enum(TOOLCHAIN_KINDS)
+      .optional()
+      .describe(
+        "Where to build. Defaults to what the workspace's uvp.json declares. `local` checks a " +
+          "container-declared workspace with this host's compilers; `container` is refused, " +
+          "because a pass runs what it builds and a container-built binary does not start here.",
+      ),
     /**
      * Whether a certificate has to verify for the exchange to count.
      *

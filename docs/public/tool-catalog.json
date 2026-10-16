@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "9cb608ec065eaf152c0c5bc44f4af59bec7a3a2f9cf8ea05f3eee5b0ed076a12",
+  "digest": "79ff940ce1ba0acc5b89cc7748dcec33bb67658566d82f2864d7124a2755d79c",
   "tool_count": 15,
   "tools": [
     {
@@ -749,7 +749,7 @@
     {
       "name": "uvp_build",
       "title": "Build a workspace",
-      "description": "Configure and build a uvp workspace with CMake, returning structured compiler diagnostics, phase timings, and the digests of the produced artifacts. Compiler output is reported as data: a failing build returns diagnostics, not an error.",
+      "description": "Configure and build a uvp workspace with CMake, returning structured compiler diagnostics, phase timings, and the digests of the produced artifacts. A workspace that declares a container toolchain in uvp.json is built inside that image, which starts a container on this host. Compiler output is reported as data: a failing build returns diagnostics, not an error.",
       "kind": "build",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -770,6 +770,14 @@
               "Debug",
               "RelWithDebInfo",
               "Release"
+            ]
+          },
+          "toolchain": {
+            "description": "Where to build. Defaults to what the workspace's uvp.json declares, and to this host when it declares nothing. `container` insists on the image uvp.json names and fails if it names none; `local` refuses a container the workspace asked for.",
+            "type": "string",
+            "enum": [
+              "local",
+              "container"
             ]
           },
           "generator": {
@@ -5061,6 +5069,14 @@
           },
           "goal": {
             "type": "string"
+          },
+          "toolchain": {
+            "description": "Where to build. Defaults to what the workspace's uvp.json declares. `local` checks a container-declared workspace with this host's compilers; `container` is refused, because a pass runs what it builds and a container-built binary does not start here.",
+            "type": "string",
+            "enum": [
+              "local",
+              "container"
+            ]
           },
           "verify_tls": {
             "default": false,

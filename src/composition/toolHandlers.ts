@@ -30,6 +30,8 @@ import {
 } from "../contracts/webToolContracts.js";
 import { toolNames } from "../contracts/toolContracts.js";
 import { unevaluatedQuestion } from "../application/assertions.js";
+import { selectToolchain } from "../application/toolchainSelection.js";
+import { readWorkspaceManifest } from "../application/workspaceManifest.js";
 import { verify } from "../application/VerificationService.js";
 import { readSavedBundle, reportedSide } from "../application/bundleFile.js";
 import type { SavedBundle } from "../application/bundleFile.js";
@@ -181,6 +183,24 @@ const recordComparison = (
   });
 };
 
+/**
+ * What a build inside an image means for the artifact it produced.
+ *
+ * Said on every container build rather than only when something looks wrong,
+ * because nothing is wrong: the binary is exactly what that image's toolchain
+ * should produce. What it is not is runnable here, and a caller who learns that
+ * from a loader error rather than from this result learns it at the least useful
+ * moment — after a service they believe they built has failed to start. It is a
+ * limitation of the choice, not a defect in it, which is why it is phrased as
+ * one.
+ */
+const containerBuildLimitations = (image: string): readonly string[] => [
+  `This build ran inside ${image}. Its artifacts are linked against the libuvcpp that image ` +
+    "has, at a path that exists only inside it, so an artifact may fail to start on this host.",
+  `The workspace was mounted into ${image} at its own absolute path; anything the build wrote ` +
+    "elsewhere belonged to the container and was discarded with it.",
+];
+
 const recordBuild = (
   recorder: EvidenceRecorder,
   workspaceId: string,
@@ -293,12 +313,26 @@ export const createToolHandlers = (
     ),
 
     [buildContract.name]: handler(buildContract.inputSchema, async (input, recorder, context) => {
+      // Which toolchain, decided before anything is read from the workspace with
+      // it. The manifest is read here because this is the boundary that turns a
+      // path into a workspace, and the same file is what names the image — a
+      // second reading further down would be a second answer to "where does this
+      // build happen".
+      const selected = selectToolchain({
+        manifest: await readWorkspaceManifest(input.path),
+        requested: input.toolchain,
+      });
+      const provider = services.toolchainFor(selected);
+      const workspace = services.workspaceFor(provider);
+
       // Discover the install first and hand it to the toolchain. `uvp doctor`
       // reports which libuvcpp it found; a build that then let CMake search for
       // its own would be describing one library and compiling against another —
-      // and for a prebuilt archive outside every search path, against none.
-      const libuvcpp = await services.primary.findLibuvcpp(input.path, context.signal);
-      const built = await services.workspace.build({
+      // and for a prebuilt archive outside every search path, against none. The
+      // search is the selected provider's, so a container build is told about
+      // the install inside its own image.
+      const libuvcpp = await provider.findLibuvcpp(input.path, context.signal);
+      const built = await workspace.build({
         path: input.path,
         buildDir: input.build_dir,
         buildType: input.build_type,
@@ -316,8 +350,13 @@ export const createToolHandlers = (
       return {
         ...envelopeOf(recorder, {
           tool: buildContract.name,
-          provider: identity,
+          // The selected provider's, not the graph's default: a result that
+          // reported this host's compiler while the image compiled it would be
+          // attributable to the wrong toolchain, which is the one thing the
+          // envelope's `provider` exists to prevent.
+          provider: provider.identity(),
           limitations: [
+            ...(selected.kind === "container" ? containerBuildLimitations(selected.image) : []),
             ...(built.outcome.succeeded
               ? [
                   "A successful build is not a running service. Launch it with uvp_run to observe it.",
@@ -521,6 +560,7 @@ export const createToolHandlers = (
             keep_running: input.keep_running,
             goal: input.goal,
             verify_tls: input.verify_tls,
+            toolchain: input.toolchain,
           },
           {
             workspace: services.workspace,
