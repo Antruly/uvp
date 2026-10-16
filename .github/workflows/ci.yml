@@ -213,18 +213,25 @@ jobs:
   # there, so every one of those claims was `undetermined` on the platform it is
   # about.
   #
-  # It runs the source projects only. They need no C++ compiler and no libuvcpp
-  # install, so what this job establishes is that the TypeScript half of uvp works
-  # on Windows — generation, parsing, the provider's own decisions, capture and
-  # replay. A generated workspace is **not** built or run here, and the job name
-  # says so rather than leaving it to be assumed: that is the `toolchain` lane, on
-  # Linux, against a real libuvcpp.
+  # It runs the source projects and the two static gates over them, and nothing
+  # else. Neither needs a C++ compiler or a libuvcpp install, so what this job
+  # establishes is that the TypeScript half of uvp works on Windows — generation,
+  # parsing, the provider's own decisions, capture and replay, plus the type and
+  # lint gates those sources have to pass. A generated workspace is **not** built
+  # or run here, and the job name says so rather than leaving it to be assumed:
+  # that is the `toolchain` lane, on Linux, against a real libuvcpp.
+  #
+  # `check:fast` is here because a static gate that cannot start on Windows is a
+  # gate this repository does not actually have there, and the way to find that
+  # out is to run it. It stops at `check:fast`: `check:pr` adds `docs:build`,
+  # `knip`, `jscpd`, `verify:pack-reproducible` and the built tests, none of which
+  # has been examined for Windows.
   windows-source:
-    name: Windows source tests (no C++ build)
+    name: Windows source gates (no C++ build)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -238,6 +245,11 @@ jobs:
         id: npm-cache
         uses: ./.github/actions/npm-cache
       - run: npm ci
+      # The static gates go first because they are the cheap signal: seconds
+      # against the tests' minute, and a failure here is not worth discovering
+      # after the suite has run.
+      - name: Run the type and lint gates
+        run: npm run check:fast
       # No `--reporter` flags, and therefore nothing to add back: the config's own
       # two reporters already name every skipped test, and a flag here would
       # replace that list (see `scripts/verify-reporters.mjs`).

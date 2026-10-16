@@ -223,13 +223,14 @@ as an exchange with no status rather than as traffic that happened.
 
 ## The Windows lane {#windows}
 
-`windows-source` runs `npm run test:fast` on `windows-latest`: the source
-projects, on the platform uvp says it supports. Before it existed, every claim
-this repository makes about Windows was read out of the source rather than
-observed — the `cl` probe in the local provider, the `C:/…` rule in the build
-output parser, `detached: process.platform !== "win32"` in the process runner,
-the `.exe` suffix the native probe looks for. Each of those was `undetermined` on
-the platform it was about. The lane is what makes them observed.
+`windows-source` runs `npm run check:fast` and `npm run test:fast` on
+`windows-latest`: the source projects and the two static gates over them, on the
+platform uvp says it supports. Before it existed, every claim this repository makes
+about Windows was read out of the source rather than observed — the `cl` probe in
+the local provider, the `C:/…` rule in the build output parser, `detached:
+process.platform !== "win32"` in the process runner, the `.exe` suffix the native
+probe looks for. Each of those was `undetermined` on the platform it was about.
+The lane is what makes them observed.
 
 **It says what it does not cover.** No job had run on Windows before this one, and
 the lane deliberately stops at the TypeScript half: it needs no C++ compiler and
@@ -302,12 +303,34 @@ can be executed — only `vitest.cmd` and a shell script are there. `npm run
 test:fast` would have died before loading a test file, and it would have looked
 like a broken suite rather than a wrong path. The runner now resolves the Vitest
 entry from Vitest's own `package.json` and runs it through the Node already
-executing the script, which is the answer `scripts/lint.mjs` already gives for
-oxlint.
+executing the script.
 
-Not yet in the lane: `typecheck`, `lint` and `oxfmt`. `scripts/lint.mjs` spawns
-its resolved oxlint path directly, which is the same Windows problem the runner
-had, so that fix belongs with the widening rather than before it.
+**The same defect, one caller later.** `scripts/lint.mjs` did what the runner had
+done: it resolved `oxlint/package.json`'s `bin` and handed _that file_ to
+`spawnSync`. The file is 46 bytes of JavaScript behind `#!/usr/bin/env node`, so
+the spawn asked the host to start it as an image — which a POSIX host does by
+reading the shebang, and which Windows cannot do at all. libuv's `search_path`
+tries the literal name only when it has an extension, so a name without one is
+searched as `NAME.com` and then `NAME.exe`; Node's own layer consults `ComSpec`
+only when `options.shell` is set, and this call passes no shell. So the old call
+was a POSIX-only assumption: on Windows it fails with `spawnSync … ENOENT` for a
+file that is present — **derived** from libuv's name search rather than measured,
+since the lane could not run lint at all before this fix, and the message under
+it guessed `Install first: npm ci` at a dependency that was installed. Both are
+fixed: oxlint is started through `process.execPath`, the same shape the runner
+uses, and a spawn failure now reports what the spawn said — resolution is the step
+that fails when the dependency is absent, and it keeps that hint.
+
+That fix is what let the lane take the gates: `windows-source` now runs
+`npm run check:fast` before the source projects. Still not in the lane: `oxfmt`
+and the rest of `check:pr` (`docs:build`, `knip`, `jscpd`,
+`verify:pack-reproducible`, the built tests), none of which has been examined for
+Windows. `oxfmt` is the one worth naming separately, because it is _not_ the same
+shape: `format:check` names `oxfmt`, which npm starts through its own `.bin` shim
+rather than through a path this repository resolved — measured by reading
+`node_modules/oxfmt/bin/oxfmt`, which is the same 46-byte Node entry, reached a
+different way. Whether that route works on Windows is unmeasured, and this
+document does not claim it does.
 
 ## Built tests
 

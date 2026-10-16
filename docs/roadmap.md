@@ -731,7 +731,8 @@ from.
 
 **The next occurrence will arrive with evidence** (2026-10-16). That is the
 instrumentation the paragraph above asked for: `npm run lint` now runs
-`scripts/lint.mjs`, which spawns oxlint unchanged and, on a non-zero exit only,
+`scripts/lint.mjs`, which starts oxlint through the Node running the script and,
+on a non-zero exit only,
 prints the tree as it failed — the argv oxlint was handed, its version, whether
 `dist/` exists and how long ago it was written, the state of every path the run
 named as unopenable, the newest files under `dist/`, and the build processes alive
@@ -2540,10 +2541,10 @@ the state this repository's own rules say to report rather than to resolve by
 reading.
 
 The lane is `windows-source`: checkout, Node from `.nvmrc`, `npm ci`, `npm run
-test:fast`, on `windows-latest`, in `CI required`. It needs no C++ compiler and no
-libuvcpp, so it establishes the TypeScript half of uvp on Windows and nothing
-about a compiler there; the job name says so, and the `local-msvc` row above is
-still open, which is why there are two rows and not one.
+check:fast`, `npm run test:fast`, on `windows-latest`, in `CI required`. It needs
+no C++ compiler and no libuvcpp, so it establishes the TypeScript half of uvp on
+Windows and nothing about a compiler there; the job name says so, and the
+`local-msvc` row above is still open, which is why there are two rows and not one.
 
 **It could not have run at all, and that was the first finding.** `npm run
 test:fast` goes through `scripts/run-tests.mjs`, which spawned
@@ -2553,8 +2554,21 @@ Windows there is no such file to execute, only `vitest.cmd`, `vitest.ps1` and a
 before loading a test file, and the failure would have read like a broken suite
 rather than a wrong path — the sort of thing a CI lane is for and a source
 reading never shows. The runner now resolves the Vitest entry from Vitest's own
-`package.json` and runs it through the Node already executing the script, which is
-the answer `scripts/lint.mjs` already gives for oxlint.
+`package.json` and runs it through the Node already executing the script.
+
+**The same defect had a second caller, and it is why the gates were not there
+yet.** `scripts/lint.mjs` resolved `oxlint/package.json`'s `bin` and spawned that
+file — 46 bytes of JavaScript behind `#!/usr/bin/env node`. A POSIX host starts it
+by reading the shebang; Windows cannot, and libuv's `search_path` tries the
+literal name only when it has an extension, so a name without one is searched as
+`NAME.com` and then `NAME.exe`. Node's own layer consults `ComSpec` only when
+`options.shell` is set, and this call passes no shell. `npm run lint` therefore
+cannot start on Windows — **derived** from libuv rather than measured, because the
+lane ran no lint until this fix — and the `Install first: npm ci` printed under
+that failure guessed at a dependency that was installed. Both are fixed:
+`scripts/lint.mjs` starts oxlint through `process.execPath`, and a spawn failure
+reports what the spawn said, leaving the reinstall hint where it is true —
+resolution.
 
 **Then it ran, and 53 of the 798 source tests could not.** They are one platform
 assumption in three places, and the counting is the useful part of the finding:
@@ -2638,9 +2652,13 @@ lane's Windows result so far is about how this suite builds its fixtures, and th
 product claims it was built to check remain where they were — inferred from
 reading, `undetermined` on Windows, until a run can reach them.
 
-**What is not in the lane.** `typecheck`, `lint` and `oxfmt`. `scripts/lint.mjs`
-spawns its resolved oxlint path directly, which is the same Windows problem the
-test runner had, so that fix belongs with the widening rather than before it.
+**What is not in the lane.** `oxfmt`, and the rest of `check:pr` — `docs:build`,
+`knip`, `jscpd`, `verify:pack-reproducible`, the built tests. `typecheck` and
+`lint` are now in it, along with the fix that let lint start there at all.
+`oxfmt` is the one worth separating: `format:check` names `oxfmt`, which npm
+starts through its own `.bin` shim, so it is not the shape `lint.mjs` had —
+measured by reading `node_modules/oxfmt/bin/oxfmt`, the same 46-byte Node entry
+reached a different way — and whether that route works on Windows is unmeasured.
 Running the built projects — the CLI and MCP binaries, the packaged tarball — is
 the other half, and needs a Windows lane that can compile, which is what the
 `local-msvc` row above means.
