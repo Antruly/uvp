@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { BUILT_PROJECT_NAMES, SOURCE_PROJECT_NAMES } from "./lib/test-projects.mjs";
+import {
+  BUILT_PROJECT_NAMES,
+  MUTATION_PROJECT_NAMES,
+  SOURCE_PROJECT_NAMES,
+} from "./lib/test-projects.mjs";
 import { REPO_ROOT } from "./lib/paths.mjs";
 
 /**
@@ -17,7 +21,7 @@ import { REPO_ROOT } from "./lib/paths.mjs";
  * skipped by the command a developer actually runs while iterating, which is the
  * one place a lane most needs to run.
  *
- * Usage: `node scripts/run-tests.mjs <source|built|all> [--except <lane>]… [extra args…]`
+ * Usage: `node scripts/run-tests.mjs <source|built|all|mutation> [--except <lane>]… [extra args…]`
  * Anything after the group is passed through, so `--watch` and a filename filter
  * work as they would with a direct `vitest` call.
  *
@@ -64,6 +68,11 @@ const GROUPS = {
   source: SOURCE_PROJECT_NAMES,
   built: BUILT_PROJECT_NAMES,
   all: [...SOURCE_PROJECT_NAMES, ...BUILT_PROJECT_NAMES],
+  // What the mutation sweep runs, once per mutant. It is a group here rather
+  // than a `--project` pair in `stryker.config.mjs` so that the sweep runs the
+  // suite's own configuration — the same pools, the same worker bound, the same
+  // canonical `TMPDIR` — through the same entry point a person uses.
+  mutation: MUTATION_PROJECT_NAMES,
 };
 
 const argv = process.argv.slice(2);

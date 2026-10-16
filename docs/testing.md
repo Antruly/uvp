@@ -769,15 +769,21 @@ request. It mutates:
 Those files' tests are the `services` and `domain` projects, and no other
 project runs: a mutant in a pure module does not change what a lane that
 compiles real C++ decides, and running one per mutant would turn a sweep
-measured in milliseconds per mutant into one measured in minutes.
-`vitest.mutation.config.ts` is that scope, filtered out of the suite's own
-project list so that the file which decides what `domain` and `services` contain
-is still `scripts/lib/test-projects.mjs`.
+measured in milliseconds per mutant into one measured in minutes. That scope is
+the `mutation` group in `scripts/lib/test-projects.mjs`, which is also the file
+deciding what `domain` and `services` contain — so a project renamed there is
+renamed here, and there is no second copy of the two names to drift.
 
-`coverageAnalysis: "perTest"` with `related: true` is the plan: a mutant re-runs
-only the tests that covered it. It is also the plan the runner cannot carry out —
-read [the subsection below](#mutation-not-a-measurement) before reading any
-number this lane prints.
+**The runner is `command`, and it grades a mutant by exit code alone.** The
+`vitest` runner plans each mutant against the tests that covered it, and vitest 5
+cannot match the ids it plans with, which is why the lane produced no
+measurement at all until 2026-10-16; [the subsection
+below](#mutation-not-a-measurement) carries that finding and the choice made
+from it. What the lane runs now is
+`node scripts/run-tests.mjs mutation` — the suite's own entry point, so a mutant
+meets the suite's pools, worker bound and canonical `TMPDIR` — and a mutant is
+killed exactly when that command exits non-zero. The cost is time: every mutant
+runs all 396 tests of the group.
 
 **There is no break threshold.** `thresholds.break` is `null` on purpose. A
 mutation score that gates a merge invites two bad responses: writing tests that
@@ -786,17 +792,21 @@ reported, the survivors are listed, and a human decides.
 
 The summary script exits non-zero when the report is **missing** — a run that
 produced no report is not a clean sweep, and treating it as one is how a broken
-mutation job goes unnoticed for a month. It exits non-zero for one more reason,
-which [the next subsection](#mutation-not-a-measurement) explains: a report in
-which mutants that were planned as a run completed no test describes the runner
-rather than the suite, and a percentage over it reads like a suite that notices
-nothing.
+mutation job goes unnoticed for a month. It exits non-zero for one more reason: a
+report in which mutants that were planned as a run completed no test describes
+the runner rather than the suite, and a percentage over it reads like a suite
+that notices nothing. That check is why the defect in [the next
+subsection](#mutation-not-a-measurement) was reported as a failure instead of a
+score, and it stays: it is the check that would catch the same class of breakage
+arriving a second way.
 
-### The score is not a measurement yet {#mutation-not-a-measurement}
+### The runner ran no test {#mutation-not-a-measurement}
 
-Measured on this tree at `175b9a7`, with the configuration described above,
-against `@stryker-mutator/core@10.0.0`, `@stryker-mutator/vitest-runner@10.0.0`
-and `vitest@5.0.3`.
+Measured on this tree at `175b9a7`, with the configuration as it then stood —
+`testRunner: "vitest"` over `vitest.mutation.config.ts` — against
+`@stryker-mutator/core@10.0.0`, `@stryker-mutator/vitest-runner@10.0.0` and
+`vitest@5.0.3`. The runner package is no longer installed; the finding is what it
+produced.
 
 A sweep of those eight files produced **1294 mutants: 199 killed, 934 survived,
 125 with no coverage, 36 static survivors**. All 199 kills are `static: true`,
@@ -846,8 +856,60 @@ declared in `plugins` cannot run either, `checkers` is empty, and `tsconfigFile`
 names a file that is deliberately absent from the repository. And the `mutate`
 list named `src/domain/result.ts`, a file that has never existed here.
 
-**What is undecided** is how the lane gets a measurement. Four ways, with the
-cost each one was measured or reasoned at:
+**The decision, taken on 2026-10-16, is the third of the ways below** — the
+built-in `command` runner over the whole mutation group. It supplies no coverage,
+so core plans every mutant with the global filter and the separator never enters
+the path. The command it runs is `node scripts/run-tests.mjs mutation`, and a
+mutant is killed exactly when that exits non-zero.
+
+**The first real measurement**, taken from the change that adopted it: a sweep of
+`src/domain/errors.ts`, 141 of the eight files' mutants, run against the group's
+396 tests. It took **4 minutes 30 seconds** and reported **127 killed, 14
+survived, 0 timed out, 0 without coverage** — a score of **90.1%**, with the
+reporter's "Ran 1.00 tests per mutant on average" as the line saying the defect is
+gone: the `command` runner counts the whole command as one test, so the zero this
+document's summary script rejects is what a regression here would look like. That
+is **1.9 seconds per mutant** for this slice, measured rather than extrapolated,
+and it agrees with the 43-mutant measurement below, so the full sweep — the 1281
+mutants `stryker run --dryRunOnly` reports on this tree, 13 fewer than the
+defective run's 1294 because the unused bundle shape was deleted from
+`src/domain/evidence.ts` in the meantime — projects to **near 41 minutes** on
+this host. The job's `timeout-minutes` went from 60
+to 90 in the same change, because every measurement here is from an 18-core
+workstation and the job runs on a smaller machine: the limit is what turns a
+sweep that overruns into a reported failure with its reports retained, rather than
+a platform kill with nothing to read.
+
+**The first full sweep is on the record, and it ran inside that projection.** Run
+[`38919206652`](https://github.com/Antruly/uvp/actions/runs/38919206652)
+(`Mutation sweep`, `workflow_dispatch`, success, 2026-10-16) mutated all eight
+files into **1281 mutants**. Its `npx --no-install stryker run` step took **51
+minutes 53 seconds** against the 41-minute projection, and it reported **936
+killed, 1 timeout, 344 survived, 0 with no coverage, 0 errors — 73.15%**, with the
+summary script printing `936/1281 mutants detected — score 73.1%`. That is **2.4
+seconds per mutant** in CI against the 1.9 measured on the workstation this
+document's other numbers come from, so the smaller machine costs about a quarter
+more time and the 90-minute limit is not close.
+
+**The per-file read**, because the aggregate hides the range: `ToolchainProvider.ts`
+94.44%, `errors.ts` 90.07%, `unknown.ts` 86.05%, `bundleDiff.ts` 85.41%,
+`evidence.ts` 67.50%, `assertions.ts` 66.41%, `workspaceManifest.ts` 58.59%, and
+`evidenceHelpers.ts` **17.65%** — 15 killed against 70 survived, an order of
+magnitude below every other file and the largest single read this lane has
+produced. `errors.ts`'s 127 killed and 14 survived reproduce the one-file
+measurement above exactly, from a different host and a different run shape.
+
+**What exit-code grading costs**, stated because it is where a score can still
+mislead: there is no per-test attribution left, so a survivor's `coveredBy` no
+longer says which test should have caught it; and a mutant whose damage stops the
+run from starting at all reads as a kill rather than as a survivor or as a broken
+run — which also makes the percentage an **upper bound**, since a group that fails
+for a reason of its own is indistinguishable from one a mutant killed. The fourteen
+survivors are real locations — `src/domain/errors.ts:148`'s conditional `docs`
+spread among them, and the message strings beside it — and each one still has to be
+read, because a survivor is either a missing assertion or an equivalent mutant.
+
+The four ways, all of them still on the record:
 
 - **Own the runner.** A Stryker `TestRunner` plugin over `vitest/node`'s public
   API, recording ids in the `" > "` form vitest matches. It is the only option
@@ -856,24 +918,24 @@ cost each one was measured or reasoned at:
   `.` and `./package.json` and nothing else, so `VitestTestRunner` cannot be
   subclassed, and the dry run, the setup file that names each test to the
   instrumented code, and per-test mutant activation would all be written here.
+  _Not taken._
 - **Patch the dependency.** One separator, two copies of `collectTestName`. It
   puts a patched package between what CI installs and what this repository reads,
-  for a bug that is upstream's to fix.
-- **Run every mutant against the whole scope**, using the built-in `command`
-  runner, which supplies no coverage and so is planned with the global filter.
-  Measured on this host at `concurrency: 2`: the 43 mutants of `domain/unknown.ts`
-  took 1 minute 26 seconds, about **two seconds per mutant**, which puts the
-  1294-mutant sweep near **43 minutes** — on an 18-core workstation, against a
-  job with a 60-minute timeout on a smaller runner, so treat it as a floor. It
-  also grades a mutant only by the command's exit code, so a mutant that stops
-  the run from starting reads as a kill, and it reports `1.00 tests per mutant`
-  because it models the whole command as one test.
-- **Drop the lane.** The cheapest, and honest if none of the above is worth the
-  cost: what is lost is the survivor list, and that list was not real either.
+  for a bug that is upstream's to fix. _Not taken, and the end state to reach if
+  the sweep ever needs to be fast: it keeps per-test planning at a fraction of
+  the time, at the cost of carrying a patched package and the machinery that keeps
+  the patch applied._
+- **Run every mutant against the whole scope.** Measured on this host at
+  `concurrency: 2`: the 43 mutants of `domain/unknown.ts` took 1 minute 26
+  seconds, about **two seconds per mutant**. It grades a mutant only by the
+  command's exit code, and it reports `1.00 tests per mutant` because it models
+  the whole command as one test. _Taken, as above._
+- **Drop the lane.** The cheapest, and it was the honest option while the score
+  was wrong: what would be lost is the survivor list, and that list was not real
+  either. _Not taken now that the score is real._
 
-Until one of them is taken, the weekly job fails at the summary step instead of
-publishing a percentage, and the mutation row under _Hardening_ in the roadmap
-owns the decision.
+The mutation row under _Hardening_ in [roadmap.md](roadmap.md#hardening) records
+the outcome rather than the open question.
 
 ## The rules the test suite enforces
 

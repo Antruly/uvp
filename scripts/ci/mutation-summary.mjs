@@ -53,9 +53,10 @@ const main = () => {
   // score over a report of that shape reads exactly like a suite that notices
   // nothing while being a runner defect instead. Static mutants are exempt —
   // they are activated before the tests load, and Stryker sizes a run plan for
-  // them from the whole project, which is how the only real kills in this
-  // repository's sweep were produced. See docs/testing.md, "The score is not a
-  // measurement yet".
+  // them from the whole project. The check stays now that the runner is the
+  // `command` runner and every mutant reports one test: a zero here means the
+  // sweep has stopped running tests again, whatever the runner is. See
+  // docs/testing.md, "The runner ran no test".
   const unran = mutants.filter((mutant) => mutant.static !== true && mutant.testsCompleted === 0);
   if (unran.length > 0) {
     process.stderr.write(

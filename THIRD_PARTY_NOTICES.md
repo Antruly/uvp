@@ -52,18 +52,18 @@ in is `@modelcontextprotocol/core`, and the closure is listed in
 
 Not distributed with the published package.
 
-| Package                                                        | License    | Used for                                      |
-| -------------------------------------------------------------- | ---------- | --------------------------------------------- |
-| `typescript`                                                   | Apache-2.0 | Compilation and type checking                 |
-| `vitest`, `@vitest/coverage-v8`                                | MIT        | Test runner and coverage                      |
-| `@stryker-mutator/core`, `typescript-checker`, `vitest-runner` | Apache-2.0 | Mutation testing                              |
-| `oxlint`, `oxfmt`                                              | MIT        | Linting and formatting                        |
-| `knip`                                                         | ISC        | Unused-file, export, and dependency detection |
-| `jscpd`                                                        | MIT        | Duplication detection                         |
-| `turbo`                                                        | MIT        | Task orchestration and caching                |
-| `vitepress`                                                    | MIT        | The documentation site                        |
-| `husky`                                                        | MIT        | Git hooks                                     |
-| `@types/node`                                                  | MIT        | Node.js type definitions                      |
+| Package                         | License    | Used for                                      |
+| ------------------------------- | ---------- | --------------------------------------------- |
+| `typescript`                    | Apache-2.0 | Compilation and type checking                 |
+| `vitest`, `@vitest/coverage-v8` | MIT        | Test runner and coverage                      |
+| `@stryker-mutator/core`         | Apache-2.0 | Mutation testing                              |
+| `oxlint`, `oxfmt`               | MIT        | Linting and formatting                        |
+| `knip`                          | ISC        | Unused-file, export, and dependency detection |
+| `jscpd`                         | MIT        | Duplication detection                         |
+| `turbo`                         | MIT        | Task orchestration and caching                |
+| `vitepress`                     | MIT        | The documentation site                        |
+| `husky`                         | MIT        | Git hooks                                     |
+| `@types/node`                   | MIT        | Node.js type definitions                      |
 
 ## Generated code
 

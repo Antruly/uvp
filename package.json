@@ -112,8 +112,6 @@
   },
   "devDependencies": {
     "@stryker-mutator/core": "10.0.0",
-    "@stryker-mutator/typescript-checker": "10.0.0",
-    "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "26.6.5",
     "@vitest/coverage-v8": "5.0.4",
     "husky": "9.1.7",
