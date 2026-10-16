@@ -417,7 +417,7 @@ implicit.
 | ✅  | `uvp_soap_call` handed a caller the first 64 KiB of the envelope's bytes and offered no way to ask for more: an envelope past the cap arrived cut, with `truncated`, `text_lossy` and `base64` saying exactly that, and the rest of it was unreachable. The cap is the caller's now — `max_body_bytes`, the name and the smaller-of-two rule `uvp_http_request`'s body cap already uses — and the question the row left open is answered by what the fields already were: `bytes` and `digest` are taken over the envelope as received rather than over the prefix handed over, so a caller who asked for too little still holds the name of the response and can ask again for the rest of the same body. No cap is refused, because the call reads the whole envelope whatever it says — the fault comes from all of it — so a cap larger than the envelope asks for bytes that are already in hand, and the transport's own read limit stays the ceiling, reported by `truncated` as it was. See [below](#lossy-text)                          |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ⬜  | `oxlint` has failed a gate three times on a `dist/` file it should not have been reading; unexplained and unreproduced                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ⬜  | `oxlint` has failed a gate three times on a `dist/` file it should not have been reading; unexplained, and unreproduced by six tests of four candidate mechanisms, named below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and has passed on every run since, local and CI, including 300 standalone runs of that file on this host with none. That bounds how often it happens here rather than explaining it: the one occurrence was in CI, where the load and the image are things this host does not reproduce. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -439,8 +439,21 @@ x Failed to open file .../dist/toolchains/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-15, second
 x Failed to open file .../dist/toolchains/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-16, third
-Found 26 warnings and 1 error.
 ```
+
+These three lines are one error from each of the three occurrences, and the `Found
+26 warnings and 1 error.` that stood under them until 2026-10-16 was no single run's
+output: the two occurrences that left a log — both from 2026-10-15, 18:16 and 18:58
+local — each end `Found 22 warnings and 1 error.`, and 26 is the warning total of the
+later tree, the re-run after the third occurrence. Turbo's own summary for both logs
+reads `Failed: //#lint`, so the open failure is the task's single error and it is
+what turns the gate red. The third occurrence is quoted from its run rather than from
+a log that is still here.
+
+The two logs also settle what the section could only infer from the task graph:
+`compile` really does run beside `lint` — `compile:` and `lint:` output interleaves
+through both logs, and `clean-build-output.mjs` deleting `dist/` while `tsc` rewrites
+it is what a walk would be racing.
 
 Read the three lines as one phenomenon rather than three: the name tracks
 whatever path that file occupies at the time, so it is not a stale reference to a
@@ -473,6 +486,36 @@ is how a real failure gets waved through — but the next person should start fr
 "it has happened three times and nobody knows why" rather than from a mechanism
 this row invented. The three occurrences are alike enough to be one bug and alike
 enough to be the same file, which is the most that can be said.
+
+**Six more tests, of four mechanisms, all negative** (2026-10-16). Each was run
+against the configuration as it is committed, and each is named so the next attempt
+does not repeat it:
+
+- **The walk entering `dist/`.** A file at `dist/zzz-probe.js` holding a deliberate
+  `no-var` violation is not reported by a bare `oxlint`, and `oxlint
+  dist/zzz-probe.js` — the same path as an argument — reports nothing either.
+- **The walk racing the deletion.** Sixty runs of a bare `oxlint` with `dist/`
+  renamed away at a random 20–600 ms into the run produced no failure. That is the
+  method the three attempts above used, with a window that opens with a rename
+  rather than after a build.
+- **An ignore that depends on the walk root.** `oxlint` run with its cwd inside
+  `dist/` answers `No files found to lint. Please check your paths and ignore
+  patterns.` — the exclusion holds from there as well as from the root, so a run
+  that somehow started below `dist/` is not it either.
+- **An import resolved into the build output.** Exactly one file in the repository
+  spells a `dist/` path in an import — `tests/boundary/process/fixtures/detachParent.mjs:1`,
+  whose specifier is the very path two of the three errors name — and that is the
+  shape worth suspecting, because a resolver opens a file rather than walking it.
+  This `oxlint` resolves no specifiers at all: a temporary file importing a module
+  that does not exist reports nothing, and one importing a `dist/` file carrying a
+  `no-var` violation reports nothing from it.
+
+What is left is narrower and still not a mechanism. Something opened one file under
+`dist/` at a moment when it was not there; `compile` was deleting and rewriting
+`dist/` at the time; and it is not the walk, not the race, not the walk root, and not
+a resolution. Instrumenting the next occurrence is worth more than a seventh guess —
+the error prints the path and nothing in the three logs says where the path came
+from.
 
 The supervision row was the one place the dependency direction was inverted:
 `WorkspaceService` called `startSupervised` from `toolchains/local/processRunner`,
