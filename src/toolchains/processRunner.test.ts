@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { wordsOf } from "../../tests/support/recordedCommand.js";
 import { runProcess } from "./processRunner.js";
 
 /**
@@ -33,7 +34,11 @@ describe("the recorded form of a command", () => {
     // Unchanged from before this was a function, and worth pinning: most
     // commands have no environment, and prefixing all of them would make the
     // common record harder to read than the command it describes.
-    expect(await recorded()).toBe(`${process.execPath} -e `);
+    //
+    // The `''` is the empty argument `-e` was handed, not decoration: a word that
+    // is not written is a word the invocation does not have, and `node -e` on its
+    // own is not the command that ran.
+    expect(await recorded()).toBe(`${process.execPath} -e ''`);
   });
 
   it("names the variables it set, in a stable order", async () => {
@@ -41,7 +46,7 @@ describe("the recorded form of a command", () => {
     // an evidence digest covers this, and property order in an object is not a
     // fact about the build.
     expect(await recorded({ ZED: "2", ALPHA: "1" })).toBe(
-      `env ALPHA=1 ZED=2 ${process.execPath} -e `,
+      `env ALPHA=1 ZED=2 ${process.execPath} -e ''`,
     );
   });
 
@@ -49,12 +54,29 @@ describe("the recorded form of a command", () => {
     // A prefix with a space in it is a path someone has, and an unquoted
     // `CMAKE_PREFIX_PATH=/opt/my libs` re-runs as a command about `/opt/my`.
     expect(await recorded({ CMAKE_PREFIX_PATH: "/opt/my libs" })).toBe(
-      `env CMAKE_PREFIX_PATH='/opt/my libs' ${process.execPath} -e `,
+      `env CMAKE_PREFIX_PATH='/opt/my libs' ${process.execPath} -e ''`,
     );
     // A value holding a quote is closed, escaped, and reopened — the only
     // spelling that survives a POSIX shell intact. It is also the spelling that
     // catches a naive `'${value}'`, which would end the quoting early and run
     // whatever followed as a command.
-    expect(await recorded({ ODD: "it's" })).toBe(`env ODD='it'\\''s' ${process.execPath} -e `);
+    expect(await recorded({ ODD: "it's" })).toBe(`env ODD='it'\\''s' ${process.execPath} -e ''`);
+  });
+
+  it("quotes an argument by the same rule, not only the environment", async () => {
+    // The half of the rule that was missing: `cmake -S /tmp/uvp probe/ws` is four
+    // arguments to a reader and two to uvp, so the line was not re-runnable for
+    // exactly the workspace the quoting exists for. Asserted through the same
+    // reader the tests use for the environment, so this pins the notation the
+    // product writes rather than this file's idea of it.
+    const outcome = await runProcess({
+      command: process.execPath,
+      args: ["-e", "", "/tmp/uvp probe/ws"],
+      timeoutMs: 30_000,
+    });
+    expect(outcome.command).toBe(`${process.execPath} -e '' '/tmp/uvp probe/ws'`);
+    // Read back word by word: the argument is one word with a space in it, which
+    // is what the child received.
+    expect(wordsOf(outcome.command)).toEqual([process.execPath, "-e", "", "/tmp/uvp probe/ws"]);
   });
 });

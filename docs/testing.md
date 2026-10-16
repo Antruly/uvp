@@ -280,16 +280,23 @@ now reads the notation the record is written in, splitting into words before it
 matches so that a `NAME=` inside another variable's value cannot be mistaken for
 an assignment. The same commit stops the test from joining a path list with a
 literal `:` where the product uses `delimiter`, which was a second, independent
-POSIX assumption in one of the four. The other problem is the record itself, and
-it is not fixed here: `renderCommand` writes `env NAME=value …` on every host,
-which is POSIX shell notation and not a line `cmd.exe` or PowerShell will run, and
-it quotes the environment but never the command's own arguments — so the line its
-docblock calls re-runnable is not reliably re-runnable on POSIX either, once a
-path has a space in it. That is a product question with a schema dimension
-(`commands: z.array(z.string())` is a declared output field, generated into
-`docs/public/tool-catalog.json` and consumed as provenance), so it stays open on
-[#20](https://github.com/Antruly/uvp/issues/20) with three costed options for a
-maintainer to choose between, and no product behaviour changed in this fix.
+POSIX assumption in one of the four.
+
+The other problem was the record itself, and it is fixed in a change of its own,
+still on [#20](https://github.com/Antruly/uvp/issues/20). `renderCommand` quoted
+the environment but not the command's own arguments, so `cmake -S /tmp/uvp probe/ws`
+was four arguments to a reader and two to uvp: the line its docblock calls
+re-runnable was not re-runnable on POSIX either, once a path had a space in it —
+and the workspace is an argument, so that is the ordinary case for a path someone
+has. Every word now goes through the one function that already owned the rule,
+`shellQuote`, and an argument that is empty is written `''` rather than vanishing
+into a separator. What the line still is — `env NAME=value …`, POSIX notation, on
+every host including Windows — is a statement in the docblock rather than a
+defect. The alternative, the record as data (`command`, `args` and `env` in place
+of one string, a change to the declared `commands: z.array(z.string())` field
+that is generated into `docs/public/tool-catalog.json`), was considered and
+rejected on the issue: every consumer would still have to render a string for
+`sources[].ref`, and the field's job is provenance, not re-execution.
 
 So 51 of the 53 have landed, leaving 2 skipped in these three groups, both the
 `cmake` pair for #22; the lane's own total is 4, the other two being the

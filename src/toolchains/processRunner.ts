@@ -126,9 +126,26 @@ const shellQuote = (value: string): string =>
  * The variables recorded are the ones this call set, which is the difference
  * between what the caller had and what the child got; the rest of the
  * environment was inherited and is not restated here.
+ *
+ * Every word goes through `shellQuote`, the command and its arguments as well as
+ * the values. Quoting only the environment was half the rule: `cmake -S /tmp/uvp
+ * probe/ws` is four arguments to a reader and two to uvp, so the line was not
+ * re-runnable for a workspace whose path has a space — the case the quoting was
+ * there for. An argument that is empty is written `''` for the same reason: the
+ * line has to name the invocation the caller asked for, and a word that vanished
+ * into a separator does not.
+ *
+ * **What this line is.** It is `env NAME=value …` — POSIX notation — on every
+ * host, including Windows, where no shell a person has would run it. That is
+ * stated rather than fixed: there is no single Windows notation (`cmd.exe` and
+ * PowerShell disagree about `set`, and neither is necessarily the shell that
+ * reads the record), and what the field owes a caller is the command, its
+ * arguments and the environment uvp set, which is what it holds. A caller on a
+ * host this line is not written for reads it as the description it is. #20
+ * records the alternative — the record as data — and why it was not taken.
  */
 const renderCommand = (options: RunProcessOptions): string => {
-  const line = [options.command, ...options.args].join(" ");
+  const line = [options.command, ...options.args].map(shellQuote).join(" ");
   const environment = Object.entries(options.env ?? {}).sort(([left], [right]) =>
     left < right ? -1 : 1,
   );
