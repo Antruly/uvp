@@ -626,7 +626,7 @@ implicit.
 | ✅  | `uvp_soap_call` handed a caller the first 64 KiB of the envelope's bytes and offered no way to ask for more: an envelope past the cap arrived cut, with `truncated`, `text_lossy` and `base64` saying exactly that, and the rest of it was unreachable. The cap is the caller's now — `max_body_bytes`, the name and the smaller-of-two rule `uvp_http_request`'s body cap already uses — and the question the row left open is answered by what the fields already were: `bytes` and `digest` are taken over the envelope as received rather than over the prefix handed over, so a caller who asked for too little still holds the name of the response and can ask again for the rest of the same body. No cap is refused, because the call reads the whole envelope whatever it says — the fault comes from all of it — so a cap larger than the envelope asks for bytes that are already in hand, and the transport's own read limit stays the ceiling, reported by `truncated` as it was. See [below](#lossy-text)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ✅  | A cap on capture size enforced by the session, not only reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ✅  | A supervision port, so `application` stops importing `toolchains/local` directly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ⬜  | `oxlint` has failed a gate three times on a `dist/` file it should not have been reading; unexplained, and unreproduced by seven tests of five candidate mechanisms named below, so `lint` now records the tree state when it fails. **Bounded and labelled by decision, not chased** (2026-10-16): three occurrences in two days and none in the days since, the evidence this row is missing is a fourth occurrence, and the gate now writes that occurrence down when it happens, so a seventh guess is worth less than waiting for it. #13 was closed on that decision, not on a fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ✅  | `oxlint` failed a gate on a `dist/` file it should not have been reading — four times, unexplained, with seven tests of five candidate mechanisms all negative — and the fourth occurrence arrived with the report the gate had been changed to write, which is what found it. **Explained and fixed** (2026-10-16): `oxlint`'s import resolver _opens_ what a static specifier names, `tests/boundary/process/fixtures/detachParent.mjs` named `dist/toolchains/processRunner.js`, and `compile` deletes `dist/` with `clean-build-output.mjs` and rewrites it beside `lint` in the same turbo pass — so a delete landing between the resolver's `stat` and its `open` fails the whole run with the message all four occurrences carried. `strace` shows that one path is the only thing under `dist/` the linter opens. Failing that single `open` and nothing else reproduces it on demand; the fixture builds its specifier at run time now, which no static resolver follows, and `tests/boundary/importSurface.test.ts` fails any static specifier under `src/`, `tests/` or `scripts/` that reaches into build output. The candidate had been eliminated once already by a control that could not have seen it. See [below](#the-build-output-open)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |     |
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and has passed on every run since, local and CI, including 300 standalone runs of that file on this host with none. That bounds how often it happens here rather than explaining it: the one occurrence was in CI, where the load and the image are things this host does not reproduce. **Bounded and labelled by decision, not chased** (2026-10-16) — and the class narrowed in the meantime: one of the two surviving mechanisms below is the synchronous `spawn` throw, which #33 measured, reproduced and fixed, so a repeat of that member no longer arrives as `execution_failure` at all but as `launch_failed` carrying the path. #14 was closed on that decision, not on an explanation. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -640,9 +640,11 @@ implicit.
 | ✅  | The worked example in `docs/evidence.md` was hand-written, and every field it showed was wrong the same way: a `vb_`-prefixed `bundle_id`, `evidence_ids`, `unknown_ids`, and `members[]` entries carrying `subject`, `observed` and `derived`. No tool returns any of those; the page shows two captures of a real pass now. They settled the claim beside the example too, that the envelope holds references "so the bundle holds the detail". It does not: `toEvidenceRef` drops `subject`, `observed` and `derived`, the bundle carries the same references, and `digest` is computed _from_ the fields that were dropped, so a reader can compare two runs but not see what either observed. The same reading found one thing declared twice: `createEvidenceBundle` in `src/domain/evidence.ts` took full `Evidence[]` records and had no production caller, while the shipped bundle is `verificationBundleSchema`. The unused pair is **deleted** (2026-10-16), which closes the option rather than leaving it open: two shapes for one concept, one of them never having run, is what the ownership rule is against — and the shipped shape's dropping of the records is a decision about what a bundle is, not an omission. A reader of one bundle reaches the observations by calling the tool that produced them. See [below](#evidence-bundle)                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ⬜  | **The mutation sweep's score is not a measurement.** Of its 1294 mutants, 934 ran no test at all — each reported `Survived` with `testsCompleted: 0` beside a `coveredBy` naming the tests that should have run — and all 199 of its kills are `static` mutants, which Stryker plans by a different path. The cause is one separator: the vitest runner records a test as `file#suite and test names joined by a space`, and vitest 5 matches a name pattern against the same names joined by `" > "`, so a per-test filter selects nothing. The reported number is wrong rather than low, which was checked from the other side: the mutant Stryker called `Survived` at `src/application/assertions.ts:74:10` fails 4 of the lane's own 396 tests. The configuration could not start at all before this change — three separate defects, all fixed — and the summary script now fails on a report of this shape rather than printing a percentage over it. Which of four ways out to take is undecided. See [below](#mutation-not-measured)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
-The `dist/` row is an observation with no diagnosis attached, recorded as such
-rather than as a bug report. It has been seen three times, each time as the only
-error in the `lint` task, with no rule name:
+### The build output `open` {#the-build-output-open}
+
+The `dist/` row was an observation with no diagnosis attached, recorded as such
+rather than as a bug report, and it has one now. It was seen four times, each time
+as the only error in the `lint` task, with no rule name:
 
 ```
 x Failed to open file .../dist/toolchains/local/processRunner.js with error
@@ -651,9 +653,12 @@ x Failed to open file .../dist/toolchains/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-15, second
 x Failed to open file .../dist/toolchains/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-16, third
+x Failed to open file .../dist/toolchains/processRunner.js with error
+  "No such file or directory (os error 2)"          # 2026-10-16, fourth,
+                                                    # with the report attached
 ```
 
-These three lines are one error from each of the three occurrences, and the block as
+These four lines are one error from each of the four occurrences, and the block as
 it stood read as one run's output — which no log that survives is. The two
 occurrences that left a log, both from 2026-10-15, 18:16 and 18:58 local, each
 contain a single one of those lines followed by `Found 22 warnings and 1 error.`,
@@ -719,9 +724,14 @@ does not repeat it:
   spells a `dist/` path in an import — `tests/boundary/process/fixtures/detachParent.mjs:1`,
   whose specifier is the very path two of the three errors name — and that is the
   shape worth suspecting, because a resolver opens a file rather than walking it.
-  This `oxlint` resolves no specifiers at all: a temporary file importing a module
-  that does not exist reports nothing, and one importing a `dist/` file carrying a
-  `no-var` violation reports nothing from it.
+  It was ruled out on two controls that reported nothing — a temporary file
+  importing a module that does not exist, and one importing a `dist/` file carrying
+  a `no-var` violation — and concluded that this `oxlint` resolves no specifiers at
+  all. **The elimination was wrong, and this was the mechanism.** Both controls
+  asked for output and neither state produces any: a resolver that finds nothing
+  opens nothing, and a resolved file is _opened_ rather than linted, so both runs
+  would have looked identical with the resolver working. See
+  [the mechanism](#the-build-output-open).
 - **The named file's absence.** The one thing the three errors have in common is a
   path that was not there to open, so the condition was staged directly: with
   `dist/toolchains/processRunner.js` — the path two of the three errors name —
@@ -735,9 +745,12 @@ does not repeat it:
 What is left is narrower and still not a mechanism. Something opened one file under
 `dist/` at a moment when it was not there; `compile` was deleting and rewriting
 `dist/` at the time; and it is not the walk, not the race, not the walk root, and not
-a resolution. Instrumenting the next occurrence is worth more than a seventh guess —
-the error prints the path and nothing in the three logs says where the path came
-from.
+a resolution — as it then stood. The last of those is the one that turned out to be
+wrong, and [the fourth occurrence](#the-build-output-open) is where that is
+corrected: the controls were insensitive rather than the candidate. Instrumenting
+the next occurrence was worth more than a seventh guess for exactly this reason —
+the error prints the path, and what the three logs could not say about it was where
+it came from.
 
 **The next occurrence will arrive with evidence** (2026-10-16). That is the
 instrumentation the paragraph above asked for: `npm run lint` now runs
@@ -762,10 +775,14 @@ running". What it cannot do is say where the path came from: it sees a read that
 failed, not the read that asked for it.
 
 The report has been observed working — on a forced failure (`--deny-warnings`) and
-against a live sibling process it correctly named with its age — but it has not
-been observed on the failure it is for, which has not happened since. An
-instrument that has never met its event is a plan, not a diagnosis, and the row
-stays open until it does.
+against a live sibling process it correctly named with its age — and it has now met
+the failure it was written for: the fourth occurrence is below, and the two facts
+the report adds that no earlier log could are the ones that pointed at the resolver.
+The process list, which was there to answer "was a build running", answered it the
+other way round — it named no compiler, and the `dist/` mtimes it recorded beside
+that are what place the failure at the end of a build rather than inside one. An
+instrument that has never met its event is a plan; this one has, and the row closes
+on what it caught.
 
 **Decided: bounded and labelled, not chased** (2026-10-16). The row's own issue,
 #13, asked a maintainer to choose between a mechanism, more instrumentation, and
@@ -783,6 +800,81 @@ thing they have in common. Until then a red `lint` that goes green on rerun is
 this row, and the re-run is the cost the decision accepts. It is recorded rather
 than left silent because the failure mode is exactly the one below: "it passed
 this time" gets mistaken for a fix.
+
+**Superseded the same evening.** The fourth occurrence arrived with the report
+attached, the mechanism fell out of it, and this paragraph is therefore the record
+of a decision that was right to take and wrong to keep: the row ends on
+[the fourth occurrence](#the-build-output-open), not here. What the decision got
+right is the part worth keeping — waiting for evidence beat a seventh guess, and it
+was the fourth report, not any of the seven tests, that named the reader.
+
+**The fourth occurrence, and the mechanism** (2026-10-16). It arrived that evening,
+in a local `npm run check:pr` on the branch that carries #7's dependency bumps —
+a run that followed `npm ci`, which is to say a cold turbo cache, which is to say
+`compile` really ran rather than being served from one. The instrument caught it,
+and what it wrote is what the row was waiting for:
+
+- the failure was recorded at `2026-10-16T15:21:38.372Z`, on
+  `dist/toolchains/processRunner.js`, with the errno the other three carry;
+- `dist/` was written at `…38.329Z` and that file at `…38.324Z`, 48 ms before the
+  failure, and the newest files under `dist/` at `…38.332Z` — a tree that had just
+  been rebuilt, and a file that was there when the report looked;
+- the process list named no compiler. The builds alive were `artifacts:skills`,
+  `artifacts:tool-catalog`, `artifacts:error-schema` and `knip`.
+
+The reading those last two support is an inference and is labelled as one: a tree
+written 48 ms before the report and no compiler alive when it ran is a tree whose
+build had just finished, and a file that exists when the report looks but not when
+`oxlint` opened it is a file that was absent in between — inside
+`clean-build-output.mjs`'s `rm -rf dist`, which runs before `tsc` writes it again.
+The report's clock is when the `lint` task exited, after the open had already
+failed.
+
+The mechanism came from following that window instead of guessing at it. `strace
+-f` over a plain bare `oxlint` run on this tree shows it opening exactly one file
+under `dist/` — `dist/toolchains/processRunner.js` — and probing `package.json`,
+`tsconfig.json` and `node_modules` along the way to it, which is a resolver rather
+than a walk. Exactly one file in the repository spells that path as an import:
+`tests/boundary/process/fixtures/detachParent.mjs`, which loads the compiled module
+on purpose. `oxlint`'s import resolver opens what a static specifier names, and the
+path it opens is a path the build deletes.
+
+**That is candidate five, and the test that ruled it out could not have seen it.**
+Both of its controls asked for output: a temporary file importing a module that does
+not exist reported nothing, and one importing a `dist/` file with a `no-var`
+violation reported nothing from it. Neither can tell "this resolves nothing" from
+"this resolves, and what it resolves to is opened rather than linted" — the second
+being what a resolver does when it _succeeds_, which is the state that fails. The
+row called that candidate "the shape worth suspecting" and it was the right one; the
+way it was eliminated is worth more than the elimination, because an insensitive
+control reads exactly like a negative result.
+
+**Reproduced on demand, then fixed.** A 40-line `LD_PRELOAD` shim that fails that
+one `openat` — matched on the path, every other open passed through untouched —
+reproduces the occurrence exactly: `<unknown>: error: Failed to open file
+…/dist/toolchains/processRunner.js with error "No such file or directory (os error
+2)"`, exit 1, with the same 27 warnings printed and no summary line, which is what
+the failure does to a run that would otherwise have summarised. Nothing else was
+staged: no race, no build, no timing. The fixture now builds its specifier at run
+time — `await import(new URL("../../../../dist/toolchains/processRunner.js",
+import.meta.url).href)` — the same target behind a specifier no static resolver
+follows, and under the same shim the run exits 0 and the shim never fires. The
+fixture is otherwise untouched, and the lane that drives it (`process-boundary`,
+7 tests) passes.
+
+The class is checked, not just the instance. `tests/boundary/importSurface.test.ts`
+asserts that no static specifier in `src/`, `tests/` or `scripts/` resolves into
+`dist/`, over every `.ts`, `.mts`, `.cts`, `.js`, `.mjs` and `.cjs` file in those
+roots, with the walk's own size asserted so a `roots` list that stopped matching
+the tree cannot pass quietly. It was measured against the pre-fix fixture rather
+than assumed: it fails, naming
+`tests/boundary/process/fixtures/detachParent.mjs -> ../../../../dist/toolchains/processRunner.js`.
+
+One import of build output is left alone, and the reason is measured rather than
+argued. `scripts/uvp.mjs` reaches the CLI through `import("../dist/cli.js")`, and
+`strace` shows this `oxlint` opening nothing for it: the resolver follows static
+specifiers only. If a later version follows dynamic ones too, that bin entry is
+where this arrives next, and the check's own comment says so where it will be read.
 
 The supervision row was the one place the dependency direction was inverted:
 `WorkspaceService` called `startSupervised` from `toolchains/local/processRunner`,

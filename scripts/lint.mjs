@@ -9,25 +9,26 @@ import { DIST_DIR, REPO_ROOT } from "./lib/paths.mjs";
 /**
  * Run oxlint, and when it fails, print the state of the tree as it failed.
  *
- * `oxlint` has failed a gate three times with `Failed to open file
- * …/dist/… with error "No such file or directory (os error 2)"`, and the three
- * logs that survive say nothing about where that path came from, or what else was
- * running. Six tests of four candidate mechanisms found nothing, so the next
- * occurrence is worth more than a seventh guess — but only if it arrives with
- * evidence attached.
+ * `oxlint` failed a gate three times with `Failed to open file …/dist/… with error
+ * "No such file or directory (os error 2)"`, and the three logs that survive say
+ * nothing about where that path came from, or what else was running. Six tests of
+ * four candidate mechanisms found nothing, so the next occurrence was worth more
+ * than a seventh guess — but only if it arrived with evidence attached.
  *
- * The report below is that evidence, collected at the moment of failure rather
- * than reconstructed afterwards: the argv oxlint was handed, whether `dist/`
- * exists and how long ago it was written, what the named paths look like now, and
- * which builds were alive in this repository. It goes to stderr, after oxlint's
- * own output, and only on a non-zero exit — a passing run costs one process and
- * prints nothing new.
+ * It arrived on 2026-10-16, and the report below is what it carried: collected at
+ * the moment of failure rather than reconstructed afterwards, naming the path, its
+ * mtime, and the build processes alive in this repository. That the named file had
+ * been written 48 ms before the failure, and that `compile` was the task rewriting
+ * `dist/` at the time, is what pointed at the resolver — `oxlint` *opens* the
+ * target of a static import, and `tests/boundary/process/fixtures/detachParent.mjs`
+ * imported `dist/toolchains/processRunner.js`. Failing exactly that one `open`, and
+ * nothing else, reproduces the failure on demand; the fixture now builds its
+ * specifier at run time and the gate is green. #13 has the reproduction.
  *
- * What it cannot do: it sees a read that failed, not the read that asked for the
- * path. If the next occurrence names a path whose directory listing was taken
- * before `compile` rewrote `dist/`, this says so; if it names one that was never
- * in the walk, this says only that it was absent at the time. Neither is a
- * diagnosis, and the row stays open either way.
+ * The report stays. It costs one process on a passing run, prints nothing new, and
+ * it is why the fourth occurrence was worth more than the three before it: what it
+ * cannot do is see the read that *asked* for the path, and this one did not need
+ * to — the timing it recorded was enough to find the reader.
  */
 
 const require = createRequire(import.meta.url);
