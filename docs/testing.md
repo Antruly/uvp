@@ -935,8 +935,11 @@ a platform kill with nothing to read.
 (`Mutation sweep`, `workflow_dispatch`, success, 2026-10-16) mutated all eight
 files into **1281 mutants**. Its `npx --no-install stryker run` step took **51
 minutes 53 seconds** against the 41-minute projection, and it reported **936
-killed, 1 timeout, 344 survived, 0 with no coverage, 0 errors — 73.15%**, with the
-summary script printing `936/1281 mutants detected — score 73.1%`. That is **2.4
+killed, 1 timeout, 344 survived, 0 with no coverage, 0 errors — 73.15%**. The
+summary script printed `936/1281 mutants detected — score 73.1%` on the day, and
+prints `937/1281` beside `344 survivor(s)` for the same report now that it counts a
+timeout where Stryker's own metric does — the paragraph below has that counting.
+That is **2.4
 seconds per mutant** in CI against the 1.9 measured on the workstation this
 document's other numbers come from, so the smaller machine costs about a quarter
 more time and the 90-minute limit is not close.
@@ -971,11 +974,23 @@ kills carry the suite's own summary, so none rests on the group's exit code alon
 is what run `38919206652`'s summary prints now that the count is in the script;
 what it printed on the day is the line quoted above it.
 
-One number in that job is still wrong, and it is filed rather than explained away:
-the summary counts a `Timeout` mutant as a survivor where Stryker's own table
-counts it as detected, so the same run printed `936/1281 … 73.1%` and `73.15%`,
-and listed the one timeout under `src/application/assertions.ts:74` in a 345-row
-survivor table. See [#43](https://github.com/Antruly/uvp/issues/43).
+**One number in that job was wrong, and it is fixed rather than explained away.**
+The summary counted a `Timeout` mutant as a survivor where Stryker's own metric
+counts it as detected — `mutation-testing-metrics@3.8.4`'s
+`totalDetected = timeout + killed`
+(`dist/src/calculateMetrics.js:170`) — so the same run printed `936/1281 … 73.1%`
+beside `73.15%` and listed the one timeout under
+`src/application/assertions.ts:74` in a 345-row survivor table, under a caption
+saying a survivor is a place where the code can be wrong and the suite still
+passes. A mutant that stops the group terminating is not that: the run did not
+pass, it did not finish. The counting now comes from that package rather than from
+this repository's reading of it — the same source keeps errored, ignored and
+pending mutants out of the total, where `total - survivors` had counted them as
+detected — so the report above prints `937/1281 mutants detected — score 73.1%`
+and `344 survivor(s)`, with the timed-out mutant named on its own line instead.
+The score line keeps this document's one decimal, so 73.15% and 73.07% both print
+as `73.1%`; the counts beside it are exact, and Stryker's own line uses two
+decimals. See [#43](https://github.com/Antruly/uvp/issues/43).
 
 The four ways, all of them still on the record:
 

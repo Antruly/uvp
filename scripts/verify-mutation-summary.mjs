@@ -40,6 +40,19 @@ import { REPO_ROOT } from "./lib/paths.mjs";
  * carried, none killed, a suite that reported no tests, and a report whose runner
  * is not the one this classifies.
  *
+ * ## The counting, which is the other half of what a score is
+ *
+ * The score is the metrics package's, and `mutation-testing-metrics@3.8.4` counts
+ * a `Timeout` as detected (`totalDetected = timeout + killed`) while this summary
+ * counted it as a survivor — one mutant apart in the first full sweep, which is
+ * the difference between the 73.15% Stryker printed and the 73.07% printed beside
+ * it ([#43](https://github.com/Antruly/uvp/issues/43)). The same package keeps
+ * errored, ignored and pending mutants out of the total altogether, where the
+ * summary's `total - survivors` counted them as detected. Neither is a shape a
+ * real sweep has produced, which is exactly why they are fixtures: there is no
+ * run to check them against until there is a run that has one, and by then the
+ * number is already wrong. The three cases below pin each reading.
+ *
  * ## What this does not establish
  *
  * It is a producer golden, not the workflow: the real input is a 52-minute sweep
@@ -220,6 +233,55 @@ const CASES = [
     covers: ["an absent runner is the third state, not a pass"],
   },
   {
+    name: "a timeout is detected, where the metrics package counts it",
+    report: report([
+      mutant({ id: "0", statusReason: COLORED_SUITE_OUTPUT }),
+      mutant({ id: "1", status: "Timeout", location: { start: { line: 219 } } }),
+      mutant({ id: "2", status: "Survived", location: { start: { line: 12 } } }),
+    ]),
+    status: 0,
+    includes: [
+      "2/3 mutants detected — score 66.7%.",
+      "Timeout: 1 of the detected mutants — src/domain/errors.ts:219.",
+      "These are mutants the runner's limit stopped rather than a failing test",
+      "| src/domain/errors.ts:12 | `true` | Survived |",
+    ],
+    // The timeout in the survivor table is the defect this case exists for: the
+    // old counting listed it there and scored the report 1/3.
+    excludes: ["| src/domain/errors.ts:219 |", "Timeout: no mutant exceeded", "Outside the score"],
+    covers: ["a timeout is counted as the metrics package counts it"],
+  },
+  {
+    name: "an errored mutant is neither detected nor surviving",
+    report: report([
+      mutant({ id: "0", statusReason: COLORED_SUITE_OUTPUT }),
+      mutant({ id: "1", status: "Survived", location: { start: { line: 12 } } }),
+      mutant({ id: "2", status: "RuntimeError", location: { start: { line: 30 } } }),
+      mutant({ id: "3", status: "Ignored", location: { start: { line: 31 } } }),
+    ]),
+    status: 0,
+    includes: [
+      "1/2 mutants detected — score 50.0%.",
+      "Outside the score: 1 RuntimeError, 1 Ignored.",
+    ],
+    excludes: ["| src/domain/errors.ts:30 |", "| src/domain/errors.ts:31 |", "3/4 mutants"],
+    covers: ["errors and ignored mutants are outside the denominator"],
+  },
+  {
+    name: "a report with nothing scoreable is not a score at all",
+    report: report([
+      mutant({ status: "RuntimeError" }),
+      mutant({ id: "1", status: "CompileError", location: { start: { line: 2 } } }),
+    ]),
+    status: 1,
+    includes: [
+      "2 mutants were reported and none of them was scoreable",
+      "1 RuntimeError, 1 CompileError",
+    ],
+    excludes: ["mutants detected", "Kill basis:", "Timeout:"],
+    covers: ["the third state exists where the metrics package returns NaN"],
+  },
+  {
     name: "a mutant that ran no test is still not a score",
     report: report([
       mutant({ statusReason: COLORED_SUITE_OUTPUT }),
@@ -245,6 +307,9 @@ const READINGS = [
   "carry no suite",
   "no mutant was killed",
   "Kill basis: not read",
+  "Timeout: 1 of the detected mutants",
+  "Outside the score: 1 RuntimeError, 1 Ignored.",
+  "none of them was scoreable",
 ];
 
 /**
@@ -339,8 +404,8 @@ const main = async () => {
   console.log(
     `mutation summary: ${String(CASES.length)} fixture report(s) over ${String(READINGS.length)} ` +
       "readings — all-carried, partly-carried, none-killed and not-read are each reported as " +
-      `this check expects, and ${FILE_UNDER_TEST} declines to classify a runner whose output ` +
-      "it is not written for",
+      "this check expects, a timeout is counted as detected and an errored mutant is not, and " +
+      `${FILE_UNDER_TEST} declines to classify a runner whose output it is not written for`,
   );
 };
 
