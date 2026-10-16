@@ -111,6 +111,11 @@ const createCapture = (maxBytes: number) => {
  * break on the first prefix that has a space in it — which is a path someone
  * has. Single quotes are used because nothing inside them is special to a POSIX
  * shell; a value that contains one is closed, escaped, and reopened.
+ *
+ * One consequence is worth stating because it looks like an inconsistency: on
+ * Windows the executable is quoted in every recorded line, since `C:\…\node.exe`
+ * holds backslashes and a backslash is an escape in the notation the line is
+ * written in. That is the rule working, not a special case for Windows.
  */
 const shellQuote = (value: string): string =>
   /^[A-Za-z0-9_@%+=:,./-]+$/u.test(value) ? value : `'${value.replaceAll("'", String.raw`'\''`)}'`;
