@@ -2565,6 +2565,14 @@ assumption in three places, and the counting is the useful part of the finding:
 | 4        | `artifacts.test.ts` names its outputs the POSIX way, and `discoverArtifacts` decides what a build produced from a mode bit on POSIX and an extension on Windows                                                                                                                                          | [#19](https://github.com/Antruly/uvp/issues/19) |
 | 4        | a recorded command line is rendered in POSIX dialect — `env LC_MESSAGES=C CMAKE_PREFIX_PATH='C:\…' cmake -S …` — and four assertions read the raw string, so they fail on the quoting rather than on the prefix                                                                                          | [#20](https://github.com/Antruly/uvp/issues/20) |
 
+**The artifacts row is fixed, and the rest of the table is what the first run
+counted.** `artifacts.test.ts` now names each file it means as a build output the
+way this host names one, taking that answer from `EXE` in `src/toolchains/host.ts`
+rather than spelling it again — so its 4 tests run on Windows and the skips that
+named #19 are gone. The two remaining rows are still skipped by name until their
+own fixes land, which is what makes the count a thing that falls rather than a
+claim that it did.
+
 The failure text is what makes the first group a fixture defect rather than a
 product one:
 

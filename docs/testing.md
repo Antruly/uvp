@@ -255,6 +255,12 @@ The skips are `it.skipIf`/`describe.skipIf` with the reason in the **title**, so
 a pass. Each names its issue, which is where the removal is tracked; the count
 above is the number that should fall as those land.
 
+**The artifacts row is fixed.** The fixture now names every file it means as a
+build output the way this host names one — `EXE` from `src/toolchains/host.ts`,
+which is the product's own answer to that question — so its 4 tests run on
+Windows and the skips that named #19 are gone. The three rows above stay as the
+first run counted them; 4 of the 53 have landed, leaving 49 skipped.
+
 The lane also found one defect it could not have run without: `scripts/run-tests.mjs`
 spawned `node_modules/.bin/vitest` directly, which on Windows is not a file that
 can be executed — only `vitest.cmd` and a shell script are there. `npm run
