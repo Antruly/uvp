@@ -3,6 +3,13 @@ name: Mutation sweep
 # Mutation testing is slow by nature and its value is in reading the survivors,
 # not in gating a merge. It runs on a schedule and on demand, never on a pull
 # request — a PR that fails on a mutation score invites editing the score.
+#
+# The sweep does carry a floor: `thresholds.break` in stryker.config.mjs fails
+# this job when the score drops below it. A weekly run has none of the pressure
+# that makes a score gate a bad idea on a pull request — tripping the floor
+# produces a failed workflow and a report to read, which is what the lane is for.
+# Because Stryker signals that with a non-zero exit, the sweep step tolerates
+# failure and a later step fails the job: the survivor list is printed either way.
 
 on:
   schedule:
@@ -25,11 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     # Ninety minutes, raised from sixty when the sweep moved to the `command`
     # runner: every mutant now runs the whole 396-test group instead of a per-test
-    # plan, measured at 1.9 seconds per mutant — 141 mutants in 4 minutes 30
-    # seconds — on an 18-core workstation, which projects to about 41 minutes for
-    # the 1281 mutants this tree reports. The job runs on something smaller than
-    # that workstation, so the earlier limit did not cover a sweep here. The limit
-    # is what turns a sweep that overruns into a reported failure with its reports
+    # plan. That is 1.9 seconds per mutant — 141 mutants in 4 minutes 30 seconds —
+    # on an 18-core workstation, which projected to about 41 minutes for the 1281
+    # mutants this tree reports; the first full sweep here took 51 minutes and 53
+    # seconds, so the projection was optimistic by about a quarter and the earlier
+    # 60-minute limit would not have covered a sweep on this runner. The limit is
+    # what turns a sweep that overruns into a reported failure with its reports
     # uploaded, instead of a platform kill with nothing to read.
     timeout-minutes: 90
     steps:
@@ -47,12 +55,25 @@ jobs:
       - name: Preflight the configuration
         run: npx --no-install stryker run --dryRunOnly
       - name: Run the sweep
+        id: sweep
+        # Stryker exits non-zero both when the score falls below `thresholds.break`
+        # and when the run itself fails, and the two are told apart by the report
+        # this job is about to summarize. Absorbing the exit code here is what
+        # keeps the summary and the reports from being skipped on the one run that
+        # most needs reading; the last step fails the job afterwards.
+        continue-on-error: true
         run: npx --no-install stryker run
       - name: Require both reports from the completed sweep
+        # `outcome != 'skipped'` rather than `!cancelled()` alone: a failure
+        # before the sweep — a bad `npm ci`, a rejected configuration — skips the
+        # sweep step, and these steps should not then report a missing report as
+        # a second, less useful failure on top of it.
+        if: ${{ !cancelled() && steps.sweep.outcome != 'skipped' }}
         run: |
           test -s reports/mutation/uvp.json
           test -s reports/mutation/uvp.html
       - name: Summarize survivors
+        if: ${{ !cancelled() && steps.sweep.outcome != 'skipped' }}
         run: node scripts/ci/mutation-summary.mjs
       - name: Retain the reports
         if: ${{ !cancelled() }}
@@ -62,3 +83,8 @@ jobs:
           path: reports/mutation/
           if-no-files-found: warn
           retention-days: 30
+      - name: Fail the job when the sweep step did
+        if: ${{ !cancelled() && steps.sweep.outcome == 'failure' }}
+        run: |
+          echo "::error::the sweep step exited non-zero: either the score fell below thresholds.break in stryker.config.mjs, or Stryker failed outright. The report's thresholds and the survivor list above say which."
+          exit 1
