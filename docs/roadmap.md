@@ -630,6 +630,7 @@ implicit.
 | ✅  | CI's database and HTTP/3 coverage: observed at last in run `38801883813` (2026-10-16), the first run in which the real-libuvcpp lane did anything — it reports `UVCPP_DB_ENABLE 1` and `UVCPP_HTTP3_ENABLE 1` in the install's config header, and both the h3 service and the probe's HTTP/3 exchange passed. See [below](#the-real-lane-s-first-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ✅  | `npm run build:native-probe` builds the HTTP/3 exchange only when the install it is pointed at exposes the HTTP/3 C ABI, so a libuvcpp built without HTTP3/QUIC no longer costs the WebSocket half its native stack. The gate asks the compiler and names the third answer — an install that contradicts itself — instead of concluding "no HTTP/3" and dying in a header. See [below](#the-probe-s-http-3-build-gate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and has passed on every run since, local and CI, including 300 standalone runs of that file on this host with none. That bounds how often it happens here rather than explaining it: the one occurrence was in CI, where the load and the image are things this host does not reproduce. **Bounded and labelled by decision, not chased** (2026-10-16) — and the class narrowed in the meantime: one of the two surviving mechanisms below is the synchronous `spawn` throw, which #33 measured, reproduced and fixed, so a repeat of that member no longer arrives as `execution_failure` at all but as `launch_failed` carrying the path. #14 was closed on that decision, not on an explanation. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ⬜  | A launch of a generated service was refused once in CI by `spawn ETXTBSY` — the kernel declining to `execve` a file something holds open for writing — and only one half of it is closed: Node **throws** for that errno instead of emitting `error`, so the refusal escaped the error contract as a bare `Error` with no path in it, and the supervisor converts the throw now, so a repeat arrives as `launch_failed` naming the binary. What held the handle is still unknown, after four candidates were eliminated one by one. **Bounded and labelled by decision, not chased** (2026-10-16). See [below](#the-refused-launch)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ✅  | `tests/conformance/captureReplay.test.ts` has failed **four** times with `TransportFailure: socket hang up`, each from a request through a capture proxy: twice inside a full local gate (2026-10-16T05:59:33Z, 06:56Z) and twice from standalone runs on an idle machine, which ruled the gate's load out and settled that this row wanted a sample rather than a theory. The proxy's number had been handed out twice, and the client's global keep-alive pool still held a socket for that `host:port`; the mechanism is constructed rather than sampled below. Fixed at the reservation, where a number is now handed out once per process, with a test that measures its own strength. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens, and the part a container can rehearse has now been rehearsed: the distro image's own tools, and libuvcpp 1.7.0's configure against its OpenSSL, which accepted 3.5.5 and then stopped on a dependency fetch this host's route could not complete in three attempts. Neither is a claim about a runner. **Decided on 2026-10-16: the lanes ride the rollout** rather than pinning `ubuntu-24.04` for the month, because the same evidence that makes pinning cheap makes it unnecessary — neither known change breaks anything here — and a pin would freeze two lanes' environment to avoid learning what a month would otherwise have taught. What stays open is therefore not a decision but an observation: no run has landed on 26.04 yet, so this row closes when one does, and a failure there is an environment fact to read rather than a decision to take. See [below](#ubuntu-2604) |
 | ✅  | The runner warned that Node.js 20 was deprecated, naming five of the six actions pinned here by SHA. `runs.using` in each action's own `action.yml` read `node20` at all six pinned SHAs and `node24` at every major Dependabot proposed, which is how the sixth was counted without waiting for a warning about it, and all six are adopted in [the pins above](#action-pins). Two of the majors change more than their runtime, both read rather than assumed: `setup-node` v5 caches by itself when `package.json` declares a `packageManager`, which this one does and `.github/actions/npm-cache` already owns, so it is switched off at all 11 call sites; `download-artifact` v8 fails a run on a digest mismatch where it used to warn. `checkout` v7 refuses a fork's code under `pull_request_target` — the event `pr-readiness.yml` uses — but its guard reads the requested ref, repository and commit, and that workflow asks for the default branch and none of those.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -1424,6 +1425,79 @@ way, because nothing on the server side can tell a stale socket from a fresh one
 Retrying once on `req.reusedSocket` is the fix clients usually carry, and it would
 change the transport's observable behaviour, so it is named for the design discussion
 rather than taken here.
+
+### A launch refused with no path in it {#the-refused-launch}
+
+Run `38919703248`, job _Source tests_, failed one test — and the failure is not the
+one the test was written to find:
+
+```
+FAIL  tests/conformance/bundleDiff.test.ts > two passes of one service >
+      reports a service that stopped answering as declared as a change, digest and all
+Error: spawn ETXTBSY
+  ❯ WorkspaceService.startSupervised [as supervisor] src/toolchains/processRunner.ts:282:17
+  ❯ WorkspaceService.run src/application/WorkspaceService.ts:331:27
+```
+
+Three facts about the occurrence. It is **not the diff under test**: the branch was
+documentation-only, three markdown files and no source, and the same job passed on
+the same sources twelve minutes earlier. It is **one occurrence, not two**: the
+_Portable tests_ job also went red and did not observe it itself — it merges the
+other jobs' reports, and its step reads `SOURCE_RESULT: failure` — so counting the
+merged report would double the rate. And it had **never happened before**:
+`git log --all --grep=ETXTBSY` is empty and no document in the repository mentioned
+the errno.
+
+**The errno is the one Node does not report the way the others are reported.**
+`spawn` was probed here with three refusals side by side, each spawning a `#!/bin/sh`
+script, and the third is a different shape from the first two:
+
+| The kernel said              | How it arrives               | Message               | `syscall`      |
+| ---------------------------- | ---------------------------- | --------------------- | -------------- |
+| `ENOENT` (no such file)      | `error` event, later turn    | `spawn <path> ENOENT` | `spawn <path>` |
+| `EACCES` (not executable)    | `error` event, later turn    | `spawn <path> EACCES` | `spawn <path>` |
+| `ETXTBSY` (open for writing) | **thrown by `spawn` itself** | `spawn ETXTBSY`       | `spawn`        |
+
+`ChildProcess.spawn` forwards `EACCES`, `EAGAIN`, `EMFILE`, `ENFILE` and `ENOENT` to
+the `error` event and throws `new ErrnoException(err, "spawn")` for every other errno.
+The third row is reachable with no race at all — hold a handle on the target, from
+another process with `open(path, "w")` or in the same one with `openSync(path, "r+")`
+— and closing the handle makes the next spawn succeed. That is what made this the one
+unexplained occurrence in this table that could be settled rather than bounded: the
+defect the occurrence exposed is forced, so it did not have to wait for a second
+sighting.
+
+**Half of it is fixed.** `startSupervised` built its `started` promise from the two
+events alone, so a synchronous throw happened before a handle existed to reject
+through, and `WorkspaceService.run` — which calls the supervisor _outside_ the `try`
+that turns a rejection into `launch_failed` — let it escape with no code, no category,
+no remedy, and no path in the message either. It is the plain `Error` that reaches
+`toUvpError` with no code of its own, which is one of the two mechanisms
+[the cancellation flake](#the-cancellation-flake) is still waiting for; that row now
+records the narrowing. The supervisor catches the throw and returns a handle whose
+`whenStarted()` rejects with it, so the refusal follows the same route as the missing
+binary and the unexecutable one — asserted side by side in
+`tests/boundary/process/launchRefusal.test.ts`, where the held-open case carries its
+own control, and where the test reports `expected 'execution_failure' to be
+'launch_failed'` on the revision before the fix. The port's docblock no longer claims
+the host always reports asynchronously, which is the sentence the errno falsified.
+
+**The other half is not, and is not being chased.** Something had `…/build/svc` open
+for writing at the moment uvp exec'd it, and four candidates were eliminated rather
+than left plausible: the fixture's own write (an awaited `writeFile`, then `chmod`,
+both before the spawn), a second writer of that path (every conformance file mkdtemps
+its own root, and the tree's fixed temporary names are ones no test writes), uvp's own
+run and verify paths (`WorkspaceService.ts:240` is workspace _creation_; the built
+binary is read, never rewritten), and the mirror-image story — a file being _executed_
+is what makes a later `open` for writing fail, so a leftover service would have
+surfaced this from `writeFile` and not from `spawn`. What is left is one witness and
+an unknown mechanism, and the one occurrence was on a runner this host is not.
+
+So, decided the same way as the two rows above it: **bounded and labelled**. The
+label is what the fix bought — a repeat arrives as `launch_failed` with the binary in
+`details.command` and the errno in the message, so it identifies its own workspace on
+the first try, which is exactly what the first occurrence could not do. Nothing here
+establishes who held the handle, and nothing here claims the rate has changed.
 
 ### The skip list, wherever a run sets its own reporters {#the-skip-list}
 
