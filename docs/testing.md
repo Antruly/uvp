@@ -954,10 +954,25 @@ mislead: there is no per-test attribution left, so a survivor's `coveredBy` no
 longer says which test should have caught it; and a mutant whose damage stops the
 run from starting at all reads as a kill rather than as a survivor or as a broken
 run — which also makes the percentage an **upper bound**, since a group that fails
-for a reason of its own is indistinguishable from one a mutant killed. The fourteen
-survivors are real locations — `src/domain/errors.ts:148`'s conditional `docs`
-spread among them, and the message strings beside it — and each one still has to be
-read, because a survivor is either a missing assertion or an equivalent mutant.
+for a reason of its own is indistinguishable from one a mutant killed. The
+survivors are real locations, and each one still has to be read, because a survivor
+is either a missing assertion or an equivalent mutant.
+
+**`errors.ts`'s fourteen have been read, and the read is the argument for the
+check.** Twelve of the fourteen were missing assertions rather than equivalent
+mutants, and they are pinned as of [#31](https://github.com/Antruly/uvp/issues/31):
+the retryable table for the four codes whose category says the environment might be
+different next time, the `docs` conditional at `:148` in both directions and as an
+inversion, the spread it guards, the failure's `name`, the whitespace-only cause,
+`retryable: false` on a thrown non-`Error`, a `ZodError` carrying no issues, and the
+fallback sentence. The file moves from **90.07% to 98.58%** — 139 of 141.
+
+The two that remain are left deliberately. `:256` and `:257` are the two halves of
+one remediation sentence, so killing either means asserting user-facing prose, which
+turns every later wording change into a test failure — an assertion that would
+measure this document rather than the suite. They are unpinned here and in the test
+file, recorded rather than quietly dropped. The sweep's other 330 survivors are
+still unread.
 
 **In that run the upper bound was tightly zero, and the line says so.** Over the
 936 kills of the retained report, **936 carry the suite's own summary** in their
