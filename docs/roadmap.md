@@ -441,14 +441,15 @@ x Failed to open file .../dist/toolchains/processRunner.js with error
   "No such file or directory (os error 2)"          # 2026-10-16, third
 ```
 
-These three lines are one error from each of the three occurrences, and the `Found
-26 warnings and 1 error.` that stood under them until 2026-10-16 was no single run's
-output: the two occurrences that left a log — both from 2026-10-15, 18:16 and 18:58
-local — each end `Found 22 warnings and 1 error.`, and 26 is the warning total of the
-later tree, the re-run after the third occurrence. Turbo's own summary for both logs
-reads `Failed: //#lint`, so the open failure is the task's single error and it is
-what turns the gate red. The third occurrence is quoted from its run rather than from
-a log that is still here.
+These three lines are one error from each of the three occurrences, and the block as
+it stood read as one run's output — which no log that survives is. The two
+occurrences that left a log, both from 2026-10-15, 18:16 and 18:58 local, each
+contain a single one of those lines followed by `Found 22 warnings and 1 error.`,
+and turbo's own summary for both reads `Failed: //#lint`: the open failure is the
+`lint` task's only error and it is what turns the gate red. The `Found 26 warnings
+and 1 error.` that stood under the three lines is the third tree's total — the run
+that followed the third occurrence, above, reports 26 warnings and no errors — but
+the third occurrence kept no log, so what its own summary said was not observed.
 
 The two logs also settle what the section could only infer from the task graph:
 `compile` really does run beside `lint` — `compile:` and `lint:` output interleaves
