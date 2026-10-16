@@ -2,8 +2,9 @@
 PR title: type(optional-scope): imperative outcome
 The title becomes the squash-merge commit subject and the generated changelog entry.
 
-Agents: do not open this PR, do not write this description, and do not complete
-the Author readiness declarations. Leave them for the human owner.
+Agents: leave the Author readiness declarations for the human owner, and merge only
+once the owner has explicitly approved this PR —
+see CONTRIBUTING.md#pull-request-ownership-and-readiness.
 -->
 
 ## Summary
