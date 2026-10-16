@@ -83,6 +83,7 @@
     "verify:actions": "node scripts/verify-actions.mjs",
     "verify:artifact-guards": "node scripts/verify-artifact-guards.mjs",
     "verify:docs-interpolation": "node scripts/verify-docs-interpolation.mjs",
+    "verify:mutation-summary": "node scripts/verify-mutation-summary.mjs",
     "verify:pack-reproducible": "node scripts/verify-pack-reproducible.mjs",
     "verify:lane-plan": "node scripts/ci/plan.mjs --table-only",
     "artifacts:tool-catalog": "node scripts/generate-mcp-tool-catalog.mjs",
@@ -102,7 +103,7 @@
     "check": "turbo run typecheck lint format:check metadata:check knip",
     "check:fast": "turbo run typecheck lint",
     "check:ci": "turbo run typecheck lint format:check metadata:check verify:lane-plan knip jscpd docs:check docs:build",
-    "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run verify:reporters && npm run verify:actions && npm run verify:artifact-guards && npm run verify:docs-interpolation && npm run verify:pack-reproducible && npm run test:run",
+    "check:pr": "npm run check:ci && npm run verify:test-discovery && npm run verify:reporters && npm run verify:actions && npm run verify:artifact-guards && npm run verify:docs-interpolation && npm run verify:mutation-summary && npm run verify:pack-reproducible && npm run test:run",
     "prepare": "husky"
   },
   "dependencies": {
