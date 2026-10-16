@@ -12,37 +12,51 @@
  * failure, and the run costs minutes per mutant. The targets below are the pure
  * decision logic — assertions over a real exchange, the feature assessment that
  * decides what a libuvcpp build provides, and the coverage algebra — where a
- * surviving mutant is a genuine gap and the suite runs in milliseconds.
+ * surviving mutant is a genuine gap and the whole group's 396 tests run in about
+ * two seconds.
  *
- * **This configuration does not currently produce a measurement.** The
- * `vitest` runner plans every non-static mutant against the tests that covered
- * it, and vitest 5 cannot match the ids it plans with, so those mutants run
- * zero tests and are reported `Survived`. `scripts/ci/mutation-summary.mjs`
- * fails on a report of that shape rather than printing a score over it, and
- * docs/testing.md, "The score is not a measurement yet", carries the measurements
- * and the alternatives. Nothing here should be read as a working lane until that
- * section says otherwise.
+ * **The runner is `command`, and that is a deliberate trade.** The `vitest`
+ * runner plans every non-static mutant against the tests that covered it, and
+ * vitest 5 cannot match the ids it plans with — core hands it `file#suite test`,
+ * vitest matches `" > "` — so those mutants ran zero tests and were reported
+ * `Survived`: 934 of 1294 in the sweep that found this, with all 199 kills
+ * static. The correct repair is one separator in two copies of the dependency's
+ * own helper, and applying it here would mean this repository carrying a patched
+ * dependency and the machinery to keep the patch applied, which is a
+ * supply-chain decision rather than a footnote to a CI bug.
+ *
+ * So the sweep runs the whole mutation group for every mutant and grades it by
+ * exit code alone: a mutant is killed exactly when the `node scripts/run-tests.mjs
+ * mutation` command exits non-zero, which is the standard criterion and the
+ * `unran.length === 0` condition `scripts/ci/mutation-summary.mjs` requires. What
+ * that costs is the per-test attribution, which the summary does not use, and
+ * time — measured at 1.9 s per mutant for this group, so ~41 minutes for a sweep
+ * against the job's 90-minute limit. If a faster sweep is ever worth buying, the
+ * way to buy it is the patched dependency, and that decision has not been taken.
+ *
+ * Two consequences of the runner change are visible elsewhere. The `vitest`
+ * runner package and the TypeScript checker package were only ever referenced
+ * from this file's `plugins` list, so both are gone from `package.json` rather
+ * than carried unused. And `knip.json` carries `@stryker-mutator/command-runner`
+ * in `ignoreDependencies`: knip's Stryker plugin reads `testRunner` as
+ * `@stryker-mutator/<value>-runner`, which is right for a published runner and
+ * wrong for `command`, a runner built into core that has no package to install.
  */
 const config = {
   $schema: "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  testRunner: "vitest",
-  plugins: ["@stryker-mutator/typescript-checker", "@stryker-mutator/vitest-runner"],
-  vitest: {
-    // The scope is a config file rather than a project name: Stryker 10 dropped
-    // `vitest.project`, and with it the config this repository had been carrying
-    // since the import, which is why the sweep could not start at all.
-    // `vitest.mutation.config.ts` names the two projects whose tests exercise
-    // the files below, taken from the suite's own project list.
-    configFile: "vitest.mutation.config.ts",
-    // A mutant re-runs only the tests that covered it, which is what keeps a
-    // sweep over nine modules affordable.
-    related: true,
+  testRunner: "command",
+  commandRunner: {
+    // The suite's own entry point, scoped to the mutation group by
+    // `scripts/lib/test-projects.mjs`. `scripts/run-tests.mjs` resolves the
+    // Vitest entry point and starts it through the Node already running, which
+    // is what keeps this line working on a host with no `node_modules/.bin`.
+    command: "node scripts/run-tests.mjs mutation",
   },
-  // The TypeScript checker is installed and would be the right check — it
-  // refuses a mutant that does not compile, which is a survivor that measures
-  // nothing. It cannot run here: TypeScript 7.0.2's JavaScript API is `version`
-  // and `versionMajorMinor` alone, so the checker's tsconfig and program
-  // plumbing has nothing to call. The suite fails on a type error already.
+  // The TypeScript checker would be the right check — it refuses a mutant that
+  // does not compile, which is a survivor that measures nothing. It cannot run
+  // here: TypeScript 7.0.2's JavaScript API is `version` and `versionMajorMinor`
+  // alone, so the checker's tsconfig and program plumbing has nothing to call.
+  // The suite fails on a type error already.
   checkers: [],
   // Core rewrites the sandbox's tsconfig through `ts.parseConfigFileTextToJson`,
   // for the same missing API, and it does that whenever this path names a file
@@ -50,15 +64,6 @@ const config = {
   // repository — renaming it to `tsconfig.json` crashes the run before the first
   // mutant, which is what the committed configuration did.
   tsconfigFile: "tsconfig.json.absent",
-  typescriptChecker: {
-    // Accurate type checking per mutant roughly doubles the run for a
-    // compile-heavy project, and the suite already fails on a type error.
-    prioritizePerformanceOverAccuracy: true,
-  },
-  // What the per-test plan would use if vitest 5 could honour it. The runner
-  // returns its own coverage from the dry run regardless of this setting, so
-  // "off" does not avoid the broken plan either — see docs/testing.md.
-  coverageAnalysis: "perTest",
   // No break threshold. A mutation score is a signal to investigate, and a gate
   // that fails a build on a score invites mutating the score instead of the
   // tests. The mutations that survive are what get read.
@@ -84,8 +89,8 @@ const config = {
     // mutations that matter are the ones that turn "I could not compare these"
     // into a yes or a no. `bundleFile.ts` is deliberately absent: it reads a file,
     // so most of its mutants are decided by the conformance lane rather than by
-    // the `domain` and `services` projects this runner is scoped to, and a score
-    // that counted them would be measuring the runner's scope rather than the
+    // the `domain` and `services` projects the mutation group covers, and a score
+    // that counted them would be measuring the group's scope rather than the
     // tests.
     "src/application/bundleDiff.ts",
     // Evidence and unknown semantics.

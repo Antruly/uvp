@@ -14,6 +14,7 @@
   },
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["openssl", "ld"],
+  "ignoreDependencies": ["@stryker-mutator/command-runner"],
   "rules": {
     "files": "error",
     "dependencies": "error",

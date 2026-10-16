@@ -90,3 +90,21 @@ export const BUILT_PROJECT_NAMES = BUILT_TEST_PROJECTS.map((project) => project.
 
 /** Project names that run against source only. */
 export const SOURCE_PROJECT_NAMES = SOURCE_TEST_PROJECTS.map((project) => project.name);
+
+/**
+ * The projects a mutation sweep covers.
+ *
+ * Not every source project, and the split is the same one `stryker.config.mjs`
+ * gives for its targets: this is the pure decision logic — the assertion
+ * algebra, the feature assessment, the coverage and evidence algebra — where a
+ * surviving mutant is a genuine gap in the suite. The other projects build real
+ * C++ and open real sockets, so a mutant there is more often a build failure
+ * than a test failure, and it costs minutes per mutant to find that out.
+ *
+ * It lives here, beside the list that decides which files are in which project,
+ * because the mutation lane has to ask the suite's own question: it runs this
+ * group through `scripts/run-tests.mjs`, so a project renamed here renames it
+ * there, and a second copy of the two names is how the sweep and the lane it
+ * measures stop agreeing.
+ */
+export const MUTATION_PROJECT_NAMES = ["domain", "services"];

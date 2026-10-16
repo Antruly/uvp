@@ -637,7 +637,7 @@ implicit.
 | ✅  | `uvp_assert_exchange`'s `results[]` carries `status: satisfied \| unmet \| undetermined` in place of `passed`, one row per assertion asked, and `not_evaluated[]` is gone: `satisfied + unmet + undetermined` is the row count, so a check nobody could evaluate is visible in the array rather than inferable from a counter. The vocabulary is declared once, in `src/domain/verdict.ts`, and `uvp_doctor`'s feature verdicts read it too. `uvp_verify` is unchanged — it has no per-check rows, and its third state reaches a caller through `unverified[]` and the coverage note. See [below](#assertion-third-state)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ✅  | A workflow job whose own `if:` is wider than its steps assume: `test` runs whenever the run is not cancelled, so that a failed shard still produces a merged report, but it downloaded `uvp-test-runtime`, which `build` uploads only when `code` or `package` is selected. Two documentation-only pushes (`315d494`, `0dcbd94`) went red in _Portable tests_ at `Download the built runtime` while every lane that job depends on was correctly skipped, and the guard the job does carry sits below the download. The three artifact steps are guarded on `code` individually, a step above them says which of the two cases the run is in, and `npm run verify:artifact-guards` now compares every reader's condition against its writer's as a logical implication. See [below](#artifact-guards)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ✅  | The worked example in `docs/evidence.md` was hand-written, and every field it showed was wrong the same way: a `vb_`-prefixed `bundle_id`, `evidence_ids`, `unknown_ids`, and `members[]` entries carrying `subject`, `observed` and `derived`. No tool returns any of those; the page shows two captures of a real pass now. They settled the claim beside the example too, that the envelope holds references "so the bundle holds the detail". It does not: `toEvidenceRef` drops `subject`, `observed` and `derived`, the bundle carries the same references, and `digest` is computed _from_ the fields that were dropped, so a reader can compare two runs but not see what either observed. The same reading found one thing declared twice: `createEvidenceBundle` in `src/domain/evidence.ts` took full `Evidence[]` records and had no production caller, while the shipped bundle is `verificationBundleSchema`. The unused pair is **deleted** (2026-10-16), which closes the option rather than leaving it open: two shapes for one concept, one of them never having run, is what the ownership rule is against — and the shipped shape's dropping of the records is a decision about what a bundle is, not an omission. A reader of one bundle reaches the observations by calling the tool that produced them. See [below](#evidence-bundle) |
-| ⬜  | **The mutation sweep's score is not a measurement.** Of its 1294 mutants, 934 ran no test at all — each reported `Survived` with `testsCompleted: 0` beside a `coveredBy` naming the tests that should have run — and all 199 of its kills are `static` mutants, which Stryker plans by a different path. The cause is one separator: the vitest runner records a test as `file#suite and test names joined by a space`, and vitest 5 matches a name pattern against the same names joined by `" > "`, so a per-test filter selects nothing. The reported number is wrong rather than low, which was checked from the other side: the mutant Stryker called `Survived` at `src/application/assertions.ts:74:10` fails 4 of the lane's own 396 tests. The configuration could not start at all before this change — three separate defects, all fixed — and the summary script now fails on a report of this shape rather than printing a percentage over it. Which of four ways out to take is undecided. See [below](#mutation-not-measured)                                                                                                                                                                                                                                                                                                                |
+| ✅  | **The mutation sweep's score was not a measurement.** Of its 1294 mutants, 934 ran no test at all — each reported `Survived` with `testsCompleted: 0` beside a `coveredBy` naming the tests that should have run — and all 199 of its kills are `static` mutants, which Stryker plans by a different path. The cause is one separator: the vitest runner records a test as `file#suite and test names joined by a space`, and vitest 5 matches a name pattern against the same names joined by `" > "`, so a per-test filter selects nothing. The score was wrong rather than low, which was checked from the other side: the mutant Stryker called `Survived` at `src/application/assertions.ts:74:10` fails 4 of the lane's own 396 tests. The sweep now runs the whole mutation group for every mutant through the built-in `command` runner and grades it by exit code, so a mutant runs all 396 tests of the group: about two seconds per mutant, against a job whose timeout went to 90 minutes. What that gives up is per-test attribution, and a mutant that stops the run from starting reads as a kill. See [below](#mutation-not-measured)                                                                                                                                                                                                        |
 
 The `dist/` row is an observation with no diagnosis attached, recorded as such
 rather than as a bug report. It has been seen three times, each time as the only
@@ -809,12 +809,13 @@ reach the observations by calling the tool that produced them — which is what
 already reads that way, and its "what is not inlined" section now says the shape is
 settled rather than open.
 
-### The mutation sweep's score is not a measurement {#mutation-not-measured}
+### The sweep that measured the runner {#mutation-not-measured}
 
 The mutation row above is a different kind of entry from the rest of this table:
-what it records is not a gap in the suite but a defect in the lane that reads it.
-The sweep was run, the report was parsed, and the report says the lane never ran
-the tests it planned.
+what it recorded was not a gap in the suite but a defect in the lane that reads
+it. The sweep was run, the report was parsed, and the report said the lane never
+ran the tests it planned. That is fixed, and this section keeps the finding, the
+decision taken from it, and what the first real measurement reported.
 
 Of the 1294 mutants in a sweep of the eight mutated files, **934 ran no test at
 all** — each reported `Survived` with `testsCompleted: 0` beside a `coveredBy`
@@ -858,35 +859,57 @@ workflow's preflight step hit first; core rewrites the sandbox's tsconfig throug
 JavaScript API is `version` and `versionMajorMinor` alone — so `checkers` is
 empty and `tsconfigFile` names a file that is deliberately absent; and the
 `mutate` list named `src/domain/result.ts`, which has never existed here. Those
-are fixed. The lane is not.
+are fixed, and they are not the defect — the lane could not have produced a
+measurement with them fixed either.
 
-Four ways out, none of them taken, and which one to take is the interesting part:
+**The decision, taken on 2026-10-16, is the third option: the built-in `command`
+runner over the whole mutation group.** It supplies no coverage, so every mutant
+is planned with the global filter and the separator never enters the path, and a
+mutant is killed exactly when `node scripts/run-tests.mjs mutation` exits
+non-zero. The first real measurement came with the change that adopted it: a sweep
+of `src/domain/errors.ts` — 141 mutants against the group's 396 tests — in **4
+minutes 30 seconds**, reporting **127 killed, 14 survived, 0 timed out, 0 without
+coverage**, a score of **90.1%**, and "Ran 1.00 tests per mutant on average" in
+place of the zero-test shape. That is **1.9 seconds per mutant**, which agrees
+with the 43-mutant measurement above and puts the full sweep — 1281 mutants on
+this tree, against the defective run's 1294 — **near 41 minutes** on an 18-core
+workstation, so the job's timeout went from 60 to 90 minutes: the measurements
+are from a workstation and the job runs on something smaller.
+
+What the choice gives up is stated rather than hidden. There is no per-test
+attribution, so a survivor no longer comes with the test that should have caught
+it; and a mutant whose damage stops the run from starting at all reads as a kill
+rather than as a survivor or as a broken run. Neither is a reason to keep a
+number that described the runner instead of the suite, and the fourteen survivors
+the first sweep named are real locations that still have to be read.
+
+The four ways, all of them on the record:
 
 - **Own the runner** — a Stryker `TestRunner` plugin over `vitest/node`'s public
   API, recording ids in the form vitest matches. The only option that keeps
   per-test planning, and so the only one whose sweep stays affordable. Its size
   is unmeasured and it is not a shim: the package exposes `.` and
   `./package.json`, so `VitestTestRunner` cannot be subclassed, and the dry run,
-  the setup file and per-test mutant activation would be this repository's.
+  the setup file and per-test mutant activation would be this repository's. _Not
+  taken._
 - **Patch the dependency** — one separator, in two copies of `collectTestName`.
   It would put a patched package between what CI installs and what this
-  repository reads, for a bug that is upstream's to fix.
+  repository reads, for a bug that is upstream's to fix. _Not taken, and the end
+  state to reach if the sweep ever needs to be fast._
 - **Run every mutant against the whole scope** — the built-in `command` runner,
   which supplies no coverage and is therefore planned with the global filter.
   Measured at `concurrency: 2` on this host: `domain/unknown.ts`'s 43 mutants in
   1 minute 26 seconds, about **two seconds per mutant**, which puts 1294 of them
-  near **43 minutes** — on an 18-core workstation, against a 60-minute job on a
-  smaller runner, so that is a floor. It also grades a mutant only by the
-  command's exit code, so a mutant that stops the run from starting reads as a
-  kill.
-- **Drop the lane** — the cheapest, and honest if the other three are not worth
-  their cost: what is lost is a survivor list that was not real.
+  near **43 minutes**. _Taken, as above._
+- **Drop the lane** — the cheapest, and it was the honest option while the score
+  was wrong: what would be lost is a survivor list that was not real. _Not taken
+  now that the score is real._
 
-Until one is taken, the weekly job fails at the summary step rather than
-publishing a percentage: a report in which mutants ran no test is treated the way
-a missing report already was, as a finding to report rather than a score to
-print. [testing.md](testing.md#mutation-not-a-measurement) carries the same
-account with the commands behind it.
+The summary script's rejection of a report whose mutants ran no test stays, and it
+is not vestigial: a report of that shape is treated as a finding rather than a
+score to print, which is the check that would catch this class of breakage
+arriving a second way. [testing.md](testing.md#mutation-not-a-measurement)
+carries the same account with the commands behind it.
 
 ### Rehearsing Ubuntu 26.04 {#ubuntu-2604}
 
