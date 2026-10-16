@@ -164,10 +164,14 @@ conclusion is not restated there, the digest is what establishes that two runs
 agree and the coverage is what establishes how much was examined — and neither
 says what was seen.
 
-This is an open question rather than a settled design. Making the recorded detail
-reachable changes what every tool's output carries — an evidence-algebra
-decision, which is the kind that gets a design discussion before it gets code —
-so this page describes the shape as it is and the roadmap carries the row.
+This is a settled design rather than an open question, as of 2026-10-16. The
+alternative — a second bundle shape carrying the whole records, which
+`src/domain/evidence.ts` declared as `evidenceBundleSchema` and never shipped —
+has been deleted, and the roadmap records why in
+[the section on it](roadmap.md#evidence-bundle). Making the recorded detail
+reachable from a bundle would change what every tool's output carries, and what it
+would buy is low: a reader who needs to know what was seen calls the tool that saw
+it, and the refs and `unknown_ids` are what say which call that is.
 
 ## Verification status
 
@@ -265,7 +269,8 @@ went unanswered.
 An evidence entry is a **reference**: id, kind, when, a semantic `digest`, the
 coverage it covers, and the sources behind it. The recorded `subject`,
 `observed` and `derived` of that entry are not inlined here — see
-[the open question](#what-is-not-inlined) about that — so what a reader of a
+[what is not inlined](#what-is-not-inlined) for why that is settled rather than
+pending — so what a reader of a
 result checks a conclusion against is the `digest`, the `coverage`, and the
 tool's own top-level fields, which are what `exchanges[]` carries above.
 
