@@ -288,11 +288,14 @@ describe("what a published install can reach", () => {
  *
  * Deliberately narrower than `SPECIFIER_PATTERNS` above. The dynamic form is
  * excluded because it was measured rather than assumed: `strace` over a full
- * `oxlint` 1.87.0 run on this tree shows it opening no path for `scripts/uvp.mjs`'s
+ * `oxlint` run on this tree shows it opening no path for `scripts/uvp.mjs`'s
  * `import("../dist/cli.js")`, which is the only other import of build output
- * outside this describe. If a later oxlint starts resolving dynamic specifiers
- * too, this is the check that has to widen — and the shim in #13 is how to re-run
- * the measurement.
+ * outside this describe. Measured on 1.87.0, and again on 1.88.0 when the
+ * npm-minor bump moved this repository to it: with the pre-fix fixture in place
+ * both versions open the same static specifier into `dist/`, so the new one
+ * resolves what the old one resolved rather than more. If a later oxlint starts
+ * resolving dynamic specifiers too, this is the check that has to widen — and the
+ * shim in #13 is how to re-run the measurement.
  */
 const STATIC_SPECIFIER_PATTERNS = [
   /\bfrom\s*["']([^"']+)["']/gu,
