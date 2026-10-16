@@ -129,9 +129,14 @@ diff, check the validation evidence and its limits, and explicitly declare the
 PR ready for initial maintainer review.
 
 Leave the template's **Author readiness** declarations unchecked for the human
-owner. Never attest to human review on their behalf, and never open a PR on your
-own initiative. Keep the PR body and affected validation current as the work
-changes, and report only checks that actually ran.
+owner. Never attest to human review on their behalf, and never approve a change.
+When your operator has granted standing authorization — this repository's
+maintainer does, for the fixes they ask for — you may create the branch for a
+tracked issue, named after it, push it, and open one PR against `main` from it; you
+may merge that PR **only** after the owner has explicitly approved it on the PR,
+since a green run is evidence rather than approval. Never push to `main` directly.
+Keep the PR body and affected validation current as the work changes, and report
+only checks that actually ran.
 
 <!-- BEGIN:turborepo-agent-rules -->
 

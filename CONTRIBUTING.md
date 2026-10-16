@@ -60,8 +60,15 @@ change — code, tests, documentation, and anything produced with AI assistance.
 The PR author is the owner unless another human is named on the PR and
 explicitly accepts ownership. This applies to maintainer-authored PRs too.
 
-Agents may not open a PR, write a PR description, or close a PR. A human does
-those things.
+**One branch per issue, one PR per branch, and the owner's approval is what merges
+it.** When the operator of an agent working here has granted standing authorization
+— this repository's maintainer does, for the fixes they ask for — the agent may
+create the branch for a tracked issue, named after it, push that branch, and open
+one PR against `main` from it. It may merge that PR **only** after the human owner
+has explicitly approved it on the PR: a green run is evidence, not approval, and an
+approval on one PR does not carry to the next. Nothing is pushed to `main`
+directly, by an agent or by a person. Without that grant, an agent writes no branch
+and no PR and proposes the change to its operator instead.
 
 The human owner must:
 
@@ -71,6 +78,8 @@ The human owner must:
   record the gaps that remain.
 - Complete the **Author readiness** declaration in the PR template.
 - Keep the PR body current as the work changes.
+- Explicitly approve a PR an agent will merge. That approval is the merge gate,
+  and CI is not a substitute for it.
 
 Maintainers may return a PR to the author or close it when the problem is
 unsupported, validation is missing, or the owner cannot explain the change.
@@ -90,9 +99,14 @@ passes. There is no expectation that any given file was typed by hand.
 explain what the change does, why the approach was chosen, and what could go
 wrong. "The agent wrote it" is not an explanation.
 
-**Agents do not act on the repository.** No agent opens, comments on, or closes a
-PR; no agent writes a PR description; no agent approves a change or attests to
-human review. Agents propose changes to their operator, who decides.
+**Agents act on the repository within that rule, and no further.** With its
+operator's standing authorization an agent opens the branch and the PR for a
+tracked issue, writes the PR description, answers review comments, and merges the
+PR once the human owner has explicitly approved it. It never approves a change,
+never attests to human review, never completes the **Author readiness**
+declarations, and never closes a PR it did not merge — those stay the owner's, and
+[one branch per issue](#pull-request-ownership-and-readiness) is the same rule read
+from the agent's side.
 
 **Disclosure is required, but light.** Add the `ai-assisted` label to a PR with
 substantial AI involvement. If a specific passage is machine-generated and you do
