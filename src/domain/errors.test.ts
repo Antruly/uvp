@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   UvpFailure,
+  type UvpErrorCode,
   isUvpFailure,
   parseUvpError,
   toUvpError,
@@ -92,6 +93,65 @@ describe("UvpFailure", () => {
     expect(failure.detail).not.toHaveProperty("details");
   });
 
+  it("calls exactly the codes the environment might fix on a retry retryable", () => {
+    // The first mutation sweep named `src/domain/errors.ts`'s fourteen survivors
+    // (#31); reading them found three of these four unpinned: the test above pinned
+    // `endpoint_unreachable` alone, so `service_unavailable`, `timeout` and
+    // `resource_constraint` could each be emptied out of the set with the whole
+    // suite still passing — and an emptied member answers `retryable: false` for
+    // a failure nobody said was permanent.
+    //
+    // The whole set is asserted rather than one code at a time, so a code added to
+    // the set fails here too. `capture_unavailable` is the one code whose category
+    // reads `unavailable` and which the set deliberately omits: it carries two
+    // meanings, and only one of them is temporary. That is
+    // [#49](https://github.com/Antruly/uvp/issues/49).
+    const retryable = CODES.filter(
+      (code) =>
+        new UvpFailure({ code, message: "m", remediation: { action: "a" } }).detail.retryable,
+    );
+    // Sorted, because which codes are retryable is the invariant and the schema's
+    // declaration order is not.
+    const expected: UvpErrorCode[] = [
+      "service_unavailable",
+      "endpoint_unreachable",
+      "timeout",
+      "resource_constraint",
+    ];
+    expect([...retryable].sort()).toEqual([...expected].sort());
+  });
+
+  it("keeps a remediation link through construction, and omits the key when there is none", () => {
+    // The conditional spread that carries `docs` was unpinned in every direction
+    // the sweeper can turn it: dropping it, always including it, and inverting
+    // the test were all survivable, because the test above compared a detail to
+    // itself and so agreed with whatever came out. Both halves are asserted here
+    // — the link survives when it is given, and the key is absent when it is not,
+    // which is the same promise the `details` test above makes.
+    const withDocs = new UvpFailure({
+      code: "build_failed",
+      message: "m",
+      remediation: { action: "a", docs: "https://example.test/build" },
+    });
+    expect(withDocs.detail.remediation.docs).toBe("https://example.test/build");
+
+    const withoutDocs = new UvpFailure({
+      code: "build_failed",
+      message: "m",
+      remediation: { action: "a" },
+    });
+    expect(withoutDocs.detail.remediation).not.toHaveProperty("docs");
+  });
+
+  it("is recognisable in a log line, not only by identity", () => {
+    const failure = new UvpFailure({
+      code: "build_failed",
+      message: "m",
+      remediation: { action: "a" },
+    });
+    expect(failure.name).toBe("UvpFailure");
+  });
+
   it("produces a detail that satisfies the published contract", () => {
     const failure = new UvpFailure({
       code: "timeout",
@@ -156,6 +216,26 @@ describe("toUvpError", () => {
     expect(error.message).not.toBe("");
   });
 
+  it("still answers when a schema violation carries no issues", () => {
+    // `z.ZodError` is constructible with an empty issue list, which is why
+    // `invalidRequest` guards the first issue rather than reaching into it. The
+    // guard was unpinned: removing it made this projector throw a `TypeError`
+    // instead of reporting, and this is the last resort in a catch block, so a
+    // throw here replaces a reportable failure with a stack trace.
+    const error = toUvpError(new z.ZodError([]));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).not.toBe("");
+    expect(error.message.startsWith(":")).toBe(false);
+  });
+
+  it("falls back to a reason when the cause is only whitespace", () => {
+    // `describeCause` trims before it decides whether it has a message, and the
+    // trim was unpinned: without it a cause of `"  "` came back as `"  "`, which
+    // satisfies the contract's minimum length and tells the caller nothing.
+    expect(toUvpError("   ").message).toBe("The tool failed without reporting a reason.");
+    expect(toUvpError(new Error("\n")).message).toBe("The tool failed without reporting a reason.");
+  });
+
   it("reports an unrecognised Error as execution_failure, keeping its message", () => {
     const error = toUvpError(new TypeError("cannot read properties of undefined"));
     expect(error.code).toBe("execution_failure");
@@ -170,6 +250,10 @@ describe("toUvpError", () => {
     const error = toUvpError("the toolchain printed this");
     expect(error.code).toBe("execution_failure");
     expect(error.message).toBe("the toolchain printed this");
+    // The `Error` branch above pins this; the non-`Error` branch did not, so a
+    // failure built from a thrown string could have answered `retryable: true`
+    // with every test still passing.
+    expect(error.retryable).toBe(false);
   });
 
   it("always returns a value that satisfies the contract, whatever it was handed", () => {

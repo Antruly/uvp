@@ -1026,8 +1026,12 @@ across the eight files is the part worth reading: `ToolchainProvider.ts` 94.44%,
 `evidence.ts` 67.50% and `assertions.ts` 66.41% in the middle, `workspaceManifest.ts`
 58.59%, and `evidenceHelpers.ts` **17.65%** at the bottom — 15 killed against 70
 survived, which is a larger read than the fourteen survivors that opened
-[#31](https://github.com/Antruly/uvp/issues/31). [testing.md](testing.md#mutation-not-a-measurement)
-carries the per-run detail.
+[#31](https://github.com/Antruly/uvp/issues/31). Those fourteen have since been read:
+twelve were missing assertions and are pinned, `errors.ts` moves from 90.07% to
+98.58%, and the two that remain are the halves of one sentence, left unpinned
+because pinning them would make every later wording change a test failure. The other
+330 survivors are still unread.
+[testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.
 
 What the choice gives up is stated rather than hidden. There is no per-test
 attribution, so a survivor no longer comes with the test that should have caught
@@ -1035,8 +1039,10 @@ it; and a mutant whose damage stops the run from starting at all reads as a kill
 rather than as a survivor or as a broken run — which also means a group that fails
 for a reason of its own is indistinguishable from one a mutant killed, so the
 percentage is an upper bound rather than a floor. None of that is a reason to keep
-a number that described the runner instead of the suite, and the fourteen survivors
-the first sweep named are real locations that still have to be read.
+a number that described the runner instead of the suite, and the survivors the first
+sweep named are real locations that still have to be read — the fourteen in
+`errors.ts` have been, and [#31](https://github.com/Antruly/uvp/issues/31) records
+what the read found.
 
 **The bound is a number in the run now, and in that run it was zero.** Every kill's
 `statusReason` is the child's combined output, so the summary script counts the
