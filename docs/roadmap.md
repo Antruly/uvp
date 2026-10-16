@@ -455,7 +455,7 @@ implicit.
 | ⬜  | `tests/composition/runCancellation.test.ts` failed once in CI with `expected 'execution_failure' to be 'cancelled'` (run `38805381480`, job _Source tests_, 21.5 ms) and has passed on every run since, local and CI, including 300 standalone runs of that file on this host with none. That bounds how often it happens here rather than explaining it: the one occurrence was in CI, where the load and the image are things this host does not reproduce. See [below](#the-cancellation-flake)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ✅  | `tests/conformance/captureReplay.test.ts` has failed **four** times with `TransportFailure: socket hang up`, each from a request through a capture proxy: twice inside a full local gate (2026-10-16T05:59:33Z, 06:56Z) and twice from standalone runs on an idle machine, which ruled the gate's load out and settled that this row wanted a sample rather than a theory. The proxy's number had been handed out twice, and the client's global keep-alive pool still held a socket for that `host:port`; the mechanism is constructed rather than sampled below. Fixed at the reservation, where a number is now handed out once per process, with a test that measures its own strength. See [below](#socket-hang-up)                                                                                                                                                                                                                                                                                                                          |
 | ⬜  | `ubuntu-latest` starts moving to Ubuntu 26.04 on 2026-10-19 and the rollout is scheduled to finish by 2026-11-19 (`actions/runner-images#14748`), so for a month a run may land on either image. Two things about the new image come from its own software list rather than a guess: it ships **OpenSSL 3.5.5**, so the real lane's from-source 3.5.0 build becomes redundant rather than broken (it is cached and verifies itself with `nm`), and it ships **CMake 4.4.3**, which no longer accepts `cmake_minimum_required(VERSION < 3.5)` — every declaration in this repository is 3.16 or higher, so that break is not ours. The lane's `apt-get` list is unchanged on 26.04 (`libsqlite3-dev` is there; no `libuv` entry, as today, which is why `libuv1-dev` is installed explicitly). Everything else about running these lanes on a package set never rehearsed here is unknown until it happens                                                                                                                                         |
-| ⬜  | The runner warns that Node.js 20 is deprecated, naming the actions it is about by the SHA pinned here: in run `38827824455` it named `cache@0057852b`, `checkout@11d5960a`, `setup-node@49933ea5`, `upload-artifact@ea165f8d` and `download-artifact@d3f86a10`. That list is what ran rather than what is deprecated — `github-script@v7` targets `node20` too and never appeared, because its one job runs only on pull requests — so the count is six, where the row this replaced said four. `runs.using` in each action's own `action.yml` says `node20` at the pinned SHA and `node24` at the major Dependabot proposes, so all six clear it, none of them from a release note. They run on Node 24 today and the warning is not yet a failure — exactly the state that ends in a red lane on a date nobody wrote down. Adopting the six is the human owner's decision, [the pins above](#action-pins); they are rehearsed — SHAs resolved, all 40 references replaced, `verify:actions` green, every input still declared — but not run.    |
+| ✅  | The runner warned that Node.js 20 was deprecated, naming five of the six actions pinned here by SHA. `runs.using` in each action's own `action.yml` read `node20` at all six pinned SHAs and `node24` at every major Dependabot proposed, which is how the sixth was counted without waiting for a warning about it, and all six are adopted in [the pins above](#action-pins). Two of the majors change more than their runtime, both read rather than assumed: `setup-node` v5 caches by itself when `package.json` declares a `packageManager`, which this one does and `.github/actions/npm-cache` already owns, so it is switched off at all 11 call sites; `download-artifact` v8 fails a run on a digest mismatch where it used to warn. `checkout` v7 refuses a fork's code under `pull_request_target` — the event `pr-readiness.yml` uses — but its guard reads the requested ref, repository and commit, and that workflow asks for the default branch and none of those.                                                              |
 | ✅  | A CI test step that sets its own `--reporter` flags loses the skip list, because flags replace the config. `npm run verify:reporters` now fails any `run:` under `.github/` or any `package.json` script that replaces the reporters without naming the skip reporter, and asks `vitest/node` for the reporters a default run resolves to rather than searching the config's text. See [below](#the-skip-list)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ✅  | `uvp_assert_exchange`'s `results[]` carries `status: satisfied \| unmet \| undetermined` in place of `passed`, one row per assertion asked, and `not_evaluated[]` is gone: `satisfied + unmet + undetermined` is the row count, so a check nobody could evaluate is visible in the array rather than inferable from a counter. The vocabulary is declared once, in `src/domain/verdict.ts`, and `uvp_doctor`'s feature verdicts read it too. `uvp_verify` is unchanged — it has no per-check rows, and its third state reaches a caller through `unverified[]` and the coverage note. See [below](#assertion-third-state)                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ✅  | A workflow job whose own `if:` is wider than its steps assume: `test` runs whenever the run is not cancelled, so that a failed shard still produces a merged report, but it downloaded `uvp-test-runtime`, which `build` uploads only when `code` or `package` is selected. Two documentation-only pushes (`315d494`, `0dcbd94`) went red in _Portable tests_ at `Download the built runtime` while every lane that job depends on was correctly skipped, and the guard the job does carry sits below the download. The three artifact steps are guarded on `code` individually, a step above them says which of the two cases the run is in, and `npm run verify:artifact-guards` now compares every reader's condition against its writer's as a logical implication. See [below](#artifact-guards)                                                                                                                                                                                                                                             |
@@ -1174,25 +1174,57 @@ here, and in run `38827824455` it named five of the six — `cache@0057852b`,
 `download-artifact@d3f86a10`. That is a list of what ran rather than of what is
 deprecated: `github-script@v7` is `node20` too and never appeared, because its one
 job runs only on pull requests. The action's own manifest answers it without running
-anything — `runs.using` is `node20` at all six pinned SHAs and `node24` at all six
-proposed ones, read with
+anything — `runs.using` is `node20` at all six SHAs the pins held and `node24` at all
+six now adopted, read with
 `gh api repos/<owner>/<repo>/contents/action.yml?ref=<sha>`. A configuration header
 rather than a version number is the difference between knowing and inferring, and it
 makes the answer **every one of the six, and none of them chosen from a release
 note.**
 
-**Adopting them is a human's decision, and a rehearsal is not an adoption.** The six
-were rehearsed and reverted: each SHA resolved from its tag and agreeing with the
-pull request Dependabot opened, the replacement applied to all 40 references across
-the five files under `.github/` with a count per file, `npm run verify:actions` green
-on the result (40 third-party and 10 local references, one SHA per action), and every
-input this repository passes — `fetch-depth`, `ref`, `persist-credentials`,
-`node-version-file`, `path`, `key`, `name`, `overwrite`, `script`, `github-token` —
-still declared in the new major's `action.yml`. What a rehearsal cannot do is run:
-whether these majors behave in these jobs is a claim only a run makes, and this one
-made no run. An action major changes what code runs in CI with this repository's
-token, and a pin is exactly the thing that made the choice visible instead of making
-it silently on someone's next push.
+**Adopting them was a human's decision, and the rehearsal was what put it in front of
+one.** The six were rehearsed and reverted first: each SHA resolved from its tag and
+agreeing with the pull request Dependabot opened, the replacement applied to all 40
+references across the five files under `.github/` with a count per file,
+`npm run verify:actions` green on the result (40 third-party and 10 local references,
+one SHA per action), and every input this repository passes — `fetch-depth`, `ref`,
+`persist-credentials`, `node-version-file`, `path`, `key`, `name`, `overwrite`,
+`script`, `github-token` — still declared in the new major's `action.yml`. Adopting
+them changes what code runs in CI with this repository's token, which is the kind of
+change a pin exists to make visible rather than to make on someone's next push, so it
+waited for the owner's decision and then landed as a change of its own.
+
+**Two majors change more than their runtime, and both were read rather than assumed.**
+
+- **`setup-node` v5 caches by itself when `package.json` declares a `packageManager`.**
+  This one declares `npm@11.16.0`, so all eleven call sites would have started
+  restoring and saving an npm cache of their own, keyed and saved by setup-node,
+  beside the one `./.github/actions/npm-cache` already owns — two writers to one
+  directory, and the second one's save policy is not this repository's. The input that
+  turns it off, `package-manager-cache: false`, is declared in v5 through v7, and it
+  is set at every call site with the reason beside it.
+- **`download-artifact` v8 fails a run on a digest mismatch**, where v4 logged a
+  warning and continued; `digest-mismatch` is the input that softens it. The artifacts
+  this repository downloads are its own, built in the same run, so a mismatch is a
+  fact about the transfer rather than about the content, and failing is the direction
+  that does not hand a shard a half-restored `dist/`.
+
+`checkout` v7's other change is a guard, not a behaviour: it refuses to check out
+fork pull-request code under `pull_request_target` or `workflow_run`, which is the
+event `pr-readiness.yml` uses. The guard is in
+`src/unsafe-pr-checkout-helper.ts`, and it fires only for a fork PR _and_ a request
+whose repository, ref or commit resolves to that fork — this workflow asks for
+`refs/heads/<default branch>`, with no `repository` and no `commit`, so it returns
+before the throw. That was read from the guard rather than inferred from the release
+note, and `allow-unsafe-pr-checkout` is the input that would opt in.
+
+**A rehearsal cannot run, and the runs are what settle it.** Everything above is read
+from a manifest or from a source file at the adopted SHA; whether these majors behave
+in these jobs is a claim only a run makes, and the push that carried them is where one
+arrives — `ci.yml` and `pages.yml` on that push exercise five of the six, and
+`pr-readiness.yml` is dispatched by hand against an open pull request to exercise the
+sixth, since its only job runs on `pull_request_target`. Node 24 also needs a runner
+at `v2.327.1` or later, which the GitHub-hosted labels in use are; that is a statement
+about the labels, and the runs are where it stops being one.
 
 **Three decisions in the check itself.**
 
