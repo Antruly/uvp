@@ -783,7 +783,15 @@ from it. What the lane runs now is
 `node scripts/run-tests.mjs mutation` — the suite's own entry point, so a mutant
 meets the suite's pools, worker bound and canonical `TMPDIR` — and a mutant is
 killed exactly when that command exits non-zero. The cost is time: every mutant
-runs all 396 tests of the group.
+runs the whole group rather than the tests that touched it. That count is a property
+of the tree rather than of the lane, and it moves with nothing to mark it: **391**
+where the first full sweep ran (`a772ccb`), **396** on `main` now that
+[#31](https://github.com/Antruly/uvp/issues/31) pinned twelve `errors.ts` survivors
+with five more cases, **428** with the `evidenceHelpers` tests below. It is read off
+runs rather than remembered — all 936 kill records of run `38919206652` carry
+`(391)` — and the figure written here was 396 while the tree it described had 391:
+wrong where it was written, and true again by accident once those five cases landed
+rather than by anyone correcting it.
 
 **The break threshold is 70, and the sweep is a canary rather than a per-PR
 gate.** `thresholds.break` fails the weekly run when the score falls below it. The
@@ -892,7 +900,7 @@ which files the dry run loads, not how a mutant is planned.
 
 **The score is wrong, not merely low.** Hand-applying the mutant Stryker reported
 as `Survived` at `src/application/assertions.ts:74:10` (replacement
-`index >= path.length`) fails **4 of the 396 tests** in the lane's own scope. The
+`index >= path.length`) fails **4 of the 391 tests** in the lane's own scope. The
 suite would have caught it; the runner never ran it. So the survivors this lane
 lists are not a list of gaps, and the percentage over them describes the runner.
 
@@ -913,8 +921,8 @@ the path. The command it runs is `node scripts/run-tests.mjs mutation`, and a
 mutant is killed exactly when that exits non-zero.
 
 **The first real measurement**, taken from the change that adopted it: a sweep of
-`src/domain/errors.ts`, 141 of the eight files' mutants, run against the group's
-396 tests. It took **4 minutes 30 seconds** and reported **127 killed, 14
+`src/domain/errors.ts`, 141 of the eight files' mutants, run against the whole
+group. It took **4 minutes 30 seconds** and reported **127 killed, 14
 survived, 0 timed out, 0 without coverage** — a score of **90.1%**, with the
 reporter's "Ran 1.00 tests per mutant on average" as the line saying the defect is
 gone: the `command` runner counts the whole command as one test, so the zero this
@@ -952,6 +960,24 @@ magnitude below every other file and the largest single read this lane has
 produced. `errors.ts`'s 127 killed and 14 survived reproduce the one-file
 measurement above exactly, from a different host and a different run shape.
 
+**`evidenceHelpers.ts`'s seventy have been read, and sixty-six of them are
+pinned** ([#52](https://github.com/Antruly/uvp/issues/52)). The file had no test of
+its own — three test files reached it and all three took `createRecorder` — so the
+fifteen that died were the mutants an unrelated test happened to walk. The read is
+`src/application/evidenceHelpers.test.ts`, and a one-file `stryker run` over this
+tree reports **81 of 85 killed, 95.29%**, against 17.65% before. The four that
+remain are equivalent rather than missing: `exactOptionalPropertyTypes` forces the
+conditional spread on every forwarded optional, and at two sites in `record` and
+two in `recordUnknown` the callee re-checks the same one — `createEvidence`
+defaults `derived` and `limitations`, `createResidualUnknown` drops `blockedBy` and
+`partialEvidence` — so a key present as `undefined` and a key absent build the same
+value. That was measured rather than reasoned about, by building both forms against
+the compiled domain code and comparing them as canonical JSON, as key ownership and
+as a deep walk that counts a present-but-`undefined` key as a difference: all four
+pairs equal, and the mutant that replaces each condition with `false` is the one
+left in the report. They are recorded here rather than chased with an assertion
+that cannot exist.
+
 **What exit-code grading costs**, stated because it is where a score can still
 mislead: there is no per-test attribution left, so a survivor's `coveredBy` no
 longer says which test should have caught it; and a mutant whose damage stops the
@@ -974,7 +1000,7 @@ The two that remain are left deliberately. `:256` and `:257` are the two halves 
 one remediation sentence, so killing either means asserting user-facing prose, which
 turns every later wording change into a test failure — an assertion that would
 measure this document rather than the suite. They are unpinned here and in the test
-file, recorded rather than quietly dropped. The sweep's other 330 survivors are
+file, recorded rather than quietly dropped. The sweep's other 260 survivors are
 still unread.
 
 **In that run the upper bound was tightly zero, and the line says so.** Over the
