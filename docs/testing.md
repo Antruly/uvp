@@ -292,8 +292,9 @@ maintainer to choose between, and no product behaviour changed in this fix.
 
 So 51 of the 53 have landed, leaving 2 skipped in these three groups, both the
 `cmake` pair for #22; the lane's own total is 4, the other two being the
-reserved-port window (Linux only) and `runCancellation`'s stop marker, which is a
-`TerminateProcess` on Windows and says so in its title.
+reserved-port window — a host with no window below the ephemeral range has none
+to reserve from, and says so in the title — and `runCancellation`'s stop marker,
+which is a `TerminateProcess` on Windows and says so in its title too.
 
 The lane also found one defect it could not have run without: `scripts/run-tests.mjs`
 spawned `node_modules/.bin/vitest` directly, which on Windows is not a file that
