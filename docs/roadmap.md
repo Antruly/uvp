@@ -876,6 +876,27 @@ argued. `scripts/uvp.mjs` reaches the CLI through `import("../dist/cli.js")`, an
 specifiers only. If a later version follows dynamic ones too, that bin entry is
 where this arrives next, and the check's own comment says so where it will be read.
 
+**That last paragraph is the one that could have gone stale, so it was measured
+again.** Every measurement above was taken on `oxlint` 1.87.0, and the npm-minor
+bump moved this repository to **1.88.0** — the same tool whose resolver the whole
+row is about. The two claims were therefore taken again on the new version rather
+than assumed to carry over, with the same method on the same tree and only the
+fixture's specifier form changed:
+
+| Tree                               | 1.88.0 paths under the repository's `dist/`                                                              | Shim                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| pre-fix fixture (static import)    | 3 — `toolchains/processRunner.js` and the resolver's probes of `toolchains/package.json`, `package.json` | fires; the same `Failed to open file …` error, exit 1, 27 warnings, no summary line |
+| fixed fixture (run-time specifier) | **none**, over every syscall in the trace that names a path, not only `open`                             | never fires; exit 0                                                                 |
+
+So the resolver is unchanged in the way that matters: 1.88.0 opens the same static
+specifier 1.87.0 opened, the fix is still load-bearing rather than guarding a
+behaviour that left in the upgrade, and the dynamic specifier is still not
+followed. Two things the trace also shows about 1.88.0, neither of which this row
+rests on: its wrapper is no longer a single-threaded Node process — 61 `clone3`
+calls with `CLONE_THREAD` and a Vite module runner loaded inside them, i.e. it runs
+JavaScript in worker threads of its own process — and its warning set on this tree
+is the same 27 as 1.87.0's, so nothing new was switched on by the bump.
+
 The supervision row was the one place the dependency direction was inverted:
 `WorkspaceService` called `startSupervised` from `toolchains/local/processRunner`,
 and `sessionStore` imported that module's `SupervisedProcess` type, which the
@@ -2588,7 +2609,7 @@ used.** On npm 11.19.0, with this repository's lockfile:
 
 Three separate problems, each enough on its own:
 
-- **`--omit dev` drops `zod`.** `zod` 4.4.3 is in `package.json#dependencies`, its
+- **`--omit dev` drops `zod`.** `zod` is in `package.json#dependencies`, its
   lockfile entry carries no `dev` flag, `@modelcontextprotocol/server` and
   `@modelcontextprotocol/core` both declare `zod: ^4.2.0`, and the installed
   `node_modules/.package-lock.json` agrees. It is absent from `components`, from
@@ -2597,7 +2618,9 @@ Three separate problems, each enough on its own:
   could make that actively misleads. Why that flag drops it is **not**
   established — a minimal reproduction was not built, and the only correlate
   measured is that `zod` is the sole production package that dev-only packages
-  also need.
+  also need. Measured at 4.4.3, and again at 4.6.7 when that bump was taken:
+  the generator's cross-check reports the same single omission both times, so
+  nothing here is a property of the version.
 - **Without `--omit dev`** it describes the build machine: every linter, test
   runner and docs tool, ~300 packages, none of which a user receives.
 - **Reading a tree at all** describes this host's `node_modules`, which is stale

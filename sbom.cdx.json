@@ -58,7 +58,7 @@
       },
       {
         "name": "uvp:lockfile-sha512",
-        "value": "0ee0b368278ed5ccef1f229f34f10a309aff6fe88eaa713e86b68f792eff068a1a8151778b81565437eaa1f2ab788d0e63e89c4d077db2738638a70a0141784a"
+        "value": "4eed7ab114ce5fd1768aace2a6a9a5ccb113483ffeba6a70e820a91a800d842658bfee36df09818252be09d4065c7b36bf50299c71036e46ce6a26fc66f83be9"
       },
       {
         "name": "uvp:closure",
@@ -152,23 +152,23 @@
       ]
     },
     {
-      "bom-ref": "zod@4.4.3",
+      "bom-ref": "zod@4.6.7",
       "type": "library",
       "name": "zod",
-      "version": "4.4.3",
+      "version": "4.6.7",
       "scope": "required",
-      "purl": "pkg:npm/zod@4.4.3",
+      "purl": "pkg:npm/zod@4.6.7",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmmirror.com/zod/-/zod-4.4.3.tgz"
+          "url": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz"
         }
       ],
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "cad10d163209165d94c1882575eda37215b61f09b818914b0e249759d4eb25004837d15cca9ee7e0387124489634024c575fc1a967d6fe4920ef55037072724d"
+          "content": "83c5b60f6914e9af2e9ed734e777d7d6e5412b333bcaa0315bfdf3c24f37fba472176f9228eb95f9cd30043854c335753da19aa66647fab99c5333dffb7086c2"
         }
       ],
       "licenses": [
@@ -186,20 +186,20 @@
       "dependsOn": [
         "@modelcontextprotocol/server@2.3.1",
         "canonicalize@5.1.0",
-        "zod@4.4.3"
+        "zod@4.6.7"
       ]
     },
     {
       "ref": "@modelcontextprotocol/core@2.3.1",
       "dependsOn": [
-        "zod@4.4.3"
+        "zod@4.6.7"
       ]
     },
     {
       "ref": "@modelcontextprotocol/server@2.3.1",
       "dependsOn": [
         "@modelcontextprotocol/core@2.3.1",
-        "zod@4.4.3"
+        "zod@4.6.7"
       ]
     },
     {
@@ -207,9 +207,9 @@
       "dependsOn": []
     },
     {
-      "ref": "zod@4.4.3",
+      "ref": "zod@4.6.7",
       "dependsOn": []
     }
   ],
-  "serialNumber": "urn:uuid:6bb72067-242b-5b76-b9b4-4d5358f39ac3"
+  "serialNumber": "urn:uuid:73b6623e-0c73-5502-863d-332a9bd34c9c"
 }
