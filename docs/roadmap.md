@@ -1217,14 +1217,30 @@ whose repository, ref or commit resolves to that fork — this workflow asks for
 before the throw. That was read from the guard rather than inferred from the release
 note, and `allow-unsafe-pr-checkout` is the input that would opt in.
 
-**A rehearsal cannot run, and the runs are what settle it.** Everything above is read
-from a manifest or from a source file at the adopted SHA; whether these majors behave
-in these jobs is a claim only a run makes, and the push that carried them is where one
-arrives — `ci.yml` and `pages.yml` on that push exercise five of the six, and
-`pr-readiness.yml` is dispatched by hand against an open pull request to exercise the
-sixth, since its only job runs on `pull_request_target`. Node 24 also needs a runner
-at `v2.327.1` or later, which the GitHub-hosted labels in use are; that is a statement
-about the labels, and the runs are where it stops being one.
+**A rehearsal cannot run, and the runs are what settled it.** The push that carried
+the bump started CI run `38854668506`, whose ten jobs all passed, and Documentation
+build `38854668572`. Five of the six are exercised by name in a step log: the shard
+jobs run `actions/checkout@3d3c42e5…`, `actions/setup-node@949feb24…`,
+`Cache npm package downloads`, `Download the built runtime` and the built lane on
+what it downloaded, every step successful — so `download-artifact` v8 delivered the
+`dist/` the built lane ran on rather than being expected to. `github-script` is the
+sixth, and its one job is on `pull_request_target`: `pr-readiness.yml` was dispatched
+by hand (`38854711806`) against open pull request #8, and the script ran — it resolved
+`require("node:url")`, imported `scripts/ci/pr-readiness.mjs` and read the body — then
+failed the job with the same four declaration lines run `38852315799` produced before
+the bump, which is the gate reading a Dependabot body rather than an action that
+stopped working. Node 24 also needs a runner at `v2.327.1` or later, which the
+GitHub-hosted labels here are; that far is the labels, and the runs are where it
+stopped being a statement about them.
+
+**And the warning the row was about is gone, counted rather than eyeballed.** Run
+`38853786333`, the last before the bump, logs `Node.js 20 is deprecated` ten times,
+naming the pinned SHAs; run `38854668506` logs it zero times, as does the dispatched
+`pr-readiness` run against the one that logged it once. The only `DeprecationWarning`
+left is `DEP0005` for `Buffer()`, which belongs to a dependency rather than a runtime.
+The warning's own text is worth keeping for what it said: those actions were "being
+forced to run on Node.js 24" already, so what the majors changed is the manifest
+agreeing with what the runner was doing.
 
 **Three decisions in the check itself.**
 
