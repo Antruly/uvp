@@ -45,7 +45,12 @@ export const rememberExchange = (
     httpVersion: exchange.response?.httpVersion,
     requestHeaders: exchange.requestHeaders,
     responseHeaders: exchange.response?.headers ?? {},
-    responseHeadersObserved: exchange.responseHeadersObserved ?? undefined,
+    // `undefined` means "the whole set was read". A record with no response did
+    // not read a whole set — or any set — so leaving it unset would turn a header
+    // assertion into "absent" instead of "not looked at". A caller that observed
+    // part of a response still names those names.
+    responseHeadersObserved:
+      exchange.responseHeadersObserved ?? (exchange.response === undefined ? [] : undefined),
     requestBody: exchange.requestBody,
     responseBody: exchange.response?.body,
     durationMs: exchange.durationMs,

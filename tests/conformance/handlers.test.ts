@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -710,6 +712,45 @@ describe("the SOAP call", () => {
       const body = output["body"] as { base64?: string; text_lossy?: string };
       expect(body.base64).toBeUndefined();
       expect(body.text_lossy).toBeUndefined();
+    },
+    TIMEOUT,
+  );
+});
+
+describe("the websocket probe's rejected upgrade", () => {
+  it(
+    "records the handshake, so its headers are assertable",
+    async () => {
+      // A non-101 answer is an HTTP exchange, and its headers are the most useful
+      // thing the probe can report. The record used to be written with no
+      // response, which made `header_exists` say "absent" for a header the
+      // handshake carried — a finding about the peer derived from a gap in the
+      // record. This is the 403 case the record's own semantics were written for.
+      const server = createHttpServer((_request, response) => {
+        response.writeHead(403, { "content-type": "text/plain" });
+        response.end("not a websocket");
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const port = (server.address() as AddressInfo).port;
+      try {
+        const probe = await call("uvp_websocket_probe", {
+          url: `ws://127.0.0.1:${String(port)}/ws`,
+          idle_timeout_ms: 2_000,
+        });
+        expectConforms("uvp_websocket_probe", probe);
+        expect(probe["upgraded"]).toBe(false);
+
+        const asserted = await call("uvp_assert_exchange", {
+          exchange_id: probe["exchange_id"],
+          assertions: [{ kind: "header_exists", target: "content-type" }],
+        });
+        expectConforms("uvp_assert_exchange", asserted);
+        expect(asserted["satisfied"]).toBe(1);
+        expect(asserted["undetermined"]).toBe(0);
+        expect(asserted["unmet"]).toBe(0);
+      } finally {
+        server.close();
+      }
     },
     TIMEOUT,
   );
