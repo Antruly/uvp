@@ -139,7 +139,10 @@ export const reservationWindowIsAvailable = ephemeralFloor !== undefined;
  * completes nor is refused — a firewall dropping packets, a timeout — is not
  * evidence that the port is free, and a caller deciding whether its premise
  * still holds must not read it as one. Only `true` says "something listens";
- * `false` says "the kernel refused"; `undefined` says "ask again later".
+ * `false` says the kernel refused the connection (`ECONNREFUSED`), which is what
+ * "nothing is listening there" looks like; `undefined` says "ask again later",
+ * and that includes a connect that failed some other way — `EACCES`, `EMFILE`,
+ * `ENETUNREACH` — because none of those is the kernel saying the port is empty.
  */
 export const portAnswers = async (port: number, timeoutMs = 1_000): Promise<boolean | undefined> =>
   await new Promise<boolean | undefined>((resolve) => {
@@ -154,8 +157,11 @@ export const portAnswers = async (port: number, timeoutMs = 1_000): Promise<bool
     socket.once("connect", () => {
       settle(true);
     });
-    socket.once("error", () => {
-      settle(false);
+    socket.once("error", (cause: NodeJS.ErrnoException) => {
+      // Only a refusal says the port is empty. Any other failed connect means
+      // this probe could not tell, which must not be reported as a listener
+      // count of zero.
+      settle(cause.code === "ECONNREFUSED" ? false : undefined);
     });
   });
 
