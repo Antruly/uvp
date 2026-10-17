@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -783,6 +784,66 @@ describe("the websocket probe's rejected upgrade", () => {
         expect(asserted["satisfied"]).toBe(1);
         expect(asserted["undetermined"]).toBe(0);
         expect(asserted["unmet"]).toBe(0);
+      } finally {
+        server.close();
+      }
+    },
+    TIMEOUT,
+  );
+});
+
+describe("the websocket probe's upgrade deadline", () => {
+  it(
+    "ends a listener that accepts and never answers instead of hanging",
+    async () => {
+      // Before the change there was no timer before the upgrade: the call could
+      // only end on the caller's signal, so a port that accepts TCP and says
+      // nothing held the probe open forever.
+      const server = createNetServer(() => {});
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const port = (server.address() as AddressInfo).port;
+      try {
+        const started = Date.now();
+        const failure = await call("uvp_websocket_probe", {
+          url: `ws://127.0.0.1:${String(port)}/ws`,
+          idle_timeout_ms: 300,
+        }).then(
+          () => undefined,
+          (cause: unknown) => toUvpError(cause),
+        );
+
+        expect(failure?.code).toBe("endpoint_unreachable");
+        expect(failure?.message).toContain("no complete response within");
+        expect(Date.now() - started).toBeLessThan(2_000);
+      } finally {
+        server.close();
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "settles a response whose body is cut short",
+    async () => {
+      // A peer that sends headers and part of the declared body, then destroys
+      // the socket: the `IncomingMessage` emits close with `complete: false`,
+      // never `end`. With no listener the promise stayed pending.
+      const server = createNetServer((socket) => {
+        socket.on("error", () => socket.destroy());
+        socket.write("HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\npartial");
+        setTimeout(() => socket.destroy(), 20).unref();
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const port = (server.address() as AddressInfo).port;
+      try {
+        const started = Date.now();
+        const output = await call("uvp_websocket_probe", {
+          url: `ws://127.0.0.1:${String(port)}/ws`,
+          idle_timeout_ms: 1_000,
+        });
+        expectConforms("uvp_websocket_probe", output);
+        expect(output["upgraded"]).toBe(false);
+        expect(Date.now() - started).toBeLessThan(2_000);
       } finally {
         server.close();
       }

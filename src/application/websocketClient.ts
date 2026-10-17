@@ -315,7 +315,39 @@ export const probeWebSocket = async (
       idleTimer.unref?.();
     };
 
+    /**
+     * Bound the opening handshake, which no other timer covers.
+     *
+     * `armIdleTimer` is for a connection that has already upgraded; before that
+     * point a listener that accepts TCP and says nothing had no deadline at all,
+     * so the call could only end on the caller's signal. The reason is recorded
+     * because "no response" alone cannot tell a silent listener from a response
+     * whose body never finished.
+     */
+    const armHandshakeDeadline = (): void => {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        transportError ??= `no complete response within ${String(options.idleTimeoutMs)} ms`;
+        finish();
+      }, options.idleTimeoutMs);
+      idleTimer.unref?.();
+    };
+
     const onResponse = (response: IncomingMessage): void => {
+      // `end` is the complete-body case. A peer that destroys the connection
+      // mid-body emits `error`/`close` (with `complete: false`) instead, and
+      // without these listeners the promise stayed pending until the caller's
+      // signal — the same hang as a listener that never answered.
+      response.on("error", (error: Error) => {
+        transportError ??= error.message;
+        finish();
+      });
+      response.on("close", () => {
+        if (!response.complete) {
+          transportError ??= "the response ended before its body was complete";
+        }
+        finish();
+      });
       // A non-101 response is the answer, not a failure. Its headers and status
       // are the most useful thing this probe can return.
       handshake = {
@@ -597,6 +629,7 @@ export const probeWebSocket = async (
       );
     }
 
+    armHandshakeDeadline();
     request.end();
   });
 };
