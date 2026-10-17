@@ -3135,6 +3135,14 @@ DB-backed refusal case runs on both platforms since
 path with a file rather than relying on a missing directory the Windows runner
 can create.
 
+**The toolset is a sample, not a pin.** The lane runs on the moving
+`windows-latest` label and asks `vswhere` for `-latest`, so the Visual Studio it
+compiles with is whatever the image carries. Every run of both legs so far has
+been Visual Studio 2026 (`18.10.3`) with MSVC `14.51.36231`, and the job log
+records the image and toolset since
+[#168](https://github.com/Antruly/uvp/issues/168); no other Visual Studio version
+has been exercised.
+
 **What is not in the source lane.** `oxfmt`, and the rest of `check:pr` —
 `docs:build`, `knip`, `jscpd`, `verify:pack-reproducible`, the built tests.
 `typecheck` and `lint` are now in it, along with the fix that let lint start there

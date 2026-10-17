@@ -364,6 +364,20 @@ with the reason the roadmap records; and the DB refusal case runs there since
 [#108](https://github.com/Antruly/uvp/issues/108), on a path blocked by a file
 rather than by the host's permissions.
 
+**It records the toolset it exercised.** The step prints `ImageOS`,
+`ImageVersion`, `VisualStudioVersion`, `VSCMD_VER` and `VCToolsVersion` after
+`vcvars64.bat`, and fails when `VCToolsVersion` is unset rather than printing an
+empty line. Every execution of both legs so far — ten jobs across five runs,
+from the first at `05:48Z` to the latest at `07:52Z` — reports
+`windows-2025-vs2026` with Visual Studio 2026 (`18.10.3`) and MSVC
+`14.51.36231`; for example the two legs of
+[run 39015162211](https://github.com/Antruly/uvp/actions/runs/39015162211)
+(jobs [117345769135](https://github.com/Antruly/uvp/actions/runs/39015162211/job/117345769135)
+and [117345769140](https://github.com/Antruly/uvp/actions/runs/39015162211/job/117345769140)).
+That is one sample from a moving label, not a pinned version: the
+README's `MSVC 2019+` is a support statement, and only VS 2026 has been observed
+([#168](https://github.com/Antruly/uvp/issues/168)).
+
 ## Built tests
 
 These require `npm run compile` to have run first. They exercise the artifacts

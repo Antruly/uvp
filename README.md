@@ -45,7 +45,8 @@ can walk away from uvp and keep the project.
 ### Requirements
 
 - Node.js `^22.19.0 || ^24.11.0 || >=26.0.0`
-- A C++14 toolchain (`g++` or `clang++`; MSVC 2019+ on Windows) and CMake 3.20+
+- A C++14 toolchain (`g++` or `clang++`; MSVC 2019+ on Windows, where CI has
+  exercised Visual Studio 2026 / MSVC 14.51 only) and CMake 3.20+
 - [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 or newer**, either
   `cmake --install`ed or unpacked from a release archive
 
