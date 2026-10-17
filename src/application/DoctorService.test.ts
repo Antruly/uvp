@@ -86,6 +86,19 @@ describe("the header probe", () => {
     await expect(headerProbeAt(root)("grpc")).resolves.toBeUndefined();
   });
 
+  it.skipIf(isWindows)(named("keeps walking past a layout it could not look through"), async () => {
+    const root = await prefixRoot();
+    await mkdir(join(root, "include"), { recursive: true });
+    // The libuvcpp layout is unsearchable, the fallback layout holds the
+    // header. One failed lookup is not a reason to stop: the fallback's
+    // header is a positive observation, and answering "undecided" here would
+    // discard something the probe did see.
+    await symlink("uvcpp", join(root, "include", "uvcpp"));
+    await writeFile(join(root, "include", "grpc"), "");
+
+    await expect(headerProbeAt(root)("grpc")).resolves.toBe(true);
+  });
+
   it("answers for a missing prefix without looking at the filesystem", async () => {
     await expect(headerProbeAt(undefined)("grpc")).resolves.toBeUndefined();
   });
