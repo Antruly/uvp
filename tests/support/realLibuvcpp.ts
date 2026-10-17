@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { EXE } from "../../src/toolchains/host.js";
+import { EXE, isWindows } from "../../src/toolchains/host.js";
 
 /**
  * The shared helper for the lanes that need a real compiler and a real libuvcpp:
@@ -322,9 +322,25 @@ export const createWorkspace = async (
   };
 };
 
-/** Build a generated workspace through uvp. The caller judges the result. */
+/**
+ * Build a generated workspace through uvp. The caller judges the result.
+ *
+ * On Windows the lane names Ninja and Release. The archive is a release build
+ * with the release CRT, and the Visual Studio generator is multi-configuration:
+ * `-DCMAKE_BUILD_TYPE` is ignored there, so the default build was Debug linked
+ * against a release library — two CRTs in one process, which is not a supported
+ * combination. Ninja makes the build type effective and Release matches the
+ * archive. This is the lane's route, not a change to the product's default; the
+ * default Windows generator is exercised by the source lane and its compiler
+ * probe, but not by a C++ build here.
+ */
 export const buildWorkspace = async (workspace: Workspace): Promise<CliOutcome> =>
-  await runCli(["build", workspace.root, "--json"]);
+  await runCli([
+    "build",
+    workspace.root,
+    ...(isWindows ? ["--generator", "ninja", "--build-type", "Release"] : []),
+    "--json",
+  ]);
 
 const sleep = async (ms: number): Promise<void> =>
   await new Promise((resolve) => setTimeout(resolve, ms));
