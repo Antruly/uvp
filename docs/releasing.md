@@ -336,6 +336,10 @@ npm run test:toolchain        # skipped if libuvcpp is absent
 npm pack --dry-run            # inspect what will ship
 ```
 
+What a release may claim about a host, compiler, generator, or feature is
+recorded in the [first-release support matrix](support-matrix.md). A
+configuration absent from that page is `unknown`, not unsupported.
+
 `check:pr` includes the pack reproducibility check, which packs the tarball three
 more times and compares digests — see
 [what it establishes](#reproducibility-of-the-tarball), and note that it needs

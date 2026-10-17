@@ -370,6 +370,8 @@ otherwise.
   a verification report
 - [libuvcpp feature mapping](docs/libuvcpp-features.md) — what each feature needs
   from a libuvcpp build, verified against 1.7.0
+- [First-release support matrix](docs/support-matrix.md) — what the CI lanes have
+  observed, derived, and left unknown
 - [Tool design](docs/tool-design.md) — how a uvp tool boundary is chosen
 - [Testing](docs/testing.md) — test depths and real-toolchain lanes
 - [Roadmap](docs/roadmap.md) — what is planned and what gates admission
