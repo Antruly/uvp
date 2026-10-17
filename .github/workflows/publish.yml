@@ -152,7 +152,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .cache
-          npm pack --pack-destination .cache --json > .cache/pack.json
+          # `--ignore-scripts` keeps the `prepare` lifecycle out of stdout. This
+          # repository's `prepare` is husky, and with HUSKY=0 it prints a line
+          # that would corrupt the JSON. `verify:pack-reproducible` packs the
+          # same way and measured that the lifecycle does not change the bytes.
+          npm pack --pack-destination .cache --json --ignore-scripts > .cache/pack.json
           node -e '
             const { appendFileSync } = require("node:fs");
             const [entry] = JSON.parse(require("node:fs").readFileSync(".cache/pack.json", "utf8"));
