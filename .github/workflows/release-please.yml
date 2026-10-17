@@ -10,9 +10,14 @@ name: Release please
 # This workflow does **not** push to the release PR branch. `sbom.cdx.json`
 # carries the version in two compound strings that `extra-files` cannot rewrite,
 # so its regeneration stays a maintainer step: after the bump, a maintainer runs
-# `npm run docs:generate` and commits the result to the release PR. The release
-# PR is expected to be red on `docs:check` until that commit; this workflow does
-# not claim the pre-regeneration head is green.
+# `npm run docs:generate` and commits the result to the release PR. If CI runs on
+# that PR, it is expected to be red on `docs:check` until that commit, and a
+# `GITHUB_TOKEN`-opened PR may carry no check runs at all (see `docs/releasing.md`).
+# This workflow does not claim either head is green.
+#
+# There is no tag and no `bootstrap-sha`, so release-please's documented first-run
+# behaviour reads the whole branch history: the first release PR's changelog will
+# cover all of it unless the maintainer records a different choice on #160.
 
 on:
   push:

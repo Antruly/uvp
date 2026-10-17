@@ -214,7 +214,7 @@ MySQL 和 PostgreSQL 走的是同一份生成代码、同一条运行时加载�
 
 **进行中。** 发布自动化：`release-please-config.json`、针对 PR 标题的
 传统提交（Conventional Commits）门禁，以及运行 release-please 的工作流
-（`.github/workflows/release-please.yml`，#160）都已存在，但至今没有切过版本，
+（`.github/workflows/release-please.yml`，由 #177 为 #160 添加）都已存在，但至今没有切过版本，
 包只能从 clone 或 tarball 安装。发布 PR 上的派生文件仍由维护者手动重新生成，
 这是 #160 记录在案的决定。路线图里列出的加固项
 只剩下最后一项：`local-msvc` 的 Windows 通道。同一列表里的其余各项已经落地并有检查兜底：

@@ -2826,7 +2826,7 @@ the whole value at its path. So the file is deliberately absent from
 rather than fragile: `docs:check` runs on every pull request and compares the file
 byte for byte, so a version bump that skips `npm run docs:generate` is a red pull
 request, not a released artifact describing a version it is not. The release
-workflow added in #160 does not perform the regeneration either: the scope
+workflow added in #177 for #160 does not perform the regeneration either: the scope
 decision on that issue keeps the regenerated commit a maintainer step rather than
 giving a workflow write access to the release PR branch.
 

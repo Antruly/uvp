@@ -5,7 +5,7 @@ version by hand, and no one tags by hand.
 
 The configuration (`release-please-config.json`), the changelog rules, the gate
 on pull request titles, and the workflow that runs release-please
-(`.github/workflows/release-please.yml`, added in #160) exist. No release has
+(`.github/workflows/release-please.yml`, added in #177 for #160) exist. No release has
 been cut yet, so the flow below is written from the configuration and has not
 been observed end to end — see [Pre-release checks](#pre-release-checks).
 
@@ -13,7 +13,10 @@ been observed end to end — see [Pre-release checks](#pre-release-checks).
 
 1. A pull request merges to `main` with a conventional-commit title.
 2. release-please opens or updates a release PR. It carries the version bump, the
-   changelog entry, and the files that embed a version.
+   changelog entry, and the files that embed a version. There is no tag and no
+   `bootstrap-sha`, so the first run reads the whole branch history and the first
+   release PR's changelog covers all of it; `bootstrap-sha` is the knob if that
+   is not wanted, and it can be removed after the first release.
 3. A maintainer runs `npm run docs:generate` and commits the regenerated files to
    the release PR, because `sbom.cdx.json` carries the version in two compound
    strings that `extra-files` cannot rewrite. This is a maintainer step by

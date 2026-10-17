@@ -246,7 +246,8 @@ verification route rather than on appetite.
 
 **In progress.** Release automation: `release-please-config.json`, the
 conventional-commit gate on pull request titles, and the workflow that runs
-release-please (`.github/workflows/release-please.yml`, #160) exist, but no
+release-please (`.github/workflows/release-please.yml`, added in #177 for #160)
+exist, but no
 version has been cut, so the package is installed from a clone or a tarball.
 Regenerating the derived files on the release PR is still a maintainer step, by
 the recorded decision on #160.
