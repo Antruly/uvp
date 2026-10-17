@@ -1196,7 +1196,11 @@ much of the 344 is mutants the tree could never hold? — asked of the whole tab
 rather than of one file. `scripts/mutation-survivor-kinds.mjs` applies each surviving
 mutant's own replacement text to the span its own report records, runs the project's
 `tsc --noEmit`, and restores the file from the report's embedded `source`, which is
-the authority for the restore rather than a copy taken when the run started. Over run
+the authority for the restore rather than a copy taken when the run started. That
+source is also what each location is checked against: a span past its last line, an
+inverted span, or a missing one is reported as `undetermined` with the reason rather
+than applied, because an unchecked `NaN` offset writes a program nobody described
+and the compiler's answer about it would be counted as the mutant's. Over run
 [`38919206652`](https://github.com/Antruly/uvp/actions/runs/38919206652)'s report:
 **108 of the 344 do not compile** — `assertions.ts` 39 of 129, `evidenceHelpers.ts`
 28 of 70, `workspaceManifest.ts` 25 of 53, `evidence.ts` 10 of 13, `errors.ts` 4 of
