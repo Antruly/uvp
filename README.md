@@ -249,7 +249,8 @@ so no version has been cut and the package is installed from a clone or a
 tarball.
 
 The Windows `local-msvc` lane has landed and runs in CI. It exercises the
-database refusal case and the MSVC `LNK` link diagnostics already; the two tests
+database refusal case. The parser reads MSVC's `LNK` shape, but only against
+documented examples — no test drives a real `link.exe` failure, and the two tests
 that drive a real linker still skip there because their fixture is a GNU `ld`.
 The rest of that list has landed and is checked: every action under
 `.github/` is SHA-pinned with the release named beside it
@@ -345,10 +346,12 @@ An older libuvcpp fails the check with the version it found named in the message
 
 The generated projects do — the CMake templates branch for MSVC and the CMake
 package route works there. The `local` provider is exercised on Windows by the
-`windows-toolchain` CI lane with MSVC, where the database refusal case runs and
-MSVC `LNK` link failures are parsed; the two tests that drive a real linker still
-skip there because their fixture is a GNU `ld`. The doctor reports what it can
-and cannot establish rather than pretending otherwise.
+`windows-toolchain` CI lane with MSVC, where the database refusal case runs.
+MSVC `LNK` link failures have a parser format since #142, but it is checked
+against documented examples only: no test drives a real `link.exe` failure, and
+the two tests that drive a real linker skip there because their fixture is a GNU
+`ld`. The doctor reports what it can and cannot establish rather than pretending
+otherwise.
 </details>
 
 ## Documentation
