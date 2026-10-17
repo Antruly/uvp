@@ -298,6 +298,10 @@ describe("exchanges only one pass asked", () => {
     ]);
     expect(result.exchanges.entries.at(0)?.after?.status).toBe(200);
     expect(result.exchanges.entries.at(0)?.before).toBeUndefined();
+    // An exchange one pass asked and the other did not is a change the digest
+    // sees — its name is in the sequence the digest covers. A row that said
+    // otherwise would report an added request as a change the digest cannot see.
+    expect(result.exchanges.entries.at(0)?.verdict_changed).toBe(true);
     expect([
       result.exchanges.unchanged,
       result.exchanges.before_count,
@@ -320,6 +324,9 @@ describe("exchanges only one pass asked", () => {
     expect(shape(result.exchanges.entries)).toEqual([["bye", "absent"]]);
     expect(result.exchanges.entries.at(0)?.before?.status).toBe(200);
     expect(result.exchanges.entries.at(0)?.after).toBeUndefined();
+    // The same fact one row over: the exchange's name is in the sequence the
+    // digest covers, so its disappearance is a verdict the digest can see.
+    expect(result.exchanges.entries.at(0)?.verdict_changed).toBe(true);
     expect(result.order_changed).toBe(false);
   });
 });
@@ -391,6 +398,9 @@ describe("unanswered questions", () => {
     expect(asked(result.unverified.entries)).toEqual([["Is the pool sized?", "changed"]]);
     expect(result.unverified.entries.at(0)?.before).toBe("no_basis");
     expect(result.unverified.entries.at(0)?.after).toBe("not_attempted");
+    // The entry is a change, so the result is one: a comparison that listed the
+    // row and then called the pair identical would contradict its own table.
+    expect(result.outcome).toBe("changed");
   });
 
   it("reports a question the later pass answered as absent", () => {
@@ -425,6 +435,11 @@ describe("records that cannot be read as one subject", () => {
     expect(result.incomparable_because).toHaveLength(1);
     expect(result.incomparable_because[0]).toContain(DEFAULT_WORKSPACE);
     expect(result.incomparable_because[0]).toContain("wsp_zzzzzzzzzzzzzzzzzzzzzz");
+    // The sentence says what follows from the fact, not only the fact: two
+    // subjects rather than two moments.
+    expect(result.incomparable_because[0]).toContain(
+      "so a difference between them is two subjects rather than a change in one",
+    );
     // What the outcome withholds is the reading of the fields, not the fields: a
     // record of what each pass said is still worth having.
     expect(shape(result.exchanges.entries)).toEqual([["hello", "changed"]]);
@@ -448,6 +463,21 @@ describe("records that cannot be read as one subject", () => {
     expect(result.same_digest).toBeUndefined();
   });
 
+  it("names both sides when neither supplied digest describes its own contents", () => {
+    // The reason joins the sides it found inconsistent. With one side it is a
+    // list of one; only two sides exercise the separator, and a join with no
+    // separator would report a side called `beforeafter`, which names neither.
+    const bogus = "0".repeat(64);
+    const result = compare(
+      { ...pass(), bundle_digest: bogus },
+      { ...pass(), bundle_digest: bogus },
+    );
+    expect(result.digest_consistent).toEqual({ before: false, after: false });
+    expect(result.incomparable_because[0]).toContain(
+      "the before and after bundle's supplied digest",
+    );
+  });
+
   it("refuses a pass that recorded one exchange name twice", () => {
     // Names key the comparison. A map would keep the last one silently, and a
     // report over a quietly shortened list is worse than a refusal.
@@ -463,6 +493,27 @@ describe("records that cannot be read as one subject", () => {
     expect(result.incomparable_because).toHaveLength(1);
     expect(result.incomparable_because[0]).toContain("hello");
     expect(result.incomparable_because[0]).toContain("more than once");
+    // And why it matters: a name that appears twice cannot key a comparison.
+    expect(result.incomparable_because[0]).toContain(
+      "so its exchanges cannot be matched up by name with another pass's",
+    );
+  });
+
+  it("names every duplicated exchange when more than one was recorded twice", () => {
+    // `duplicatesOf` returns the names it saw repeated, and the reason joins
+    // them. One duplicate exercises the list; only two exercise the separator
+    // between them, so `(hello, bye)` is what a caller needs to see.
+    const doubled = pass({
+      exchanges: [
+        { name: "hello", status: 200 },
+        { name: "hello", status: 500 },
+        { name: "bye", status: 200 },
+        { name: "bye", status: 500 },
+      ],
+    });
+
+    const result = compare(doubled, oneExchange({ name: "hello", status: 200 }));
+    expect(result.incomparable_because[0]).toContain("(hello, bye)");
   });
 });
 
@@ -524,6 +575,9 @@ describe("the reading the caller asks for", () => {
     ]);
     expect(result.exchanges.entries.at(0)?.changed_fields).toEqual([]);
     expect(result.exchanges.entries.at(0)?.before).toBeUndefined();
+    // An unchanged row is reported because the caller asked for every exchange,
+    // not because its verdict moved.
+    expect(result.exchanges.entries.at(0)?.verdict_changed).toBe(false);
     // The counts are reported either way, so a difference filtered out of the
     // entries is never invisible.
     expect([
@@ -531,6 +585,19 @@ describe("the reading the caller asks for", () => {
       result.exchanges.before_count,
       result.exchanges.after_count,
     ]).toEqual([1, 1, 2]);
+  });
+
+  it("calls two passes identical even when the caller asked to see every unchanged row", () => {
+    // An unchanged row that is *listed* is still not a change. The outcome reads
+    // the entries rather than the counts, so a row included at the caller's
+    // request must not be mistaken for one whose verdict moved.
+    const result = compare(
+      oneExchange({ name: "hello", status: 200 }),
+      oneExchange({ name: "hello", status: 200 }),
+      true,
+    );
+    expect(shape(result.exchanges.entries)).toEqual([["hello", "unchanged"]]);
+    expect(result.outcome).toBe("identical");
   });
 
   it("still counts the questions it left out of the entries", () => {
@@ -542,6 +609,9 @@ describe("the reading the caller asks for", () => {
     );
     expect(asked(result.unverified.entries)).toEqual([["Is the pool sized?", "unchanged"]]);
     expect(result.unverified.unchanged).toBe(1);
+    // The same fact one column over: an unanswered question that did not move,
+    // listed because the caller asked for every row, is not a change.
+    expect(result.outcome).toBe("identical");
   });
 });
 
@@ -640,5 +710,258 @@ describe("the digest's coverage, checked against what the digest does", () => {
     // two passes were different experiments.
     expect(digestOf(BASE)).toBe(digestOf(ALTERED.http_version));
     expect(base.bundle_digest).toBe(digestOf(BASE));
+  });
+});
+
+describe("what the field table decides on its own", () => {
+  it("moves the verdict when only a passed count moved", () => {
+    const result = compare(
+      oneExchange({ name: "hello", status: 200, passed: 2, failed: 0 }),
+      oneExchange({ name: "hello", status: 200, passed: 1, failed: 0 }),
+    );
+    const [entry] = result.exchanges.entries;
+    expect(entry?.changed_fields).toEqual(["assertions_passed"]);
+    // `assertions_passed` is in the digest, so a change it can see is a verdict
+    // this row must report. A `digestDiffers` arrow that read its field for the
+    // changed-fields list but not for this one would answer `false` here beside
+    // `same_digest: false` — two answers that contradict each other.
+    expect(entry?.verdict_changed).toBe(true);
+    expect(result.same_digest).toBe(false);
+  });
+
+  it("moves the verdict when only a failed count moved", () => {
+    const result = compare(
+      oneExchange({ name: "hello", status: 200, passed: 0, failed: 1 }),
+      oneExchange({ name: "hello", status: 200, passed: 0, failed: 2 }),
+    );
+    const [entry] = result.exchanges.entries;
+    expect(entry?.changed_fields).toEqual(["assertions_failed"]);
+    expect(entry?.verdict_changed).toBe(true);
+    expect(result.same_digest).toBe(false);
+  });
+});
+
+describe("a summary reports the facts the record carried, and no others", () => {
+  it("omits status and http_version when the exchange had neither", () => {
+    // Absent and present-with-undefined are the same value to `entry.status` and
+    // different facts to a reader, so the distinction is asserted by key
+    // presence rather than by value.
+    const result = compare(
+      oneExchange({ name: "hello" }),
+      oneExchange({ name: "hello", status: 0 }),
+    );
+    const [entry] = result.exchanges.entries;
+    expect(Object.hasOwn(entry?.before ?? {}, "status")).toBe(false);
+    expect(Object.hasOwn(entry?.before ?? {}, "http_version")).toBe(false);
+    expect(Object.hasOwn(entry?.after ?? {}, "status")).toBe(true);
+  });
+
+  it("omits the goal when the pass did not state one", () => {
+    const result = compare(pass(), pass());
+    expect(Object.hasOwn(result.before, "goal")).toBe(false);
+    expect(Object.hasOwn(result.after, "goal")).toBe(false);
+  });
+
+  it("keeps the absent side of a question absent rather than present-and-undefined", () => {
+    const added = compare(pass(), pass({ unverified: [{ question: "q", reason: "no_basis" }] }));
+    expect(Object.hasOwn(added.unverified.entries.at(0) ?? {}, "before")).toBe(false);
+    const removed = compare(pass({ unverified: [{ question: "q", reason: "no_basis" }] }), pass());
+    expect(Object.hasOwn(removed.unverified.entries.at(0) ?? {}, "after")).toBe(false);
+  });
+});
+
+describe("the outcome's own inputs", () => {
+  it("treats a status that moved on its own as a change", () => {
+    const result = compare(pass({ status: "verified" }), pass({ status: "failed" }));
+    expect(result.status_changed).toBe(true);
+    expect(result.outcome).toBe("changed");
+  });
+
+  it("does not count a goal both passes share as a change in the ask", () => {
+    const result = compare(pass({ goal: "it answers" }), pass({ goal: "it answers" }));
+    expect(result.goal_changed).toBe(false);
+    expect(result.outcome).toBe("identical");
+  });
+
+  it("treats an exit code that moved as a change, even when success did not", () => {
+    const result = compare(
+      pass({ build: { succeeded: true, exit_code: 0 } }),
+      pass({ build: { succeeded: true, exit_code: 2 } }),
+    );
+    expect(result.build.changed).toBe(true);
+    expect(result.outcome).toBe("changed");
+  });
+
+  it("treats success that moved as a change, even when the exit code did not", () => {
+    const result = compare(
+      pass({ build: { succeeded: true, exit_code: 2 } }),
+      pass({ build: { succeeded: false, exit_code: 2 } }),
+    );
+    expect(result.build.changed).toBe(true);
+    expect(result.outcome).toBe("changed");
+  });
+
+  it("reports no endpoint when the pass recorded none, rather than an empty one", () => {
+    // The fixture always names a port; a record that omitted it must not gain an
+    // `endpoint` key on the way through the comparison.
+    const withoutEndpoint = (bundle: ComparedBundle): ComparedBundle => ({
+      ...bundle,
+      service: { run_id: mintedNow("run"), ready: bundle.service.ready },
+    });
+    const result = compare(withoutEndpoint(pass()), withoutEndpoint(pass()));
+    expect(Object.hasOwn(result.service.before, "endpoint")).toBe(false);
+    expect(Object.hasOwn(result.service.after, "endpoint")).toBe(false);
+  });
+
+  it("refuses a bundle whose after digest does not describe its own contents", () => {
+    // The `before` side is the one the existing test tampers with. The `after`
+    // side is the same fact, and the reason has to name the side it found.
+    const tampered: ComparedBundle = { ...pass(), bundle_digest: "0".repeat(64) };
+    const result = compare(pass(), tampered);
+    expect(result.digest_consistent).toEqual({ before: true, after: false });
+    expect(result.comparable).toBe(false);
+    expect(result.same_digest).toBeUndefined();
+    expect(result.incomparable_because).toEqual([
+      "the after bundle's supplied digest does not match the one its own contents produce, " +
+        "so it cannot be relied on as a record: the fields below are what it says, not what " +
+        "it is",
+    ]);
+  });
+
+  it("judges a reordering by the entries, not by the order the fixture spelled them in", () => {
+    // `zebra`/`alpha` are chosen so the *unsorted* before-sequence is not already
+    // in sorted order: a comparison that sorted one side and not the other would
+    // call this a different set rather than the same entries reordered.
+    const result = compare(
+      pass({
+        exchanges: [
+          { name: "zebra", status: 200 },
+          { name: "alpha", status: 200 },
+        ],
+      }),
+      pass({
+        exchanges: [
+          { name: "alpha", status: 200 },
+          { name: "zebra", status: 200 },
+        ],
+      }),
+    );
+    expect(result.order_changed).toBe(true);
+    expect(result.outcome).toBe("changed");
+  });
+});
+
+/** The sentences a result carries, which are part of what a caller reads. */
+const OBSERVED_NOTHING =
+  "This compares two reports of two passes and observes nothing itself, so a difference " +
+  "here is a difference between the two records, not a measurement of the subject now.";
+const IDENTIFIERS_NOT_COMPARED =
+  "Identifiers and the clock are reported and never compared: `bundle_id`, `exchange_id` " +
+  "and `service.run_id` are minted per pass, and `elapsed_ms` and `service.endpoint` are " +
+  "facts about the run rather than about the subject, so all of them differ between two " +
+  "passes that established the same things.";
+const ORDER_MOVED =
+  "The two passes recorded their exchanges or their unanswered questions in a different " +
+  "order. The sequence is part of what `bundle_digest` covers, so the digests differ even " +
+  "when the same requests produced the same results; whether that order is a difference " +
+  "in the subject is not something this comparison can decide.";
+const DIGESTS_AGREE =
+  "The two digests agree, so nothing `bundle_digest` covers moved. What differs is outside " +
+  `it: the digest reads ${DIGEST_EXCHANGE_FIELDS.join(", ")} for each exchange and not ` +
+  "the failure text, nor the build and service state.";
+const INCOMPARABLE =
+  "Every field is reported anyway, because a record of what each pass said is worth " +
+  "having. What the outcome withholds is reading those fields as a change in one subject.";
+const GOAL_MOVED =
+  "The two passes state different goals. A goal is the ask rather than a finding, so it " +
+  "is reported and does not by itself make the outcome `changed`; what is compared is the " +
+  "set of requests and what they established.";
+
+describe("the sentences a result carries", () => {
+  it("carries the two standing limitations, and only those, when nothing moved", () => {
+    const result = compare(pass(), pass());
+    expect(result.limitations).toEqual([OBSERVED_NOTHING, IDENTIFIERS_NOT_COMPARED]);
+  });
+
+  it("does not claim the digests agree when one of them does not describe its own contents", () => {
+    // The equality between the supplied digests is only a finding when *both*
+    // records can be trusted. Here the `after` digest is the one its own
+    // contents produce, and the `before` bundle carries it while saying
+    // something different — so the strings are equal and the comparison still
+    // cannot say the digests agree.
+    const after = pass();
+    const before: ComparedBundle = {
+      ...pass({ status: "failed" }),
+      bundle_digest: after.bundle_digest,
+    };
+    const result = compare(before, after);
+    expect(result.digest_consistent).toEqual({ before: false, after: true });
+    expect(result.same_digest).toBeUndefined();
+    expect(result.limitations.some((line) => line.includes(DIGESTS_AGREE))).toBe(false);
+  });
+
+  it("says the digests agree only when the change sits outside them", () => {
+    const outside = compare(
+      pass({
+        status: "failed",
+        exchanges: [
+          { name: "hello", status: 500, passed: 0, failed: 1, failures: ["status: got 500"] },
+        ],
+      }),
+      pass({
+        status: "failed",
+        exchanges: [
+          {
+            name: "hello",
+            status: 500,
+            passed: 0,
+            failed: 1,
+            failures: ["status: the service answered 500 instead of 200"],
+          },
+        ],
+      }),
+    );
+    expect(outside.same_digest).toBe(true);
+    expect(outside.limitations).toEqual([
+      OBSERVED_NOTHING,
+      IDENTIFIERS_NOT_COMPARED,
+      DIGESTS_AGREE,
+    ]);
+    // And the sentence is absent when the change is inside the digest: a reader
+    // told "the digests agree" beside two different digests would look for a bug
+    // in the comparison instead of at the change it reported.
+    const inside = compare(
+      oneExchange({ name: "hello", status: 200, passed: 2, failed: 0 }),
+      oneExchange({ name: "hello", status: 200, passed: 1, failed: 0 }),
+    );
+    expect(inside.same_digest).toBe(false);
+    expect(inside.limitations).toEqual([OBSERVED_NOTHING, IDENTIFIERS_NOT_COMPARED]);
+  });
+
+  it("says the order moved, in its own sentence, only when one did", () => {
+    const moved = compare(
+      pass({
+        exchanges: [
+          { name: "zebra", status: 200 },
+          { name: "alpha", status: 200 },
+        ],
+      }),
+      pass({
+        exchanges: [
+          { name: "alpha", status: 200 },
+          { name: "zebra", status: 200 },
+        ],
+      }),
+    );
+    expect(moved.limitations).toEqual([OBSERVED_NOTHING, IDENTIFIERS_NOT_COMPARED, ORDER_MOVED]);
+    const still = compare(pass(), pass());
+    expect(still.limitations.some((line) => line.includes("different order"))).toBe(false);
+  });
+
+  it("explains an incomparable result and a moved goal in their own sentences", () => {
+    const incomparable = compare({ ...pass(), bundle_digest: "0".repeat(64) }, pass());
+    expect(incomparable.limitations).toContain(INCOMPARABLE);
+    const goal = compare(pass({ goal: "one" }), pass({ goal: "two" }));
+    expect(goal.limitations).toContain(GOAL_MOVED);
   });
 });

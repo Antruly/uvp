@@ -1123,12 +1123,12 @@ refuses; the 15 mutants the new helper and its two call sites add are all killed
 the mutation group is **494** tests. The comparator is a scratch script under `/tmp`,
 so these numbers are quotable but not re-runnable from the repository — the same gap
 [#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
-**60** survivors are still unread — `bundleDiff.ts` 54 (52 readable) and the six in
-`evidence.ts` this read leaves all compiler-refused — **52** readable once the
+**7** survivors are still unread — the six in `evidence.ts` the read below leaves
+compiler-refused and `bundleDiff.ts`'s one equivalent — **0** readable once the
 classification below is applied. The baseline's **78** had already shrunk to **71**
 because tests the earlier reads added killed seven of them, five of those in
 `evidence.ts`, and the four `unknown.ts` and five `ToolchainProvider.ts` survivors read
-below are the next nine.
+below are the next nine; the `bundleDiff.ts` read below kills 53 of its 54.
 
 **`unknown.ts`'s four have been read, and all four are pinned**
 ([#66](https://github.com/Antruly/uvp/issues/66)). The file is the vocabulary for
@@ -1167,6 +1167,27 @@ the id refused; a different prefix refused. The remaining six survivors are the
 compiler-refused rows, measured by `scripts/mutation-survivor-kinds.mjs` rather than
 assumed: all six are `TS2322`, so the file measures **85.00%** — 34 killed of 40 — and
 the gap is damage `npm run compile` refuses, not an assertion the suite is missing.
+
+**`bundleDiff.ts`'s fifty-four have been read, and one is left** ([#64](https://github.com/Antruly/uvp/issues/64)).
+**52** of the 54 compiled. The other two are `""` StringLiteral mutations
+(`entry.change !== ""`) that `tsc` refuses with `TS2367`; the read's tests kill them
+anyway, so what the classifier would have recorded as damage the build already catches
+is now damage an assertion catches too. The twenty tests added here pin the paths the
+sweep showed were unread: the digest's own field table (`assertions_passed` and
+`assertions_failed` move the verdict because the digest covers them), the summary's
+key-presence rules (an absent endpoint is not an absent `status`, and a goal nobody
+stated is not a goal that did not move), the outcome's inputs (an unchanged row listed
+because the caller asked for it does not make the outcome `changed`; an added or absent
+exchange does), and the result's sentences — the two-sided incomparability reason, the
+duplicate-name reason, and the digest-agreement limitation, each asserted as the
+sentence a caller reads. The file measures **99.73%** — 369 killed of 370 — against
+85.41% before the read. The survivor is `:329:10–38`, the `left.length === right.length`
+conjunct → `true` (the whole-expression mutants are killed), and it is **equivalent
+rather than unpinned**: `sameSequence` has exactly one caller, `reordered`, which
+reaches it only after sorting both sequences and finding them equal, and equal sorted
+sequences have equal length — so the length comparison adds nothing to the element
+comparison that follows it. That is a derivation from the caller's guard rather than a
+measurement over an input lattice, and it is recorded as one.
 
 **A third of the survivor table is damage the build refuses, which segments the
 queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the
