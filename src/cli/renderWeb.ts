@@ -37,6 +37,26 @@ const LOSSY_TEXT: Record<string, string> = {
  */
 const BYTES_ALSO = "the bytes it is not came with this answer as base64; --json prints them";
 
+/**
+ * A limitation recorded on the evidence, which the human envelope does not repeat.
+ *
+ * Evidence lines render as `kind:coverage`; the sentences that explain what a
+ * number means live on the record itself. A renderer that needs one — the cap
+ * that cut a body — reads it from there rather than restating the fact with a
+ * different number.
+ */
+const evidenceLimitation = (
+  output: Record<string, unknown>,
+  needle: string,
+): string | undefined => {
+  for (const entry of list(output["evidence"])) {
+    for (const text of strings(at(entry, "limitations"))) {
+      if (text.includes(needle)) return text;
+    }
+  }
+  return undefined;
+};
+
 export const renderHttp = (output: Record<string, unknown>): string[] => {
   const request = obj(output["request"]);
   const body = obj(output["body"]);
@@ -91,7 +111,19 @@ export const renderHttp = (output: Record<string, unknown>): string[] => {
     ),
   );
   if (bool(body["truncated"]) === true) {
-    lines.push(row("", `truncated: only the first ${bytes(num(body["bytes"]) ?? 0)} were read`));
+    // `body.bytes` is the whole response's length, not the prefix that was kept:
+    // the output carries both on purpose, because the digest is over the full
+    // body. Printing that number as though it were what was read states the
+    // opposite of the truncation. The evidence carries the cap that was applied,
+    // so print that sentence when it is there and otherwise say only what is true.
+    const cap = evidenceLimitation(output, "response body was capped");
+    lines.push(
+      row(
+        "",
+        cap ??
+          `truncated: the text below is a prefix of the response body (${bytes(num(body["bytes"]) ?? 0)} total)`,
+      ),
+    );
   }
   // The text below is what a reader will take at face value, so the one line that
   // says it is not the response's bytes goes above it rather than after 8000
