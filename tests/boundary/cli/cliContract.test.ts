@@ -1,5 +1,13 @@
 import { execFile } from "node:child_process";
-import { chmodSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -775,5 +783,20 @@ describe("a refused invocation writes nothing", () => {
     const error = parseUvpError(soleJson(doctor.stderr, "uvp doctor"));
     expect(error.code).toBe("invalid_request");
     expect(error.message).toContain("not valid JSON");
+  });
+
+  it("refuses a name it cannot derive from the path, and writes nothing", async () => {
+    // A path is not a CMake target. Deriving `my service` from it used to report
+    // `build:complete` and leave the caller with a project `cmake` refuses on the
+    // first build; the refusal has to name the flag that fixes it.
+    const target = join(tmpdir(), `uvp init name ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke(["init", target, "--template", "hello-http", "--json"]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(String(error.details?.["usage"])).toContain("--name");
+    expect(existsSync(target)).toBe(false);
   });
 });

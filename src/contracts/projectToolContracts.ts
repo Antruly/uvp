@@ -5,6 +5,7 @@ import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
+import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
 
 const workspaceIdSchema = z.string().regex(/^wsp_[0-9a-f]{22}$/u);
 const runIdSchema = z.string().regex(/^run_[0-9a-f]{22}$/u);
@@ -29,7 +30,11 @@ export const workspaceCreateContract = defineTool({
     name: z
       .string()
       .min(1)
-      .describe("Project name; used for the CMake target and the default binary name."),
+      .regex(WORKSPACE_NAME_PATTERN, WORKSPACE_NAME_MESSAGE)
+      .describe(
+        "Project name; used for the CMake target and the default binary name. " +
+          WORKSPACE_NAME_MESSAGE,
+      ),
     template: z
       .enum([
         "hello-http",

@@ -18,6 +18,7 @@ import {
 } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { canonicalJson, sha256 } from "../domain/identity.js";
+import { WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
 
 /**
  * The contract catalog is the single source of truth: the MCP registrar, the CLI
@@ -343,6 +344,51 @@ describe("defineTool", () => {
     });
     expect(contract.annotations.idempotentHint).toBe(true);
     expect(contract.annotations.readOnlyHint).toBe(false);
+  });
+});
+
+/**
+ * A workspace name is a CMake target and a file name, and the contract is where
+ * both surfaces learn that (`uvp init` validates the same pattern, and the CLI
+ * derives its default through the same domain rule).
+ */
+describe("the workspace name", () => {
+  const create = requireToolContract("uvp_workspace_create");
+  const parse = (name: string): boolean =>
+    create.inputSchema.safeParse({ path: "/tmp/uvp-workspace", name }).success;
+
+  it("publishes the target-name pattern to MCP clients", () => {
+    // A constraint the runtime enforces but the schema omits is invisible to the
+    // client that is supposed to satisfy it.
+    const schema = z.toJSONSchema(create.inputSchema, {
+      target: "draft-2020-12",
+      io: "input",
+    }) as { properties: Record<string, Record<string, unknown>> };
+    expect(schema.properties["name"]?.["pattern"]).toBe(WORKSPACE_NAME_PATTERN.source);
+  });
+
+  it("refuses a name that would generate a project CMake cannot configure", () => {
+    for (const name of [
+      "my app",
+      "服务",
+      "a/b",
+      "all",
+      "install",
+      "ALL_BUILD",
+      "ZERO_CHECK",
+      "INSTALL",
+      "..",
+      "con.txt",
+      "svc.",
+    ]) {
+      expect(parse(name), name).toBe(false);
+    }
+  });
+
+  it("accepts the names a generated project can build", () => {
+    for (const name of ["svc", "hello-http", "my.app+1-x", "_svc", "console"]) {
+      expect(parse(name), name).toBe(true);
+    }
   });
 });
 
