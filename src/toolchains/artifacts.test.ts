@@ -33,6 +33,25 @@ import { EXE } from "./host.js";
 let root: string;
 
 /**
+ * Whether this process can be stopped from reading a file by its mode.
+ *
+ * A POSIX mode bit is what makes an executable unreadable here; root ignores the
+ * bits entirely, and Windows ACLs are not set by `chmod`. Both leave the file
+ * readable, so the case that exercises the failure is skipped with the reason
+ * stated rather than passing for the wrong reason.
+ */
+const cannotSealRead = (): string | undefined => {
+  if (process.platform === "win32") return "Windows ACLs are not set by chmod";
+  if (process.getuid?.() === 0) return "a root process reads the file regardless of its mode";
+  return undefined;
+};
+
+const sealedReason = cannotSealRead();
+
+const named = (title: string): string =>
+  sealedReason === undefined ? title : `${title} — skipped: ${sealedReason}`;
+
+/**
  * The name this host gives a build output.
  *
  * `discoverArtifacts` decides what a build produced from a mode bit on POSIX and
@@ -113,6 +132,24 @@ describe("discoverArtifacts", () => {
 
     expect(await discoverArtifacts(dir)).toEqual([]);
   });
+
+  it.skipIf(sealedReason !== undefined)(
+    named("skips an executable it cannot read, rather than rejecting the build"),
+    async () => {
+      // An executable this process may run but not read is the ordinary way a
+      // build output becomes unreadable, and it is still a successful build. The
+      // walk's own rule — a read that fails is a file that is not an artifact —
+      // has to hold for the digest read too, not just for `readdir` and `stat`.
+      const dir = buildDir("unreadable");
+      const sealed = put(dir, producedName("sealed"), "binary\n", 0o111);
+      const readable = put(dir, producedName("open"), "binary\n", 0o755);
+
+      const found = await discoverArtifacts(dir);
+
+      expect(found.map((artifact) => artifact.path).sort()).toEqual([readable].sort());
+      expect(existsSync(sealed)).toBe(true);
+    },
+  );
 
   it("skips a file with an extension even when it is executable", async () => {
     // On a POSIX host the extension is not the signal; an executable `.so` is
