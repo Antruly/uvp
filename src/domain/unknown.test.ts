@@ -31,6 +31,30 @@ describe("the reason vocabulary", () => {
     expect(unknownReasonSchema.safeParse("verified").success).toBe(false);
     expect(unknownReasonSchema.safeParse("ok").success).toBe(false);
   });
+
+  it("publishes exactly the reasons the contract enumerates, in declaration order", () => {
+    // This enum is a published vocabulary: an agent reads `reason` to decide
+    // whether to retry, install something, rebuild, or escalate, so a member
+    // that changes spelling — or becomes the empty string — changes an answer
+    // rather than a label. Listing the members here means adding, removing, or
+    // misspelling one is a diff in this file instead of a silent change to the
+    // contract. The list is the contract's own, not a restatement to satisfy
+    // the schema: the test below re-parses each of these through the schema.
+    const members = [
+      "not_attempted",
+      "toolchain_missing",
+      "unsupported_by_platform",
+      "unsupported_by_build",
+      "out_of_scope",
+      "resource_limit",
+      "cancelled",
+      "ambiguous_requirement",
+    ];
+    expect(unknownReasonSchema.options).toEqual(members);
+    for (const reason of members) {
+      expect(unknownReasonSchema.safeParse(reason).success).toBe(true);
+    }
+  });
 });
 
 describe("createResidualUnknown", () => {
@@ -86,6 +110,33 @@ describe("createResidualUnknown", () => {
   it("produces a value that satisfies the published schema", () => {
     const unknown = createResidualUnknown({ id: id("a"), question: "q", reason: "cancelled" });
     expect(residualUnknownSchema.safeParse(unknown).success).toBe(true);
+  });
+});
+
+describe("the unknown id grammar", () => {
+  const hex22 = "0123456789abcdef012345";
+  const accepts = (unknownId: string) =>
+    residualUnknownSchema.safeParse({
+      unknown_id: unknownId,
+      question: "q",
+      reason: "not_attempted",
+    }).success;
+
+  // An id is two interchangeable facts — the `unk_` prefix that marks an
+  // unknown, and the 22 hex digits that identify one. A regex that stops
+  // anchoring either end accepts an id that is not the contract's: a length
+  // that does not exist, trailing junk after the digits, or an `unk_` buried
+  // inside another prefix. The rows below are the boundaries on both sides.
+  it.each([
+    ["the prefixed 22 hex digits the contract mints", `unk_${hex22}`, true],
+    ["21 hex digits, one short of the contract", `unk_${hex22.slice(0, 21)}`, false],
+    ["23 hex digits, one past the contract", `unk_${hex22}0`, false],
+    ["trailing characters after the digits", `unk_${hex22}-extra`, false],
+    ["an `unk_` that does not start the id", `xunk_${hex22}`, false],
+    ["a different prefix of the right shape", `ev_${hex22}`, false],
+    ["uppercase hex digits, which the contract does not mint", `unk_${hex22.toUpperCase()}`, false],
+  ])("%s", (_label, unknownId, accepted) => {
+    expect(accepts(unknownId)).toBe(accepted);
   });
 });
 
