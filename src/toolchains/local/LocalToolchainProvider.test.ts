@@ -506,3 +506,64 @@ describe("a call whose signal was already aborted", () => {
     expect(failure.message).toContain("cancelled");
   });
 });
+
+describe("the msbuild generator", () => {
+  it.skipIf(!isWindows)(
+    isWindows
+      ? "does not pin the Visual Studio generator to a version"
+      : "does not pin the Visual Studio generator to a version — skipped: not a Windows host",
+    async () => {
+      const seen: RunProcessOptions[] = [];
+      const scripted = new LocalToolchainProvider({
+        run: async (options) => {
+          seen.push(options);
+          return await syntheticRun(options);
+        },
+      });
+
+      await scripted.createClient().build({
+        workspacePath,
+        buildDir,
+        buildType: "Release",
+        generator: "msbuild",
+        clean: false,
+        timeoutMs: 60_000,
+        configureOnly: true,
+        libuvcppPrefix: otherPrefix,
+        signal,
+      });
+
+      const configure = seen[0]?.args ?? [];
+      // `-G "Visual Studio 17 2022"` fails on VS 2019 and on the VS 18 runner.
+      // CMake's default on Windows is the installed Visual Studio, so the
+      // configure must not name a version at all.
+      expect(configure).not.toContain("-G");
+      expect(configure).not.toContain("Visual Studio 17 2022");
+      expect(configure).toContain("-DCMAKE_BUILD_TYPE=Release");
+    },
+  );
+
+  it.skipIf(isWindows)(
+    isWindows
+      ? "refuses msbuild off Windows — skipped: this is a Windows host"
+      : "refuses msbuild off Windows with unsupported_toolchain",
+    async () => {
+      const failure = await failureOf(() =>
+        provider.createClient().build({
+          workspacePath,
+          buildDir,
+          buildType: "Release",
+          generator: "msbuild",
+          clean: false,
+          timeoutMs: 60_000,
+          configureOnly: true,
+          libuvcppPrefix: otherPrefix,
+          signal,
+        }),
+      );
+
+      expect(failure.code).toBe("unsupported_toolchain");
+      expect(failure.remediation.action).toContain("ninja");
+    },
+  );
+});
