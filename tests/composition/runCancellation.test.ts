@@ -119,12 +119,16 @@ const silentPort = 30_000 + (process.pid % 2_000);
  * This was 400 ms until one Windows run failed on `existsSync(pidFile)` — the
  * withdrawal answered `cancelled` correctly, but the fake service there is a copy
  * of Node rather than a two-line shell script, and under the runner's load it had
- * not started inside that window. The readiness wait is ten seconds against a port
- * nothing listens on, so waiting up to this bound still withdraws inside the wait;
- * what changes is that the test establishes the service started instead of racing
- * it. See docs/roadmap.md#the-cancellation-flake.
+ * not started inside that window. Raising it to 5 s fixed that occurrence, and a
+ * second one expired the 5 s bound too (`the installed service wrote no pid file
+ * within 5000 ms`, recorded on #73). The bound is a wall-clock margin, not a
+ * settled race, so it is set well above the observed start time: the green rerun
+ * of that job ran this whole file in 1.6 s. The readiness wait below is larger
+ * than this bound against a port nothing listens on, so the withdrawal still
+ * happens inside the wait, and the test establishes that the service started
+ * rather than racing it. See docs/roadmap.md#the-cancellation-flake.
  */
-const START_BOUND_MS = 5_000;
+const START_BOUND_MS = 20_000;
 
 /** Polls for a file, answering whether it appeared inside the bound. */
 const waitForFile = async (path: string, timeoutMs: number): Promise<boolean> => {
@@ -185,7 +189,7 @@ describe("a run whose caller withdrew", () => {
           path: workspace,
           args: serviceArgs,
           env: {},
-          ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
+          ready: { port: silentPort, path: "/", timeout_ms: 30_000 },
           detach: true,
         },
         { signal: controller.signal },
