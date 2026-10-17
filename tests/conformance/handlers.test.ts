@@ -2320,6 +2320,49 @@ describe("the doctor", () => {
     expect(features[0]?.note).toContain("UVCPP_DB_ENABLE");
   });
 
+  it("reports a feature undetermined when the build's module list could not be read", async () => {
+    // The provider calls this install found, because a CMake package file is
+    // there, but no config header could be read. The empty module list is not
+    // an observation, so "tls is absent" would be a check that never ran
+    // reported as a no — and the remedy would send the caller to rebuild a
+    // library that may already have the feature.
+    const note =
+      "Found CMake package files but no uvcpp_config.h could be read; module list is unknown.";
+    const output = await callWith(
+      [
+        createFakeToolchain({
+          libuvcpp: {
+            found: true,
+            version: "1.7.0",
+            modules: [],
+            modulesUnknown: true,
+            note,
+          },
+        }),
+      ],
+      "uvp_doctor",
+      { features: ["tls"] },
+    );
+    expectConforms("uvp_doctor", output);
+
+    const features = output["features"] as { feature: string; status: string; note?: string }[];
+    expect(features).toHaveLength(1);
+    expect(features[0]).toMatchObject({ feature: "tls", status: "undetermined" });
+    expect(features[0]?.note).toBe(note);
+
+    // It is an unanswered question, not an implied pass. The reason says the
+    // evidence was missing rather than that the build does not support it, and
+    // the provider's own explanation is the one a caller can act on.
+    const unknowns = output["unknowns"] as {
+      question: string;
+      reason: string;
+      blocked_by?: string;
+    }[];
+    const unknown = unknowns.find((entry) => entry.question.includes("tls"));
+    expect(unknown?.reason).toBe("toolchain_missing");
+    expect(unknown?.blocked_by).toBe(note);
+  });
+
   it("reports grpc as undetermined when no probe can decide it, never as missing", async () => {
     // libuvcpp has no CMake switch for grpc, so its presence can only be checked
     // by looking for installed headers. With no install prefix to root a probe

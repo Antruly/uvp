@@ -69,6 +69,16 @@ export interface LibuvcppBuild {
   readonly versionSource?: "cmake_package" | "pkgconfig" | "version_file";
   readonly installPrefix?: string;
   readonly modules: readonly string[];
+  /**
+   * Whether `modules` is an observation or an unread list.
+   *
+   * An install whose config header could not be read reports `modules: []`
+   * because the field is required, but that empty list is not a fact about the
+   * build. Without this flag the two states are indistinguishable, and a consumer
+   * comparing requirements against the empty list reports every switch-gated
+   * feature as absent — a check that never ran turned into a no.
+   */
+  readonly modulesUnknown?: boolean;
   readonly note?: string;
 }
 
@@ -265,7 +275,19 @@ export interface FeatureAssessment {
    * checked by looking for headers has not been proven absent, and reporting it
    * as missing would be a guess dressed up as a finding.
    */
-  readonly undetermined: readonly { feature: UvpFeature; reason: string }[];
+  readonly undetermined: readonly UndecidedFeature[];
+}
+
+export interface UndecidedFeature {
+  readonly feature: UvpFeature;
+  readonly reason: string;
+  /**
+   * True when the reason is that the module list could not be read, rather
+   * than a missing or undecidable probe. Consumers record the two with
+   * different unknown reasons: one is an absent toolchain, the other is a
+   * finding about the build's feature set.
+   */
+  readonly modulesUnknown?: boolean;
 }
 
 /**
@@ -297,21 +319,36 @@ export type HeaderProbe = (header: string) => Promise<boolean | undefined>;
  * whose headers install whenever they are present — the installed headers are
  * the only evidence there is, and a feature that cannot be checked lands in
  * `undetermined` rather than being guessed into `satisfied` or `unmet`.
+ *
+ * `options.modulesUnknownReason` says the header could not be read at all, so
+ * `modules` is not an observation of the build. Every switch-gated feature is
+ * then `undetermined` for that reason — the macro was never looked for, which is
+ * not the same as having been looked for and found absent. Header-probed
+ * features are unaffected: their evidence does not come from the module list.
  */
 export const assessFeatures = async (
   wanted: readonly UvpFeature[],
   modules: readonly string[],
   probe?: HeaderProbe,
+  options?: { readonly modulesUnknownReason: string },
 ): Promise<FeatureAssessment> => {
   const defined = new Set(modules);
   const satisfied: UvpFeature[] = [];
   const unmet: FeatureGap[] = [];
-  const undetermined: { feature: UvpFeature; reason: string }[] = [];
+  const undetermined: UndecidedFeature[] = [];
 
   for (const feature of new Set(wanted)) {
     const requirement = FEATURE_REQUIREMENTS[feature];
 
     if (requirement.configSymbols.length > 0) {
+      if (options !== undefined) {
+        undetermined.push({
+          feature,
+          reason: options.modulesUnknownReason,
+          modulesUnknown: true,
+        });
+        continue;
+      }
       const absent = requirement.configSymbols.filter((symbol) => !defined.has(symbol));
       if (absent.length === 0) {
         satisfied.push(feature);

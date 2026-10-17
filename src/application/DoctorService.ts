@@ -529,7 +529,22 @@ export class DoctorService {
     }
 
     const { wanted, build, probe } = question;
-    const assessment = await assessFeatures(wanted.features, build.modules, probe);
+    // An unread module list is a third state, not an empty one: the provider
+    // still reports `found`, and `modules` is `[]` only because the field is
+    // required. Passing the reason through keeps every switch-gated feature
+    // undetermined — while a header-probed feature such as grpc can still be
+    // decided, because its evidence does not come from that list.
+    const assessment = await assessFeatures(
+      wanted.features,
+      build.modules,
+      probe,
+      build.modulesUnknown === true
+        ? {
+            modulesUnknownReason:
+              build.note ?? "The module list of this libuvcpp build could not be read.",
+          }
+        : undefined,
+    );
     const features: DoctorFeature[] = [];
 
     for (const feature of assessment.satisfied) {
@@ -562,7 +577,11 @@ export class DoctorService {
       recordUnknown(
         recorder,
         `Can this libuvcpp build provide ${entry.feature}?`,
-        "unsupported_by_build",
+        // An unread module list is evidence that was not available, which the
+        // toolchain-missing path records the same way; `unsupported_by_build`
+        // would assert the build does not support the feature, which nothing
+        // here established.
+        entry.modulesUnknown === true ? "toolchain_missing" : "unsupported_by_build",
         {
           blockedBy: entry.reason,
         },

@@ -229,6 +229,57 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(found.modules).toEqual(["UVCPP_HTTP_ENABLE", "UVCPP_WS_ENABLE"]);
   });
 
+  /** Discovery of `prefix`, with `UVCPP_ROOT` pointed at it for one call. */
+  const findUnderRoot = async (prefix: string) => {
+    const saved = process.env["UVCPP_ROOT"];
+    process.env["UVCPP_ROOT"] = prefix;
+    try {
+      return await provider.findLibuvcpp(workspacePath, signal);
+    } finally {
+      if (saved === undefined) delete process.env["UVCPP_ROOT"];
+      else process.env["UVCPP_ROOT"] = saved;
+    }
+  };
+
+  it("marks a module list it could not read as unknown, not as an empty one", async () => {
+    // A prefix can carry the CMake package file without the config header the
+    // module list is read from — a partial or permission-restricted install.
+    // Reporting `modules: []` alone would let a consumer conclude "this build
+    // enables nothing", which is a finding nobody made.
+    const prefix = join(root, "headerless");
+    mkdirSync(join(prefix, "lib", "cmake", "uvcpp"), { recursive: true });
+    writeFileSync(
+      join(prefix, "lib", "cmake", "uvcpp", "uvcppConfig.cmake"),
+      'set(PACKAGE_VERSION "1.7.0")\n',
+    );
+
+    const found = await findUnderRoot(prefix);
+    expect(found.found).toBe(true);
+    expect(found.installPrefix).toBe(prefix);
+    expect(found.modules).toEqual([]);
+    expect(found.modulesUnknown).toBe(true);
+    expect(found.note).toContain("module list is unknown");
+  });
+
+  it("reports an empty module list as an observation when the header was read", async () => {
+    // The other half of the distinction: a header that was read and defines no
+    // modules is a real answer, and it must not be labelled unknown.
+    const prefix = join(root, "empty-header");
+    mkdirSync(join(prefix, "lib", "cmake", "uvcpp"), { recursive: true });
+    mkdirSync(join(prefix, "include", "uvcpp"), { recursive: true });
+    writeFileSync(
+      join(prefix, "lib", "cmake", "uvcpp", "uvcppConfig.cmake"),
+      'set(PACKAGE_VERSION "1.7.0")\n',
+    );
+    writeFileSync(join(prefix, "include", "uvcpp", "uvcpp_config.h"), "\n");
+
+    const found = await findUnderRoot(prefix);
+    expect(found.found).toBe(true);
+    expect(found.modules).toEqual([]);
+    expect(found.modulesUnknown).toBeUndefined();
+    expect(found.note).toBeUndefined();
+  });
+
   it("points CMake at the install it reports, on both routes libuvcpp ships by", async () => {
     const found = await provider.findLibuvcpp(workspacePath, signal);
     const outcome = await buildWithoutPrefix();
