@@ -552,3 +552,22 @@ describe("the window a replay covers", () => {
     TIMEOUT,
   );
 });
+
+describe("a capture session that is not there", () => {
+  it(
+    "reports capture_not_found rather than an empty capture",
+    async () => {
+      // #49: the session lookup used to share `capture_unavailable` with a bind
+      // failure. The two have different remedies, and this is the observable half
+      // of the split: a caller that mistyped an id is told the session does not
+      // exist, not that capture is unavailable.
+      // A schema-valid id that no session holds. `does-not-exist` would be refused
+      // by the input pattern before the lookup, which is a different claim.
+      const code = await refusalCode("uvp_capture_read", {
+        capture_id: "cap_0000000000000000000000",
+      });
+      expect(code).toBe("capture_not_found");
+    },
+    TIMEOUT,
+  );
+});

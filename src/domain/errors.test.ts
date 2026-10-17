@@ -102,10 +102,9 @@ describe("UvpFailure", () => {
     // a failure nobody said was permanent.
     //
     // The whole set is asserted rather than one code at a time, so a code added to
-    // the set fails here too. `capture_unavailable` is the one code whose category
-    // reads `unavailable` and which the set deliberately omits: it carries two
-    // meanings, and only one of them is temporary. That is
-    // [#49](https://github.com/Antruly/uvp/issues/49).
+    // the set fails here too. These four are exactly the codes whose category says
+    // the environment might be different next time; #49's split made that rule
+    // true for every code, with no exception to document.
     const retryable = CODES.filter(
       (code) =>
         new UvpFailure({ code, message: "m", remediation: { action: "a" } }).detail.retryable,
@@ -119,6 +118,42 @@ describe("UvpFailure", () => {
       "resource_constraint",
     ];
     expect([...retryable].sort()).toEqual([...expected].sort());
+  });
+
+  it("derives retryable from the category rule, for every code", () => {
+    // The set's docblock states a rule a reader can check: the retryable codes are
+    // exactly those whose category is `unavailable`, `timeout`, or
+    // `resource_constraint`. #49 found the one code that contradicted it, so the
+    // rule itself is pinned here rather than only the set's membership — a future
+    // category change can reintroduce the drift with the set unchanged.
+    const environmentCategories = new Set(["unavailable", "timeout", "resource_constraint"]);
+    for (const code of CODES) {
+      const failure = new UvpFailure({ code, message: "m", remediation: { action: "a" } });
+      expect(failure.detail.retryable).toBe(environmentCategories.has(failure.detail.category));
+    }
+  });
+
+  it("gives both capture failures a non-retryable verdict of their own", () => {
+    // #49 split one code that carried a bind failure and a missing session. Neither
+    // is fixed by asking again: a permission or configuration fact is not a
+    // transient environment condition, and a session that does not exist is not
+    // created by a retry. The categories put them beside `launch_failed` and
+    // `workspace_not_found` respectively.
+    const listen = new UvpFailure({
+      code: "capture_listen_failed",
+      message: "m",
+      remediation: { action: "a" },
+    });
+    expect(listen.detail.category).toBe("execution_failure");
+    expect(listen.detail.retryable).toBe(false);
+
+    const missing = new UvpFailure({
+      code: "capture_not_found",
+      message: "m",
+      remediation: { action: "a" },
+    });
+    expect(missing.detail.category).toBe("unsupported_target");
+    expect(missing.detail.retryable).toBe(false);
   });
 
   it("keeps a remediation link through construction, and omits the key when there is none", () => {
