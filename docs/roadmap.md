@@ -613,7 +613,7 @@ implicit.
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ✅  | Every third-party `uses:` under `.github/` is pinned to a commit SHA with the release named beside it, and `npm run verify:actions` fails one that is not — or that pins the same action at two SHAs. Each SHA was resolved with `gh api repos/<owner>/<repo>/git/ref/tags/v4`, never from memory, and each `# vX.Y.Z` label read from the tag list. See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ✅  | A Windows lane runs the source projects: `windows-source` on `windows-latest`, in `CI required`, so a red Windows lane cannot read as green. Its first run reported 53 tests that could not run there, in three groups — five fixtures that stand in for a built binary by writing a `#!/bin/sh` script with no extension (45), an artifacts fixture that names its output the POSIX way (4), and a recorded command line rendered in POSIX dialect (4) — each skipped by name with its reason printed and an issue of its own tracking the fix. It also found that the test runner spawned `node_modules/.bin/vitest`, which Windows cannot execute at all, so the lane would have died before loading a test file. The `local-msvc` half is the row below. See [below](#windows-lane)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ⬜  | A Windows CI lane for `local-msvc`. The two source tests that keep the Windows lane short of complete are the local provider's own, and [#22](https://github.com/Antruly/uvp/issues/22) settled them as no product change: the provider chooses `cmake`'s arguments itself, so a fake that is a copy of Node exits 9 on `-S`/`--build` before any of the suite's code runs, and the two tests stay skipped **by name** rather than being bent to pass. The route recorded for getting them onto Windows is a `run` seam on the local provider, as `ContainerToolchainProvider` already has — a product change, and the one a lane for `local-msvc` would rest on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ✅  | A Windows CI lane for `local-msvc`. `windows-toolchain` builds and runs generated workspaces with MSVC (Ninja, Release) against the pinned `libuvcpp-1.7.0-msvc-x64` release archive: all six templates configure, compile, start, and answer, and the two source tests that used to skip run through the local provider’s `run` seam. The generated `CMakeLists.txt` pins the executable to `build/<name>` for multi-configuration generators. Not covered: the native probe is not built (its tests skip by name), the container lane skips without a runtime, the two MSVC link-diagnostic tests skip because LNK errors are deliberately unmatched, and the Windows SQLite refusal case is [#108](https://github.com/Antruly/uvp/issues/108). See [below](#the-windows-c-lane).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ✅  | Dependabot updates both ecosystems weekly — routine bumps grouped into one pull request per ecosystem, majors left to arrive alone — because a pin nothing updates is a pin that goes stale. Renovate would need an app installed on the repository; Dependabot is GitHub reading a file in it. An **npm** bump arrives with the derived metadata stale, which is what the bot cannot fix and the repository will not let a workflow fix: `licenses/npm-dependencies.json` and `sbom.cdx.json` are generated from the installed closure, `docs:check` fails closed on them, and the first PR this happened to was otherwise green everywhere (#7, run `38852318351`). The remedy is written down rather than automated — `npm run docs:generate` on the bot's branch, one commit, before the bump is read — because the alternative is a workflow with write access to a pull request branch, which is a scope decision this repository has not taken ([#17](https://github.com/Antruly/uvp/issues/17), and CONTRIBUTING.md carries the rule). See [below](#action-pins)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ✅  | The packaged tarball is a fact about its contents and a promise about them: `npm run verify:pack-reproducible` packs it three more times — twice more from the tree, once from the first tarball's own contents unpacked at another path — fails if any digest differs, and fails when a path `package.json`'s `files[]` names is not delivered. Measured stable across repeated packs, pack destinations, an unpacked copy at another path, and a clean rebuild of `dist/`; another machine, npm version and filesystem are not established. It also found that no tarball had ever contained `THIRD_PARTY_NOTICES.md`, which tells a redistributor to keep it. See [below](#pack-reproducibility)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ✅  | A published docs page was an empty shell: `docs/roadmap.md` quoted a GitHub workflow expression in an inline code span, Vue read its braces as an interpolation, the render threw, and VitePress logged the error and **exited 0** — so CI stayed green while the roadmap page shipped with no content in it, 16 KB against 73 KB for `testing.html`. The expression is escaped now, and `npm run verify:docs-interpolation` fails the next one, asking `docs/.vitepress/config.ts` which files are pages rather than restating its `srcExclude`. See [below](#docs-interpolation)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -3018,7 +3018,7 @@ named #19 are gone. The five fixtures behind the 45 now install a program the ho
 will start through one owner, `tests/support/fakeExecutable.ts`, so 43 of them
 run.
 
-The other 2 run into a second wall, and it is not the shell-script one: the local
+The other 2 ran into a second wall, and it is not the shell-script one: the local
 provider chooses `cmake`'s arguments itself (`-S … -B …`, then `--build …`), and
 on Windows the fake is a copy of Node, which reads those as its own options before
 any of the suite's code can run —
@@ -3028,11 +3028,12 @@ node -S /tmp/ws -B /tmp/ws/build -DCMAKE_BUILD_TYPE=Debug
 node: bad option: -S                      → exit 9, no program run
 ```
 
-— so the configure the assertions read never happens. They are skipped by name,
-with the measurement in the title, and the wall is filed as
-[#22](https://github.com/Antruly/uvp/issues/22): a `run` seam on the local
-provider, as the container provider has, would carry them, and that is a product
-change for a maintainer to decide rather than a test to invent.
+— so the configure the assertions read never happens. [#11](https://github.com/Antruly/uvp/issues/11)
+is the Windows C++ lane where the seam is needed for real: `LocalToolchainProvider`
+now takes the same `run` slot `ContainerToolchainProvider` has, and the two tests
+inject a runner on Windows while the default remains `runProcess`. They run on the
+source lane; the wall remains real for any provider that chooses its own argv and
+offers no seam.
 
 The recorded-command row is fixed as a test defect, and it was two problems in
 one. The four assertions read the record as raw text, and `NAME=(\S+)` returns
@@ -3055,9 +3056,8 @@ and `env` in place of one string — was rejected with its reason on the issue:
 `commands` is a declared provenance field, and every consumer would still have to
 render a string for `sources[].ref`.
 
-So 51 of the 53 have landed and 2 are skipped in these three groups; the lane's
-own total is 4, the other two being the reserved-port window and
-`runCancellation`'s stop marker.
+So all 53 have landed. The source lane's own total is 2, the reserved-port window
+and `runCancellation`'s stop marker.
 
 The failure text is what makes the first group a fixture defect rather than a
 product one:
@@ -3070,9 +3070,10 @@ could not be started: spawn … ENOENT
 
 uvp resolves the binary as `join(buildDir, manifest.binary ?? manifest.name)`, and
 on Windows `CreateProcess` appends `.exe` to a name that has no extension — so a
-real CMake build producing `svc.exe` **is** found, with no change to uvp. That is
-derived from documented behaviour rather than observed, and it is the thing the
-lane will make observed once the fixtures can produce a binary Windows can start.
+real CMake build producing `svc.exe` **is** found. The Windows C++ lane made that
+observed, and it also found the second half: the binary has to be _at_
+`build/<name>` for the manifest's path to be true. See
+[below](#the-windows-c-lane).
 
 **Each gap is skipped by name, not by count.** The 53 are `it.skipIf` and
 `describe.skipIf` with the reason in the title, so
@@ -3085,15 +3086,51 @@ gets its own pull request so the lane can verify it: once the lane is on `main`,
 a Windows fix is proven by the run that follows it rather than by the argument
 that made it.
 
-**What it found about the code, not the fixtures.** Nothing yet, and that is worth
-stating plainly. The three groups are all tests standing in for something: the
-lane's Windows result so far is about how this suite builds its fixtures, and the
-product claims it was built to check remain where they were — inferred from
-reading, `undetermined` on Windows, until a run can reach them.
+### The Windows C++ lane {#the-windows-c-lane}
 
-**What is not in the lane.** `oxfmt`, and the rest of `check:pr` — `docs:build`,
-`knip`, `jscpd`, `verify:pack-reproducible`, the built tests. `typecheck` and
-`lint` are now in it, along with the fix that let lint start there at all.
+`windows-toolchain` is the second Windows job and the one the `local-msvc` row
+was waiting for. It installs the pinned `libuvcpp-1.7.0-msvc-x64` release
+archive, records the `UVCPP_*` modules its config header defines, installs a
+`pkg-config.exe` (the archive ships a `.pc` file and no CMake package config),
+activates MSVC through `vswhere`/`vcvars64.bat`, and runs the built toolchain
+group: all six generated workspaces configure, compile, start, and answer.
+
+The route is **Ninja in Release**, not the Visual Studio generator. The archive is
+a release build with the release CRT; the VS generator is multi-configuration and
+ignores `CMAKE_BUILD_TYPE`, so a Debug build there linked a release library and
+mixed CRTs — the services started but routes answered 404 and some never listened.
+Ninja makes the build type effective, and Release matches the archive. The
+generated `CMakeLists.txt` also pins the executable to `build/<name>` for
+multi-configuration generators, because that is the path the manifest and
+`uvp run` already name; this lane's Ninja route does not exercise the VS
+subdirectory, so that property is derived from CMake's documented behaviour rather
+than observed here.
+
+The first runs found five things, all in the lane, its stand-ins, or the generated
+CMakeLists rather than in provider logic:
+
+- the restored record assertion compared raw text, and Windows quotes the build
+  directory because it contains backslashes;
+- the pkg-config install directory was not on `GITHUB_PATH`, so CMake's
+  `find_package(PkgConfig REQUIRED)` failed in the step after the install;
+- `Get-Command pkg-config` found Strawberry Perl's `pkg-config.bat` while CMake
+  looks for `pkg-config.exe`;
+- the test helper named the binary `svc` where MSVC writes `svc.exe`;
+- the VS generator put the executable in `build/Debug/`, which the runtime output
+  directory property now prevents.
+
+What it does not cover: the native probe is not built on Windows, so its tests skip
+by name; the container lane skips without a runtime; the two link-diagnostic tests
+skip because MSVC's `LNK2019`/`LNK2001` are deliberately unmatched; and the
+DB-backed refusal case is skipped by name with its observation on
+[#108](https://github.com/Antruly/uvp/issues/108), because on this archive the
+service listens with an unopenable SQLite path instead of refusing first.
+
+**What is not in the source lane.** `oxfmt`, and the rest of `check:pr` —
+`docs:build`, `knip`, `jscpd`, `verify:pack-reproducible`, the built tests.
+`typecheck` and `lint` are now in it, along with the fix that let lint start there
+at all. The C++ half is `windows-toolchain` above; it runs the built toolchain
+group, not the CLI, MCP server, or packaged tarball.
 `oxfmt` is the one worth separating: `format:check` names `oxfmt`, which npm
 starts through its own `.bin` shim, so it is not the shape `lint.mjs` had —
 measured by reading `node_modules/oxfmt/bin/oxfmt`, the same 46-byte Node entry

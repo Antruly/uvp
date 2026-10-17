@@ -345,6 +345,21 @@ rather than through a path this repository resolved — measured by reading
 different way. Whether that route works on Windows is unmeasured, and this
 document does not claim it does.
 
+**The C++ Windows lane is `windows-toolchain`.** It installs the pinned
+`libuvcpp-1.7.0-msvc-x64` release archive, records the modules its config header
+defines, installs a `pkg-config.exe`, activates MSVC through
+`vswhere`/`vcvars64.bat`, and runs the built toolchain group with Ninja in
+Release. The route is Ninja Release because the archive is a release build with
+the release CRT: the Visual Studio generator is multi-configuration and ignores
+`CMAKE_BUILD_TYPE`, so a Debug build there mixed CRTs. The lane is where the
+Windows claims in the local provider and the generated code are observed;
+`windows-source` only proves the TypeScript half. Its first runs found four
+lane/stand-in defects (quoted record text, the pkg-config PATH, the `.bat`/`.exe`
+mix-up, and the `svc`/`svc.exe` name) and the multi-configuration output
+directory. The native probe is not built there; the two link-diagnostic tests skip
+with the reason the roadmap records; and the DB refusal case skips by name with
+its observation on [#108](https://github.com/Antruly/uvp/issues/108).
+
 ## Built tests
 
 These require `npm run compile` to have run first. They exercise the artifacts
