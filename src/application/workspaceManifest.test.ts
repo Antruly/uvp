@@ -1,11 +1,11 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderTemplate } from "./templates.js";
 import type { TemplateId } from "./templates.js";
-import { readWorkspaceManifest } from "./workspaceManifest.js";
+import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
 import type { UvpFeature } from "../domain/features.js";
 
 /**
@@ -33,10 +33,26 @@ import type { UvpFeature } from "../domain/features.js";
  * than to a wrong one. Those cases are written against the reader directly,
  * because a generator cannot produce them.
  *
+ * The last group is about the read itself rather than about a field. "No file"
+ * and "a file that could not be used" are different answers, and the second one
+ * exists so that a workspace declaring a container build is never built on the
+ * host because the declaration could not be parsed.
+ *
  * The cases are grouped by the thing they are a claim about rather than by the
  * function that answers them, which is why the toolchain declaration is not
  * tested under the transport it has nothing to do with.
  */
+
+/**
+ * `title`, on the host where a mode bit does not stop a read.
+ *
+ * `chmod(0o000)` is how these cases produce an unreadable file; Windows has no
+ * mode bits to withhold, so the case would assert a state the host cannot enter.
+ */
+const named = (title: string): string =>
+  process.platform === "win32"
+    ? `${title} — skipped: this host has no POSIX mode bits to make the file unreadable`
+    : title;
 
 const directories: string[] = [];
 
@@ -73,17 +89,24 @@ const manifestRoot = async (manifest: unknown): Promise<string> => {
   return root;
 };
 
+/**
+ * The manifest the reader found, for the cases about its fields.
+ *
+ * The other state — a file that is there and could not be used — has its own
+ * cases below, which read the result whole. Everywhere else the question is what
+ * the fields mean, and "was there a file" is the setup rather than the subject.
+ */
+const manifestAt = async (root: string) => manifestOf(await readWorkspaceManifest(root));
+
 describe("the transport a workspace declares", () => {
   it("is HTTPS for a workspace that declared tls", async () => {
-    const manifest = await readWorkspaceManifest(await writeWorkspace("hello-http", ["tls"]));
+    const manifest = await manifestAt(await writeWorkspace("hello-http", ["tls"]));
     expect(manifest?.scheme).toBe("https");
     expect(manifest?.features).toEqual(["tls"]);
   });
 
   it("is HTTP for the same workspace without it", async () => {
-    const manifest = await readWorkspaceManifest(
-      await writeWorkspace("hello-http", ["http2", "websocket"]),
-    );
+    const manifest = await manifestAt(await writeWorkspace("hello-http", ["http2", "websocket"]));
     expect(manifest?.scheme).toBe("http");
   });
 
@@ -92,18 +115,16 @@ describe("the transport a workspace declares", () => {
     // look at its first element — which is how a workspace that declared
     // `["http2", "tls"]` would be read as cleartext and probed over the wrong
     // scheme by every caller downstream.
-    const manifest = await readWorkspaceManifest(
-      await writeWorkspace("hello-http", ["http2", "tls"]),
-    );
+    const manifest = await manifestAt(await writeWorkspace("hello-http", ["http2", "tls"]));
     expect(manifest?.scheme).toBe("https");
   });
 
   it("is not stated by a manifest for a directory that has none", async () => {
     // No manifest is a distinguishable answer from a manifest that declares
     // cleartext, and it has to stay that way: the caller applies its own default
-    // for a directory that is not a uvp workspace, and `undefined` is how it
-    // knows to.
-    expect(await readWorkspaceManifest(await scratchRoot())).toBeUndefined();
+    // for a directory that is not a uvp workspace, and `absent` is how it knows
+    // to.
+    expect(await readWorkspaceManifest(await scratchRoot())).toStrictEqual({ state: "absent" });
   });
 });
 
@@ -113,7 +134,7 @@ describe("the toolchain declaration", () => {
       name: "svc",
       toolchain: { kind: "container", image: "localhost/uvp-base:12" },
     });
-    const manifest = await readWorkspaceManifest(root);
+    const manifest = await manifestAt(root);
     expect(manifest?.toolchain).toEqual({ kind: "container", image: "localhost/uvp-base:12" });
     expect(manifest?.toolchainProblem).toBeUndefined();
   });
@@ -124,7 +145,7 @@ describe("the toolchain declaration", () => {
     // Asserting the whole manifest rather than the field, because "no problem"
     // and "no key" are different claims and only one of them is this one.
     const root = await manifestRoot({ name: "svc", toolchain: { kind: "local" } });
-    expect(await readWorkspaceManifest(root)).toStrictEqual({
+    expect(await manifestAt(root)).toStrictEqual({
       name: "svc",
       scheme: "http",
       features: [],
@@ -138,7 +159,7 @@ describe("the toolchain declaration", () => {
     // Absent, not `local`: the reader reports what the file says, and "the file
     // does not say" is a different fact from "the file says this host". The
     // default is applied once, by the selection rule, to both cases alike.
-    const manifest = await readWorkspaceManifest(await writeWorkspace("hello-http", []));
+    const manifest = await manifestAt(await writeWorkspace("hello-http", []));
     expect(manifest?.toolchain).toBeUndefined();
     expect(manifest?.toolchainProblem).toBeUndefined();
   });
@@ -163,7 +184,7 @@ describe("the toolchain declaration", () => {
     // the message. `errors.ts`'s two unreadable sentences are left unpinned for
     // the same reason — and `toBeTypeOf("string")` here would not do, because the
     // empty string is one.
-    const manifest = await readWorkspaceManifest(await manifestRoot({ name: "svc", toolchain }));
+    const manifest = await manifestAt(await manifestRoot({ name: "svc", toolchain }));
     expect(manifest?.toolchain).toBeUndefined();
     expect(manifest?.toolchainProblem).toBeTruthy();
   });
@@ -173,7 +194,7 @@ describe("the toolchain declaration", () => {
     // carry the value that caused the refusal: a message saying only that the
     // kind is wrong sends the reader back to the file with nothing to look for.
     const root = await manifestRoot({ name: "svc", toolchain: { kind: "docker", image: "x" } });
-    expect((await readWorkspaceManifest(root))?.toolchainProblem).toContain("docker");
+    expect((await manifestAt(root))?.toolchainProblem).toContain("docker");
   });
 });
 
@@ -184,7 +205,7 @@ describe("the feature list", () => {
     // *is* known must survive next to it, because the unknown one is not a
     // reason to forget what the workspace actually declared.
     const root = await manifestRoot({ name: "svc", features: ["tls", "quantum"], port: 8080 });
-    const manifest = await readWorkspaceManifest(root);
+    const manifest = await manifestAt(root);
     expect(manifest?.features).toEqual(["tls"]);
     expect(manifest?.unrecognisedFeatures).toEqual(["quantum"]);
     expect(manifest?.scheme).toBe("https");
@@ -200,7 +221,7 @@ describe("the feature list", () => {
       // The fallback is an empty list, and a placeholder in it would land in
       // `unrecognisedFeatures` — the list a caller shows the user — so both lists
       // are asserted, not just the one the placeholder is not in.
-      const read = await readWorkspaceManifest(await manifestRoot(manifest));
+      const read = await manifestAt(await manifestRoot(manifest));
       expect(read?.features).toStrictEqual([]);
       expect(read?.unrecognisedFeatures).toStrictEqual([]);
       expect(read?.scheme).toBe("http");
@@ -215,7 +236,7 @@ describe("the feature list", () => {
       name: "svc",
       features: ["tls", 7, null, ["quantum"], "quantum"],
     });
-    const read = await readWorkspaceManifest(root);
+    const read = await manifestAt(root);
     expect(read?.features).toStrictEqual(["tls"]);
     expect(read?.unrecognisedFeatures).toStrictEqual(["quantum"]);
     expect(read?.scheme).toBe("https");
@@ -233,7 +254,7 @@ describe("the fields a manifest carries", () => {
       requirements: { libuvcpp: "1.7.0" },
       toolchain: { kind: "container", image: "localhost/uvp-base:12" },
     });
-    expect(await readWorkspaceManifest(root)).toStrictEqual({
+    expect(await manifestAt(root)).toStrictEqual({
       name: "svc",
       binary: "svc-server",
       port: 8080,
@@ -254,7 +275,7 @@ describe("the fields a manifest carries", () => {
     // and no port at all are different facts about a workspace, and every
     // optional field here is spread only when it holds a value.
     const root = await manifestRoot({ name: "svc" });
-    expect(await readWorkspaceManifest(root)).toStrictEqual({
+    expect(await manifestAt(root)).toStrictEqual({
       name: "svc",
       scheme: "http",
       features: [],
@@ -272,7 +293,7 @@ describe("the fields a manifest carries", () => {
       template: "",
       requirements: { libuvcpp: "" },
     });
-    expect(await readWorkspaceManifest(root)).toStrictEqual({
+    expect(await manifestAt(root)).toStrictEqual({
       name: "svc",
       scheme: "http",
       features: [],
@@ -292,7 +313,7 @@ describe("the fields a manifest carries", () => {
       template: [],
       requirements: { libuvcpp: 7 },
     });
-    expect(await readWorkspaceManifest(root)).toStrictEqual({
+    expect(await manifestAt(root)).toStrictEqual({
       name: "app",
       scheme: "http",
       features: [],
@@ -305,7 +326,7 @@ describe("the fields a manifest carries", () => {
     // `8080.5` passes `typeof port === "number"` and is still not a port: reading
     // it as one hands every downstream consumer a number no listener can bind.
     const root = await manifestRoot({ name: "svc", port: 8080.5 });
-    expect(await readWorkspaceManifest(root)).toStrictEqual({
+    expect(await manifestAt(root)).toStrictEqual({
       name: "svc",
       scheme: "http",
       features: [],
@@ -320,12 +341,12 @@ describe("the fields a manifest carries", () => {
       libuvcpp: "9.9.9",
       requirements: "libuvcpp: 1.7.0",
     });
-    expect((await readWorkspaceManifest(root))?.requiredLibuvcpp).toBeUndefined();
+    expect((await manifestAt(root))?.requiredLibuvcpp).toBeUndefined();
   });
 
   it("falls back to the name `app` for a manifest that states none", async () => {
     const root = await manifestRoot({ features: ["websocket"] });
-    expect((await readWorkspaceManifest(root))?.name).toBe("app");
+    expect((await manifestAt(root))?.name).toBe("app");
   });
 });
 
@@ -335,13 +356,55 @@ describe("a manifest that is not an object", () => {
     ["an array", []],
     ["a number", 42],
     ["a string", "hello"],
-  ])("reads %s as no manifest at all", async (_label, contents) => {
+  ])("reads %s as a file that cannot be used, not as no file", async (_label, contents) => {
     // `JSON.parse` accepts all four, so the record check is the only thing
     // standing between them and a manifest built out of nothing: every field read
     // after it answers `undefined` for an array, so without the check a directory
-    // holding `[]` would answer as a cleartext workspace named `app`.
+    // holding `[]` would answer as a cleartext workspace named `app`. With the
+    // check it is `unreadable` rather than `absent`, because the file is there
+    // and saying something this reader does not understand.
     const root = await scratchRoot();
     await writeFile(join(root, "uvp.json"), JSON.stringify(contents));
-    expect(await readWorkspaceManifest(root)).toBeUndefined();
+    const read = await readWorkspaceManifest(root);
+    expect(read.state).toBe("unreadable");
+    expect(manifestProblemOf(read)).toContain("not a JSON object");
+  });
+});
+
+describe("a file that is there and cannot be used", () => {
+  it("reports invalid JSON as unreadable rather than as no manifest", async () => {
+    // The whole reason the reader has three states: this directory declares a
+    // container build, the file is truncated, and a reader that answered
+    // `undefined` would hand every caller "declares nothing" — which is the
+    // fallback that builds a container workspace on this host.
+    const root = await scratchRoot();
+    await writeFile(join(root, "uvp.json"), '{"toolchain": {"kind": "container"');
+    const read = await readWorkspaceManifest(root);
+    expect(read.state).toBe("unreadable");
+    expect(manifestProblemOf(read)).toContain("is not valid JSON");
+    expect(manifestOf(read)).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    named("reports a file it may not read as unreadable, naming the failure"),
+    async () => {
+      const root = await scratchRoot();
+      const path = join(root, "uvp.json");
+      await writeFile(path, '{"name": "svc"}');
+      await chmod(path, 0o000);
+      try {
+        const read = await readWorkspaceManifest(root);
+        expect(read.state).toBe("unreadable");
+        expect(manifestProblemOf(read)).toContain("may not read it");
+      } finally {
+        await chmod(path, 0o644);
+      }
+    },
+  );
+
+  it("leaves the file name in the problem, so the refusal can name what to repair", async () => {
+    const root = await scratchRoot();
+    await writeFile(join(root, "uvp.json"), "not json");
+    expect(manifestProblemOf(await readWorkspaceManifest(root))).toContain("uvp.json");
   });
 });

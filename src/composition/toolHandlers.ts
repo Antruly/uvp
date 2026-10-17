@@ -31,7 +31,11 @@ import {
 import { toolNames } from "../contracts/toolContracts.js";
 import { unevaluatedQuestion } from "../application/assertions.js";
 import { selectToolchain } from "../application/toolchainSelection.js";
-import { readWorkspaceManifest } from "../application/workspaceManifest.js";
+import {
+  manifestOf,
+  manifestProblemOf,
+  readWorkspaceManifest,
+} from "../application/workspaceManifest.js";
 import { verify } from "../application/VerificationService.js";
 import { readSavedBundle, reportedSide } from "../application/bundleFile.js";
 import type { SavedBundle } from "../application/bundleFile.js";
@@ -320,8 +324,10 @@ export const createToolHandlers = (
       // path into a workspace, and the same file is what names the image — a
       // second reading further down would be a second answer to "where does this
       // build happen".
+      const manifest = await readWorkspaceManifest(input.path);
       const selected = selectToolchain({
-        manifest: await readWorkspaceManifest(input.path),
+        manifest: manifestOf(manifest),
+        manifestProblem: manifestProblemOf(manifest),
         requested: input.toolchain,
       });
       const provider = services.toolchainFor(selected);

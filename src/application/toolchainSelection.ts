@@ -4,7 +4,7 @@ import {
   type ToolchainKind,
   type ToolchainSelection,
 } from "../domain/toolchain.js";
-import type { WorkspaceManifest } from "./workspaceManifest.js";
+import { manifestProblemFailure, type WorkspaceManifest } from "./workspaceManifest.js";
 
 /**
  * Which toolchain a call will use.
@@ -32,9 +32,21 @@ import type { WorkspaceManifest } from "./workspaceManifest.js";
  */
 export const selectToolchain = (input: {
   readonly manifest?: WorkspaceManifest | undefined;
+  /**
+   * Why a `uvp.json` that is there could not be read, from
+   * `manifestProblemOf`.
+   *
+   * Separate from `manifest` because the two are different facts — "declares no
+   * toolchain" and "could not say what it declares" — and only the second is a
+   * refusal. A reader that folded the second into the first is what made a
+   * container workspace build on this host.
+   */
+  readonly manifestProblem?: string | undefined;
   /** What the call itself asked for, when it asked. */
   readonly requested?: ToolchainKind | undefined;
 }): ToolchainSelection => {
+  if (input.manifestProblem !== undefined) throw manifestProblemFailure(input.manifestProblem);
+
   const declared = input.manifest?.toolchain;
   const problem = input.manifest?.toolchainProblem;
   const manifestName = input.manifest?.path ?? "uvp.json";

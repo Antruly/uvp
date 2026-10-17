@@ -20,7 +20,7 @@ import type { ToolchainIdentity } from "./ToolchainProvider.js";
 import type { ToolTlsReport, WebService } from "./WebService.js";
 import type { WorkspaceService } from "./WorkspaceService.js";
 import type { SessionStore } from "./sessionStore.js";
-import { readWorkspaceManifest } from "./workspaceManifest.js";
+import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
 import { selectToolchain } from "./toolchainSelection.js";
 import type { ToolchainKind } from "../domain/toolchain.js";
 import { UvpFailure } from "../domain/errors.js";
@@ -208,7 +208,8 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
   // from one place. Absent for a directory with no manifest, which is a workspace
   // that still builds — cleartext is then the only thing that could be on the
   // port, and saying so is more honest than a scheme uvp invented.
-  const manifest = await readWorkspaceManifest(input.path);
+  const read = await readWorkspaceManifest(input.path);
+  const manifest = manifestOf(read);
 
   // A pass builds a workspace and then starts what it built, and the second half
   // cannot honour a container: the binary would be linked against the image's
@@ -218,7 +219,13 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
   // one. Passing `toolchain: "local"` is how a caller says they know, and the
   // bundle then says `local` in its provider, so nothing about the pass claims
   // to be what the manifest asked for.
-  if (selectToolchain({ manifest, requested: input.toolchain }).kind === "container") {
+  if (
+    selectToolchain({
+      manifest,
+      manifestProblem: manifestProblemOf(read),
+      requested: input.toolchain,
+    }).kind === "container"
+  ) {
     const image =
       manifest?.toolchain?.kind === "container" ? manifest.toolchain.image : "its image";
     throw new UvpFailure({

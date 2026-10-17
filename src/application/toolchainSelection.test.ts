@@ -109,4 +109,33 @@ describe("which toolchain a call uses", () => {
       expect(toUvpError(cause).message).toContain("/w/svc/uvp.json");
     }
   });
+
+  it("refuses a manifest that could not be read, even when it declares no toolchain", () => {
+    // The file-level version of the same rule, and the one the reader used to
+    // collapse into `manifest: undefined`: a `uvp.json` that did not parse is
+    // not a workspace that declares nothing, so the default "build here" is a
+    // guess about an instruction nobody could see.
+    expect(
+      codeOf(() => selectToolchain({ manifestProblem: "uvp.json is not valid JSON (…)" })),
+    ).toBe("invalid_request");
+    expect(
+      codeOf(() =>
+        selectToolchain({
+          manifest: manifestDeclaring(undefined),
+          manifestProblem: "uvp.json could not be read (…)",
+        }),
+      ),
+    ).toBe("invalid_request");
+  });
+
+  it("passes the reader's problem on in the refusal", () => {
+    try {
+      selectToolchain({
+        manifestProblem: "uvp.json could not be read (this process may not read it)",
+      });
+      throw new Error("expected a refusal");
+    } catch (cause) {
+      expect(toUvpError(cause).message).toContain("may not read it");
+    }
+  });
 });
