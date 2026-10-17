@@ -198,17 +198,25 @@ const main = () => {
     process.exit(1);
   }
 
-  // A crash or a Ctrl-C must not leave the tree mutated. The report's source is
+  // A crash or a signal must not leave the tree mutated. The report's source is
   // the backup, so the restore needs nothing that a signal could take away.
+  //
+  // `SIGHUP` is the one that bites: a closed terminal or a dropped session sends
+  // it, and with no handler its default action ends the process without
+  // unwinding, so the `finally` never runs and the mutant stays in the tree.
+  // Registering a handler replaces that action, and the restore happens either
+  // here or in the `finally` that runs first. The exit codes are the repository's
+  // own convention (`src/cli.ts`), one per signal rather than 130 for all three.
   let pending;
   const restorePending = () => {
     if (pending !== undefined) writeFileSync(pending.file, pending.source, "utf8");
     pending = undefined;
   };
-  for (const signal of ["SIGINT", "SIGTERM"]) {
+  const SIGNAL_EXITS = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+  for (const [signal, code] of Object.entries(SIGNAL_EXITS)) {
     process.on(signal, () => {
       restorePending();
-      process.exit(130);
+      process.exit(code);
     });
   }
 
