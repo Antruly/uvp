@@ -80,7 +80,15 @@ export const discoverArtifacts = async (buildDir: string): Promise<readonly Buil
         continue;
       }
       if (!looksBuilt(entry, info.mode) || info.size === 0) continue;
-      const bytes = await readFile(full);
+      let bytes: Buffer;
+      try {
+        bytes = await readFile(full);
+      } catch {
+        // A file the walk may stat but not read is not an artifact this tool
+        // can describe; it is not a failed build. `readdir` and `stat` above
+        // already take this view, and the caller's build succeeded.
+        continue;
+      }
       found.push({ path: full, bytes: info.size, digest: sha256(bytes) });
     }
   };

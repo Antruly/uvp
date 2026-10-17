@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { discoverArtifacts } from "./artifacts.js";
-import { EXE } from "./host.js";
+import { EXE, isWindows } from "./host.js";
 
 /**
  * Which files a build directory is reported to have produced.
@@ -113,6 +113,24 @@ describe("discoverArtifacts", () => {
 
     expect(await discoverArtifacts(dir)).toEqual([]);
   });
+
+  it.skipIf(isWindows || process.getuid?.() === 0)(
+    "skips an executable it cannot read instead of rejecting the whole build",
+    async () => {
+      // `chmod 0111` leaves the file executable and unreadable, so it passes the
+      // mode/extension heuristic and then fails `readFile`. That used to reject
+      // the call even though the build succeeded. A file whose bytes cannot be
+      // read is not an artifact; it is also not a finding about the build.
+      const dir = buildDir("unreadable");
+      const readable = put(dir, producedName("hello"), "readable\n", 0o755);
+      const sealed = put(dir, producedName("sealed"), "unreadable\n", 0o111);
+
+      const found = await discoverArtifacts(dir);
+
+      expect(found.map((artifact) => artifact.path)).toEqual([readable]);
+      expect(existsSync(sealed)).toBe(true);
+    },
+  );
 
   it("skips a file with an extension even when it is executable", async () => {
     // On a POSIX host the extension is not the signal; an executable `.so` is
