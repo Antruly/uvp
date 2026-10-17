@@ -244,10 +244,13 @@ generates. The toolchain provider _port_ has two implementations: `local` and
 `container`. The `remote-ssh` provider is not written; it is blocked on a real
 verification route rather than on appetite.
 
-**Not started.** Release automation: `release-please-config.json` and the
-conventional-commit gate on pull request titles exist, but nothing runs them yet,
-so no version has been cut and the package is installed from a clone or a
-tarball.
+**In progress.** Release automation: `release-please-config.json`, the
+conventional-commit gate on pull request titles, and the workflow that runs
+release-please (`.github/workflows/release-please.yml`, added in #177 for #160)
+exist, but no
+version has been cut, so the package is installed from a clone or a tarball.
+Regenerating the derived files on the release PR is still a maintainer step, by
+the recorded decision on #160.
 
 The Windows `local-msvc` lane has landed and runs in CI. It exercises the
 database refusal case. The parser reads MSVC's `LNK` shape, but only against

@@ -2817,7 +2817,7 @@ not in `files[]`, so no tarball had ever contained it. `licenses/npm-dependencie
 was missing for the same reason. Both now ship, measured with `npm pack --dry-run`
 rather than assumed: 84 entries, all three present.
 
-**The version coupling is a requirement on a lane that does not exist.**
+**The version coupling is a requirement on a maintainer step.**
 `sbom.cdx.json` carries the version in four places, and two of them —
 `metadata.component.bom-ref` and `.purl` — are compound strings that
 release-please's `extra-files` `jsonpath` updater cannot write, since it replaces
@@ -2825,7 +2825,10 @@ the whole value at its path. So the file is deliberately absent from
 `extra-files`, and the release PR is required to regenerate it. That is safe
 rather than fragile: `docs:check` runs on every pull request and compares the file
 byte for byte, so a version bump that skips `npm run docs:generate` is a red pull
-request, not a released artifact describing a version it is not.
+request, not a released artifact describing a version it is not. The release
+workflow added in #177 for #160 does not perform the regeneration either: the scope
+decision on that issue keeps the regenerated commit a maintainer step rather than
+giving a workflow write access to the release PR branch.
 
 **Verified one mutation at a time:** a component dropped from the document, an
 edge dropped so a component hangs off the graph, a duplicated `bom-ref`, a
