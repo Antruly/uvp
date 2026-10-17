@@ -32,7 +32,11 @@
  */
 
 const STEP_KEY = /^(?<indent>[ \t]*)(?:-[ \t]+)?run:[ \t]?(?<rest>.*)$/u;
-const BLOCK_SCALAR = /^[|>][+\-\d]*$/u;
+// A block header may carry a YAML comment after its indicators — `run: | # why`
+// — and that comment is part of the header line, not of the scalar. Without the
+// trailing group the body was read as no body at all: the header became the
+// "command" and the caller looked for flags in the comment.
+const BLOCK_SCALAR = /^[|>][+\-\d]*(?:[ \t]+#.*)?$/u;
 
 const indentOf = (line) => line.length - line.trimStart().length;
 
@@ -103,7 +107,10 @@ export const runSteps = (text) =>
  * single-line scalar, which follows one. The seventh is the plain scalar, whose
  * value begins on the line below the key. The eighth is a quoted scalar that runs
  * past its line: it must come back empty, because both callers fail on an empty
- * command and that is what keeps a truncated read from looking like a read.
+ * command and that is what keeps a truncated read from looking like a read. The
+ * ninth is a block whose header carries a comment, which YAML allows and which
+ * must still be a block — reading the header as the command hides the body from
+ * both callers.
  */
 const EXTRACTION_FIXTURE = [
   "      - run: npm ci",
@@ -129,6 +136,10 @@ const EXTRACTION_FIXTURE = [
   "      - name: A scalar that runs past its line",
   '        run: "npm run test:built',
   '          --reporter=blob"',
+  "      - name: A block whose header carries a comment",
+  "        run: | # the skip reporter is named in the body",
+  "          npm run test:fast -- --reporter=default",
+  "            --reporter=./scripts/lib/vitest-skipped-reporter.mjs",
 ].join("\n");
 
 const EXTRACTION_EXPECTED = [
@@ -143,6 +154,10 @@ const EXTRACTION_EXPECTED = [
   "npm run docs:build",
   "npm run test:toolchain -- --reporter=blob --reporter=./scripts/lib/vitest-skipped-reporter.mjs",
   "",
+  [
+    "npm run test:fast -- --reporter=default",
+    "--reporter=./scripts/lib/vitest-skipped-reporter.mjs",
+  ],
 ].map((command) => [command].flat().join("\n"));
 
 /**
@@ -151,7 +166,7 @@ const EXTRACTION_EXPECTED = [
  * The callers mask these, so a fixture that reads the right commands while
  * naming the wrong lines would leave a real defect behind the self-check.
  */
-const EXTRACTION_BODY_LINES = [[], [4, 5], [8, 9, 10], [13], [15], [], [19, 20], []];
+const EXTRACTION_BODY_LINES = [[], [4, 5], [8, 9, 10], [13], [15], [], [19, 20], [], [26, 27]];
 
 /** Exit 1 unless the fixture above reads back exactly as this file says it does. */
 export const runExtractionSelfCheck = () => {
