@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,6 +86,32 @@ let temporaryRoots: string[] = [];
 
 const call = async (name: string, input: unknown): Promise<Record<string, unknown>> =>
   await handlerFor(harness.handlers, name)(input, { signal: harness.signal });
+
+/**
+ * Whether the peer closed this connection within `ms`.
+ *
+ * `close` is what the socket's owner sees when a FIN or reset arrives, and a
+ * connection nobody closed never emits it — so the deadline answers "did the
+ * client let go", which an elapsed-time assertion about the call cannot. Error
+ * events are ignored: a reset is the expected shape of a client that finished
+ * its probe, and an unhandled `error` would fail the test for the wrong reason.
+ */
+const closesWithin = async (connection: Socket, ms: number): Promise<boolean> => {
+  if (connection.destroyed) return true;
+  let timer: NodeJS.Timeout | undefined;
+  const closed = new Promise<boolean>((resolve) => {
+    connection.once("close", () => resolve(true));
+  });
+  const deadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(resolve, ms, false);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([closed, deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
 
 const callWith = async (
   providers: ReturnType<typeof createFakeToolchain>[],
@@ -799,7 +825,18 @@ describe("the websocket probe's upgrade deadline", () => {
       // Before the change there was no timer before the upgrade: the call could
       // only end on the caller's signal, so a port that accepts TCP and says
       // nothing held the probe open forever.
-      const server = createNetServer(() => {});
+      const connections: Socket[] = [];
+      const server = createNetServer((connection) => {
+        connections.push(connection);
+        // The probe is the one that must close this connection; a reset that
+        // arrives while it is idle is the expected shape, not a test failure.
+        connection.on("error", () => {});
+        // A paused socket does not emit `end` — and so does not emit `close` —
+        // until something reads it, so a listener that only accepts would miss
+        // the very EOF this test is looking for and report a leak that did not
+        // happen. Consuming the stream is what makes the peer's close visible.
+        connection.resume();
+      });
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
       const port = (server.address() as AddressInfo).port;
       try {
@@ -815,6 +852,15 @@ describe("the websocket probe's upgrade deadline", () => {
         expect(failure?.code).toBe("endpoint_unreachable");
         expect(failure?.message).toContain("no complete response within");
         expect(Date.now() - started).toBeLessThan(2_000);
+        // Settling the call is not the same claim as closing the connection.
+        // A request left alive settles the promise and keeps its socket, so the
+        // CLI printed the deadline's error and then stayed running until the
+        // peer closed — the same hang at a later stage. Read the server's own
+        // view of the connection rather than trusting the call's elapsed time.
+        expect(connections.length).toBeGreaterThan(0);
+        expect(
+          await Promise.all(connections.map((connection) => closesWithin(connection, 1_000))),
+        ).toEqual(connections.map(() => true));
       } finally {
         server.close();
       }
