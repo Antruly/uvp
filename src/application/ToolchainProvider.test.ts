@@ -152,6 +152,41 @@ describe("assessFeatures", () => {
     ]);
   });
 
+  it("reports an unread config header as undetermined, never as an absent feature", async () => {
+    // An install whose header could not be read still reports `modules: []`.
+    // Comparing that list against every requirement would say "this build lacks
+    // tls and db", which is a finding about a header nobody opened.
+    const reason =
+      "Found CMake package files but no uvcpp_config.h could be read; module list is unknown.";
+    const assessment = await assessFeatures(["tls", "db"], [], undefined, {
+      modulesUnknownReason: reason,
+    });
+    expect(assessment.satisfied).toEqual([]);
+    expect(assessment.unmet).toEqual([]);
+    expect(assessment.undetermined).toEqual([
+      { feature: "tls", reason, modulesUnknown: true },
+      { feature: "db", reason, modulesUnknown: true },
+    ]);
+  });
+
+  it("still decides a header-probed feature when the module list could not be read", async () => {
+    // grpc's evidence is the installed header, not the module list, so an
+    // unread list says nothing about it. Blanket-undetermining every feature
+    // would throw away an answer that is still available.
+    const probed: string[] = [];
+    const probe: HeaderProbe = async (header) => {
+      probed.push(header);
+      return true;
+    };
+    const assessment = await assessFeatures(["tls", "grpc"], [], probe, {
+      modulesUnknownReason: "the module list is unknown",
+    });
+    expect(assessment.satisfied).toEqual(["grpc"]);
+    expect(assessment.unmet).toEqual([]);
+    expect(assessment.undetermined.map((entry) => entry.feature)).toEqual(["tls"]);
+    expect(probed).toEqual([FEATURE_REQUIREMENTS.grpc.header]);
+  });
+
   it("names only the symbols that are actually absent", async () => {
     // The caller is about to hand the missing switches to CMake. Listing a symbol
     // that is already defined would send them to reconfigure for no reason.

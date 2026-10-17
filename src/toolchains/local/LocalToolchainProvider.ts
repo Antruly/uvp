@@ -90,7 +90,7 @@ const libuvcppSearchRoots = (workspacePath: string | undefined): readonly string
  * somewhere else reads the *same* header and must reach the same answer. What is
  * local here is only the file read.
  */
-const readModules = async (installPrefix: string): Promise<readonly string[]> => {
+const readModules = async (installPrefix: string): Promise<readonly string[] | undefined> => {
   for (const candidate of configHeaderPaths(installPrefix)) {
     try {
       return modulesFromConfigHeader(await readFile(candidate, "utf8"));
@@ -98,7 +98,10 @@ const readModules = async (installPrefix: string): Promise<readonly string[]> =>
       // Try the next candidate layout.
     }
   }
-  return [];
+  // No layout could be read. `undefined` rather than `[]`: an empty list is the
+  // finding "read it, and it defines no modules", and returning one here would
+  // make a header that was never opened indistinguishable from that finding.
+  return undefined;
 };
 
 /**
@@ -334,7 +337,7 @@ const findLibuvcpp = async (
     }
     const modules = await readModules(root);
     const hasConfig =
-      modules.length > 0 ||
+      (modules?.length ?? 0) > 0 ||
       (await stat(join(root, "lib", "cmake", "uvcpp", "uvcppConfig.cmake")).then(
         () => true,
         () => false,
@@ -345,9 +348,12 @@ const findLibuvcpp = async (
       found: true,
       ...(version === undefined ? {} : { version: version.version, versionSource: version.source }),
       installPrefix: root,
-      modules,
-      ...(modules.length === 0
-        ? { note: "Found CMake package files but no uvcpp_config.h; module list is unknown." }
+      modules: modules ?? [],
+      ...(modules === undefined
+        ? {
+            modulesUnknown: true,
+            note: "Found CMake package files but no uvcpp_config.h could be read; module list is unknown.",
+          }
         : {}),
     };
   }
