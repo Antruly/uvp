@@ -6,6 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { headerProbeAt } from "./DoctorService.js";
 
 /**
+ * `application` does not import a provider, not even from a test — so the host
+ * question is asked of the platform here rather than through `toolchains/host`.
+ */
+const isWindows = process.platform === "win32";
+
+/**
  * What the header probe answers when it cannot answer.
  *
  * The probe decides `grpc` — the one feature with no configuration symbol — so
@@ -24,6 +30,20 @@ const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true })));
 });
+
+/**
+ * `title`, on the host where the errno cannot be produced.
+ *
+ * A self-referencing symlink is not a portable way to make `stat` fail: on
+ * Windows every candidate below it answered `ENOENT`/`ENOTDIR` in CI, so the
+ * loop is reported as "not there" by the platform itself. The classification is
+ * about errnos the host can hand back; where it cannot hand this one back, this
+ * file has no coverage to claim and says why.
+ */
+const named = (title: string): string =>
+  isWindows
+    ? `${title} — skipped: this host reports a self-referencing symlink as ENOENT/ENOTDIR, not ELOOP`
+    : title;
 
 /** An install prefix to point the probe at. */
 const prefixRoot = async (): Promise<string> => {
@@ -56,7 +76,7 @@ describe("the header probe", () => {
     await expect(headerProbeAt(root)("grpc")).resolves.toBe(false);
   });
 
-  it("does not call a path it could not look through absent", async () => {
+  it.skipIf(isWindows)(named("does not call a path it could not look through absent"), async () => {
     const root = await prefixRoot();
     await mkdir(join(root, "include"), { recursive: true });
     // `include/uvcpp` points at itself, so every candidate below it fails with
