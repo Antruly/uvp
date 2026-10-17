@@ -335,6 +335,34 @@ describe("build", () => {
 
 describe("launch and stop", () => {
   it(
+    "launches an absolute binary where it is, not inside the build directory",
+    async () => {
+      // `--binary PATH` is a path. It used to be joined to `<workspace>/build`,
+      // so an absolute path became a fabricated one and the call reported
+      // `launch_failed` for an executable that existed.
+      const port = await freePort();
+      const elsewhere = await mkdtemp(join(tmpdir(), "uvp-run-binary-"));
+      temporaryRoots.push(elsewhere);
+      const svc = await writeFakeService(elsewhere, "svc", port);
+
+      const run = await call("uvp_run", {
+        path: harness.workspace,
+        binary: svc.path,
+        args: svc.args,
+        ready: { port, path: "/healthz", timeout_ms: 15_000 },
+      });
+      expectConforms("uvp_run", run);
+      // The launch itself is the assertion: before the resolve, the fabricated
+      // `<workspace>/build/<absolute path>` did not exist and this call threw
+      // `launch_failed` before a probe ran.
+      expect(run["ready"]).toBe(true);
+
+      await call("uvp_run_stop", { run_id: run["run_id"] });
+    },
+    TIMEOUT,
+  );
+
+  it(
     "launches a real process, waits for a real probe, then stops it",
     async () => {
       const port = await freePort();

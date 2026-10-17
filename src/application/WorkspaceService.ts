@@ -303,7 +303,13 @@ export class WorkspaceService {
     const manifest = await readWorkspaceManifest(root);
     const buildDir = resolve(input.buildDir ?? join(root, "build"));
     const binaryName = input.binary ?? manifest?.binary ?? manifest?.name ?? "app";
-    const binaryPath = join(buildDir, binaryName);
+    // `resolve`, not `join`: a caller-supplied `binary` is a path (the CLI names
+    // it `--binary PATH`), and `join` does not reset on an absolute segment, so
+    // `/opt/svc/bin/svc` became `<buildDir>/opt/svc/bin/svc` — a path the caller
+    // never named, reported as a launch failure for a binary that exists. A
+    // manifest's `binary` and `name` are names and still resolve under the build
+    // directory.
+    const binaryPath = resolve(buildDir, binaryName);
 
     // Nothing is started for a call that was already cancelled. The same rule the
     // provider port states for a build, and for the same reason: a run that
