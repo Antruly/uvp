@@ -45,9 +45,13 @@ can walk away from uvp and keep the project.
 ### Requirements
 
 - Node.js `^22.19.0 || ^24.11.0 || >=26.0.0`
-- A C++14 toolchain (`g++` or `clang++`) and CMake 3.20+
+- A C++14 toolchain (`g++` or `clang++`; MSVC 2019+ on Windows) and CMake 3.20+
 - [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 or newer**, either
   `cmake --install`ed or unpacked from a release archive
+
+On Windows, the archive route needs a real `pkg-config.exe` and a Release build;
+[installation.md](docs/installation.md#route-2--unpack-a-prebuilt-release-archive)
+has the exact steps.
 
 Run the doctor first. It reports what is present, what is missing, and which
 capabilities each gap actually blocks — rather than failing as one monolith:

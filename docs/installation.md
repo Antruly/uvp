@@ -126,6 +126,49 @@ and enforce the version floor on both routes. A 1.6.0 install would satisfy
 `pkg-config` and then fail to compile, which is why the floor is checked rather
 than trusted.
 
+#### Windows (MSVC)
+
+The `msvc-x64` release archive is the same route with Windows paths and a real
+`pkg-config` executable. Download and unpack it from PowerShell:
+
+```powershell
+Invoke-WebRequest -Uri 'https://github.com/Antruly/libuvcpp/releases/download/v1.7.0/libuvcpp-1.7.0-msvc-x64.zip' -OutFile libuvcpp.zip
+Expand-Archive -Path libuvcpp.zip -DestinationPath "$HOME\libuvcpp"
+$prefix = "$HOME\libuvcpp\libuvcpp-1.7.0-msvc-x64"
+
+# Discovery and the generated project's pkg-config fallback.
+$env:UVCPP_ROOT = $prefix
+$env:PKG_CONFIG_PATH = "$prefix\lib\pkgconfig"
+
+# uvcpp.dll and the OpenSSL DLLs load from here at run time.
+$env:Path = "$prefix\bin;$env:Path"
+```
+
+The archive ships `lib/pkgconfig/uvcpp.pc` and no CMake config, and CMake's
+`FindPkgConfig` looks for an executable image (`pkg-config.exe` or
+`pkgconf.exe`), not a `.bat` wrapper. If `pkg-config --version` answers but
+`uvp doctor` reports `missing: PKG_CONFIG_EXECUTABLE`, the `pkg-config` on
+`PATH` is a script — the Windows runner has Strawberry Perl's
+`pkg-config.bat`, which is exactly that case. Install an executable one, for
+example with `choco install pkgconfiglite`, then reopen the shell:
+
+```powershell
+pkg-config --modversion uvcpp     # should print 1.7.0
+```
+
+Build generated workspaces in Release against this archive. It is a Release
+build with the release CRT; a Debug build against it mixes the two CRTs on
+Windows. Name Ninja explicitly — it is the route the Windows lane verifies:
+
+```powershell
+uvp init .\svc --name svc --template hello-http --port 8090
+uvp build .\svc --generator ninja --build-type Release
+uvp run .\svc --ready-port 8090
+```
+
+`uvp doctor --json` should report the prefix, the version, and the modules the
+archive's `uvcpp_config.h` defines.
+
 ### Confirm it worked
 
 ```bash
