@@ -243,7 +243,18 @@ export class SessionStore {
     while (this.#captures.size > MAX_CAPTURES) {
       const oldest = this.#captures.keys().next();
       if (oldest.done === true) break;
+      const evicted = this.#captures.get(oldest.value);
       this.#captures.delete(oldest.value);
+      // Eviction drops the only handle a caller has on this proxy. Closing it is
+      // what makes that a release rather than a leak: the id is gone from the
+      // store, so `capture_read` and `capture stop` answer `capture_unavailable`
+      // while the listener would otherwise keep accepting and forwarding. A
+      // session already stopped was closed by its own path and is not closed
+      // twice.
+      if (evicted !== undefined && !evicted.stopped) {
+        evicted.stopped = true;
+        evicted.server.close();
+      }
     }
     return session;
   }
