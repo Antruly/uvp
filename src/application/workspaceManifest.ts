@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { UvpFailure } from "../domain/errors.js";
 import { isUvpFeature, type UvpFeature } from "../domain/features.js";
 import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js";
 
@@ -8,11 +9,17 @@ import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js
  * The `uvp.json` a workspace carries.
  *
  * The manifest is read, never trusted: every field is treated as absent until it
- * has been checked, because a workspace can be hand-edited and a malformed
- * manifest must degrade to "unknown" rather than to a wrong answer. That is also
- * why an unreadable or invalid manifest returns `undefined` instead of throwing:
- * a directory that is not a uvp workspace is a legitimate thing to point the
- * doctor at.
+ * has been checked, because a workspace can be hand-edited and a malformed field
+ * must degrade to "unknown" rather than to a wrong answer.
+ *
+ * The read itself has three outcomes, and only one of them is "no manifest". No
+ * file at all is ordinary — a directory that is not a uvp workspace is a
+ * legitimate thing to point the doctor at. A file that is there and could not be
+ * read, or parsed, is a different fact: it may declare a container build or the
+ * features a caller is about to ignore, and folding it into "no manifest" is how
+ * a workspace that said "do not build me here" was built on this host.
+ * `WorkspaceManifestRead` keeps the two apart, and `manifestOf` is the one place
+ * a caller says it has decided the difference does not matter.
  */
 export interface WorkspaceManifest {
   readonly name: string;
@@ -53,6 +60,52 @@ export interface WorkspaceManifest {
   readonly toolchainProblem?: string;
   readonly path: string;
 }
+
+/**
+ * What reading a workspace's `uvp.json` established.
+ *
+ * `absent` is the ordinary case of a directory that is not a uvp workspace;
+ * `unreadable` means there is a file and its declaration could not be honoured.
+ * A caller that treats the second as the first is choosing this host, a default
+ * feature set, or a default binary name on behalf of a workspace whose file says
+ * something else — so the collapse is written here once and has to be named at
+ * the call site.
+ */
+export type WorkspaceManifestRead =
+  | { readonly state: "read"; readonly manifest: WorkspaceManifest }
+  | { readonly state: "absent" }
+  | { readonly state: "unreadable"; readonly problem: string };
+
+/** The manifest when one was read, for callers that need the fields. */
+export const manifestOf = (read: WorkspaceManifestRead): WorkspaceManifest | undefined =>
+  read.state === "read" ? read.manifest : undefined;
+
+/**
+ * Why the file could not be used, when it could not be.
+ *
+ * Separate from `manifestOf` so a caller that must refuse can ask both
+ * questions without re-deciding which state it is looking at.
+ */
+export const manifestProblemOf = (read: WorkspaceManifestRead): string | undefined =>
+  read.state === "unreadable" ? read.problem : undefined;
+
+/**
+ * The refusal a manifest that could not be used deserves.
+ *
+ * One sentence for every boundary that has to say it: the file exists, uvp could
+ * not read what it asks for, and the only honest alternatives are repair or
+ * removal — not "assume this host".
+ */
+export const manifestProblemFailure = (problem: string): UvpFailure =>
+  new UvpFailure({
+    code: "invalid_request",
+    message: `The workspace's manifest cannot be used: ${problem}.`,
+    remediation: {
+      action:
+        "Repair the file, or remove it if this workspace has no declaration to make. uvp will not " +
+        "substitute this host's compilers, features, or binary for a declaration it could not read.",
+    },
+  });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -97,17 +150,51 @@ const readToolchain = (
     : { toolchain: { kind: "container", image } };
 };
 
+/** Why the file could not be read, in terms a caller can act on. */
+const describeReadFailure = (cause: unknown): string => {
+  const code = (cause as NodeJS.ErrnoException | null)?.code;
+  if (code === "EACCES" || code === "EPERM") return "this process may not read it";
+  if (code === "EISDIR") return "that path is a directory";
+  if (code === "ELOOP") return "it is a symlink loop";
+  if (code === "ENAMETOOLONG") return "the path is too long";
+  return cause instanceof Error ? cause.message : String(cause);
+};
+
 export const readWorkspaceManifest = async (
   root: string,
   manifestName = "uvp.json",
-): Promise<WorkspaceManifest | undefined> => {
+): Promise<WorkspaceManifestRead> => {
+  let text: string;
+  try {
+    text = await readFile(join(root, manifestName), "utf8");
+  } catch (cause) {
+    // `ENOENT`/`ENOTDIR` are the two ways the path is simply not there, and that
+    // is the ordinary "not a uvp workspace" answer. Any other failure is a file
+    // that may well exist and was not read, which is not absence.
+    const code = (cause as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { state: "absent" };
+    return {
+      state: "unreadable",
+      problem: `${manifestName} could not be read (${describeReadFailure(cause)})`,
+    };
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(join(root, manifestName), "utf8"));
-  } catch {
-    return undefined;
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    return {
+      state: "unreadable",
+      problem:
+        `${manifestName} is not valid JSON ` +
+        `(${cause instanceof Error ? cause.message : String(cause)})`,
+    };
   }
-  if (!isRecord(parsed)) return undefined;
+  if (!isRecord(parsed)) {
+    // Parsed, and not an object: there is a file, and every field read below
+    // would answer "absent" about a declaration that may be there in a shape
+    // this reader does not know. That is not the same as no file.
+    return { state: "unreadable", problem: `${manifestName} is not a JSON object` };
+  }
 
   const rawFeatures = Array.isArray(parsed["features"]) ? parsed["features"] : [];
   const features: UvpFeature[] = [];
@@ -130,20 +217,23 @@ export const readWorkspaceManifest = async (
   const { toolchain, problem: toolchainProblem } = readToolchain(parsed["toolchain"]);
 
   return {
-    name: asString(parsed["name"]) ?? "app",
-    ...(binary === undefined ? {} : { binary }),
-    ...(typeof port === "number" && Number.isInteger(port) ? { port } : {}),
-    ...(template === undefined ? {} : { template }),
-    // `https` only for a workspace that declares `tls`, and for no other reason.
-    // A workspace with no manifest at all is not read here — the caller gets
-    // `undefined` and applies its own default, so "no manifest" stays
-    // distinguishable from "a manifest that declares cleartext".
-    scheme: features.includes("tls") ? "https" : "http",
-    features,
-    unrecognisedFeatures: unrecognised,
-    ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),
-    ...(toolchain === undefined ? {} : { toolchain }),
-    ...(toolchainProblem === undefined ? {} : { toolchainProblem }),
-    path: join(root, manifestName),
+    state: "read",
+    manifest: {
+      name: asString(parsed["name"]) ?? "app",
+      ...(binary === undefined ? {} : { binary }),
+      ...(typeof port === "number" && Number.isInteger(port) ? { port } : {}),
+      ...(template === undefined ? {} : { template }),
+      // `https` only for a workspace that declares `tls`, and for no other
+      // reason. A workspace with no manifest at all is not read here — the
+      // caller gets `absent` and applies its own default, so "no manifest"
+      // stays distinguishable from "a manifest that declares cleartext".
+      scheme: features.includes("tls") ? "https" : "http",
+      features,
+      unrecognisedFeatures: unrecognised,
+      ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),
+      ...(toolchain === undefined ? {} : { toolchain }),
+      ...(toolchainProblem === undefined ? {} : { toolchainProblem }),
+      path: join(root, manifestName),
+    },
   };
 };

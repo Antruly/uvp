@@ -17,7 +17,7 @@ import type { UvpFeature } from "../domain/features.js";
 import { describeStop } from "./ProcessSupervisor.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
-import { readWorkspaceManifest } from "./workspaceManifest.js";
+import { manifestOf, manifestProblemFailure, readWorkspaceManifest } from "./workspaceManifest.js";
 
 export interface CreatedFile {
   readonly path: string;
@@ -347,7 +347,14 @@ export class WorkspaceService {
     signal?: AbortSignal | undefined;
   }): Promise<RunResult> {
     const root = resolve(input.path);
-    const manifest = await readWorkspaceManifest(root);
+    const manifestRead = await readWorkspaceManifest(root);
+    // The binary name is the one field a run takes from the manifest, so a file
+    // that could not be read is a name uvp would have to invent — and "app" for
+    // a workspace whose file says `svc` gives "no such binary" instead of the
+    // real reason. A directory with no manifest at all still runs on the
+    // default; that is a workspace that declares nothing.
+    if (manifestRead.state === "unreadable") throw manifestProblemFailure(manifestRead.problem);
+    const manifest = manifestOf(manifestRead);
     const buildDir = resolve(input.buildDir ?? join(root, "build"));
     const binaryName = input.binary ?? manifest?.binary ?? manifest?.name ?? "app";
     // `resolve`, not `join`: a caller-supplied `binary` is a path (the CLI names

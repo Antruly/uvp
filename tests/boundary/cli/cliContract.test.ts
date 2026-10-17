@@ -131,6 +131,8 @@ const UNREADABLE = join(workspace, "unreadable");
 /** What the Windows skip of the unreadable-directory case states. */
 const UNREADABLE_WHY =
   "POSIX mode bits are what stop this process listing the directory; Windows ACLs are not set by chmod";
+/** A workspace whose `uvp.json` is there, declares a container, and did not parse. */
+const BROKEN_MANIFEST = join(workspace, "broken-manifest");
 
 mkdirSync(workspace, { recursive: true });
 mkdirSync(OCCUPIED, { recursive: true });
@@ -142,6 +144,12 @@ writeFileSync(join(workspace, "plain-file"), "a path a create cannot treat as a 
 /** `title`, with the reason attached on the host that cannot run it. */
 const named = (title: string, why: string): string =>
   isWindows ? `${title} — skipped: ${why}` : title;
+
+mkdirSync(BROKEN_MANIFEST, { recursive: true });
+writeFileSync(
+  join(BROKEN_MANIFEST, "uvp.json"),
+  '{"uvp": 1, "name": "svc", "toolchain": {"kind": "container", "image": "localhost/base:12"',
+);
 
 afterAll(() => {
   rmSync(workspace, { recursive: true, force: true });
@@ -740,5 +748,32 @@ describe("a refused invocation writes nothing", () => {
     const error = parseUvpError(soleJson(init.stderr, "uvp init"));
     expect(error.code).toBe("invalid_request");
     expect(error.message).toContain("not a directory");
+  });
+
+  it("refuses to build a workspace whose manifest it could not read", async () => {
+    // The file declares a container build and did not parse. Reading that as "no
+    // manifest" builds it on this host — the one fallback the toolchain rule
+    // forbids — so the refusal has to happen before any provider is asked.
+    const build = await invoke(["build", BROKEN_MANIFEST, "--json"]);
+    expect(build.exit).toBe(EXIT_WRONG);
+    expect(build.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(build.stderr, "uvp build"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("uvp.json");
+    // Nothing was written: no build directory was created for a build that never
+    // began.
+    expect(readdirSync(BROKEN_MANIFEST)).toEqual(["uvp.json"]);
+  });
+
+  it("reports the same manifest problem from the doctor, rather than this host's toolchain", async () => {
+    // The doctor's `--workspace` reads the same file through the same boundary,
+    // and a report about this host's toolchain for a file that named another one
+    // is a claim the file never made.
+    const doctor = await invoke(["doctor", "--workspace", BROKEN_MANIFEST, "--json"]);
+    expect(doctor.exit).toBe(EXIT_WRONG);
+    expect(doctor.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(doctor.stderr, "uvp doctor"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("not valid JSON");
   });
 });

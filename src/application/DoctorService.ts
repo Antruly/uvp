@@ -13,8 +13,8 @@ import type { UvpFeature } from "../domain/features.js";
 import type { ToolchainSelection } from "../domain/toolchain.js";
 import type { VerdictStatus } from "../domain/verdict.js";
 import { selectToolchain } from "./toolchainSelection.js";
-import { readWorkspaceManifest } from "./workspaceManifest.js";
-import type { WorkspaceManifest } from "./workspaceManifest.js";
+import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
+import type { WorkspaceManifest, WorkspaceManifestRead } from "./workspaceManifest.js";
 import type { EvidenceRecorder } from "./evidenceHelpers.js";
 import {
   commandSource,
@@ -266,14 +266,23 @@ export class DoctorService {
     // toolchain declaration come from the same bytes, so a report cannot
     // describe the features of one revision of a file and the build target of
     // another.
-    const manifest =
-      input.workspace === undefined ? undefined : await readWorkspaceManifest(input.workspace);
+    const manifestRead: WorkspaceManifestRead =
+      input.workspace === undefined
+        ? { state: "absent" }
+        : await readWorkspaceManifest(input.workspace);
+    const manifest = manifestOf(manifestRead);
 
     // The same rule `uvp build` applies, and deliberately the same function: a
     // declaration that cannot be read is refused rather than degraded, including
     // when the caller passed `--features` and believes the manifest is beside the
-    // point of the question they asked.
-    const selection = selectToolchain({ manifest });
+    // point of the question they asked. A file that is there and could not be
+    // read reaches this as a problem, not as an absent manifest — reporting the
+    // host's toolchain for it would answer a question the file had asked and
+    // this call could not see.
+    const selection = selectToolchain({
+      manifest,
+      manifestProblem: manifestProblemOf(manifestRead),
+    });
     const selected = this.options.toolchainFor(selection);
 
     // The toolchain the workspace named is added to the ones a caller can name,
