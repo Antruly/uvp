@@ -61,7 +61,7 @@ import type { BuildDiagnostic, BuildPhase } from "../application/ToolchainProvid
 const GCC_DIAGNOSTIC =
   /^(?<file>(?:[A-Za-z]:[\\/])?[^:\n]+):(?<line>\d+):(?:(?<column>\d+):)?\s*(?<severity>error|warning|note|fatal error):\s*(?<message>.*)$/u;
 const MSVC_DIAGNOSTIC =
-  /^(?<file>[^(]+)\((?<line>\d+)(?:,(?<column>\d+))?\)\s*:\s*(?<severity>error|warning|note)\s+[A-Z]+\d+:\s*(?<message>.*)$/u;
+  /^(?<file>[^(]+)\((?<line>\d+)(?:,(?<column>\d+))?\)\s*:\s*(?<severity>fatal error|error|warning|note)\s+[A-Z]+\d+:\s*(?<message>.*)$/u;
 
 const SEVERITIES = new Set(["error", "warning", "note"]);
 

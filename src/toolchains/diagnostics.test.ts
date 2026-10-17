@@ -242,6 +242,27 @@ describe("compiler diagnostics", () => {
     ]);
   });
 
+  it("calls an MSVC fatal error an error, as it does for GCC's spelling", () => {
+    // MSVC's fourth severity is the same phrase GCC uses, and it is the one that
+    // stopped the build. Without it in the alternation the line did not match at
+    // all: a failed Windows build came back with no diagnostics, which is the
+    // shape this module exists to prevent.
+    const said = parseDiagnostics(
+      "",
+      "C:\\ws\\main.cpp(2): fatal error C1083: Cannot open include file: 'x.h': No such file or directory",
+      "compile",
+    );
+    expect(said).toEqual([
+      {
+        severity: "error",
+        file: "C:\\ws\\main.cpp",
+        line: 2,
+        message: "Cannot open include file: 'x.h': No such file or directory",
+        phase: "compile",
+      },
+    ]);
+  });
+
   it("keeps a diagnostic that arrived on stdout, since a wrapper may put it there", () => {
     // A missing diagnostic is worse than a duplicate, so both streams are read.
     const said = parseDiagnostics("main.cpp:7:1: warning: unused variable ‘x’", "", "compile");
