@@ -391,7 +391,7 @@ tarball.
 | Project            | Covers                                                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `boundary`         | Import-surface rules across built output                                                                     |
-| `cli-boundary`     | The CLI driven as a subprocess                                                                               |
+| `cli-boundary`     | The CLI driven as a subprocess, including `uvp setup`'s write path                                           |
 | `process-boundary` | Process supervision: start, readiness, stop, orphans                                                         |
 | `mcp-boundary`     | The MCP server over real stdio                                                                               |
 | `toolchain`        | Real CMake and real libuvcpp: six templates, a database-backed one, a failing build, both provider contracts |
@@ -700,6 +700,7 @@ not notice a bundle that disagreed with it.
 | `assertionVocabulary.test.ts` | Every `--assert` form against a real response, and every refusal    |
 | `manualPath.test.ts`          | `uvp run --no-detach` → drive it → Ctrl-C, and who owns the process |
 | `http2.test.ts`               | A workspace generated with `--features http2` really speaks HTTP/2  |
+| `publishedPackage.test.ts`    | The registry release, installed into an isolated prefix and driven  |
 
 The four verdicts are asked of one workspace on one port, reusing one build,
 because that is what a caller does — and because a pass that leaked its service
@@ -737,6 +738,23 @@ handle off the pipe, drive the service from a second uvp process, then signal th
 group. It asserts the service is stopped and the port free afterwards, because a
 foreground run's interrupt is the one place where a cleanup that did not happen
 would leave nothing behind to notice.
+
+`publishedPackage.test.ts` is the one file here that does not use the checkout at
+all: it installs `uvp-agents` from `registry.npmjs.org` into an isolated prefix
+with its own `HOME` and npm cache, then drives that copy — `setup` (printed,
+merged, refused), the MCP handshake with the advertised tool list, one
+`uvp_doctor`, and, when the host has libuvcpp, generate → build → verify. It is
+**opt-in** because it contacts the registry and compiles C++:
+
+```bash
+UVP_ACCEPTANCE_PUBLISHED=0.2.0 npx vitest run tests/acceptance/publishedPackage.test.ts
+# or UVP_ACCEPTANCE_PUBLISHED=latest
+```
+
+Without the variable it skips with that reason in its title. An install that
+fails is a **failure**, not a skip — "the version is not on the registry" is the
+fact the lane exists to check — while a host without libuvcpp skips the build
+case with the same discovery reason the other acceptance lanes print.
 
 `assertionVocabulary.test.ts` pins the vocabulary from both ends: the forms that
 must work, and the three that must be refused with a named reason rather than
