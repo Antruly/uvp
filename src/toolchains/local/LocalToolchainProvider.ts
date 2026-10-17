@@ -54,17 +54,49 @@ const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[
 ];
 
 /**
+ * The entries of `CMAKE_PREFIX_PATH`, in the spellings a caller may have used.
+ *
+ * CMake reads the variable as a semicolon-separated list on every host, while a
+ * POSIX shell is usually written with the platform's own separator — this
+ * repository's installation guide does exactly that:
+ *
+ *     export CMAKE_PREFIX_PATH="$HOME/.local:$CMAKE_PREFIX_PATH"
+ *
+ * Before [#80](https://github.com/Antruly/uvp/issues/80) the whole value was
+ * pushed into the search roots as one directory, so a caller with two prefixes
+ * was told no libuvcpp was installed even when one entry held a complete install.
+ * Both spellings are accepted off Windows. Windows is split on `;` only: every
+ * absolute Windows path starts with a drive letter, and splitting on `:` would
+ * turn `C:\prefix` into `C` and `\prefix`.
+ *
+ * Empty entries are dropped rather than searched. A trailing separator is how a
+ * shell writes "the variable was empty", and an empty string is not a directory
+ * named "".
+ */
+const pathListEntries = (value: string | undefined): readonly string[] => {
+  if (value === undefined) return [];
+  return (isWindows ? value.split(";") : value.split(/[;:]/u))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+};
+
+/**
  * Candidate roots for a libuvcpp installation.
  *
  * The environment variables come first because they are how a caller pins a
  * specific build; the directory scan is a convenience for the common case where
  * someone unpacked a release there.
+ *
+ * The roots are deduplicated because the same prefix can arrive through more than
+ * one variable — a caller who sets both `UVCPP_ROOT` and `CMAKE_PREFIX_PATH` is
+ * not asking for the install to be examined twice — and searching it twice would
+ * report the same directory as two candidates.
  */
 const libuvcppSearchRoots = (workspacePath: string | undefined): readonly string[] => {
   const fromEnv = [
     process.env["UVCPP_ROOT"],
     process.env["LIBUVCPP_ROOT"],
-    process.env["CMAKE_PREFIX_PATH"],
+    ...pathListEntries(process.env["CMAKE_PREFIX_PATH"]),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
   const conventional = [
@@ -79,7 +111,7 @@ const libuvcppSearchRoots = (workspacePath: string | undefined): readonly string
       : []),
   ].filter((value): value is string => value !== undefined);
 
-  return [...fromEnv, ...conventional];
+  return [...new Set([...fromEnv, ...conventional])];
 };
 
 /**
