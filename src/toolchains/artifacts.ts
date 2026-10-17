@@ -80,7 +80,18 @@ export const discoverArtifacts = async (buildDir: string): Promise<readonly Buil
         continue;
       }
       if (!looksBuilt(entry, info.mode) || info.size === 0) continue;
-      const bytes = await readFile(full);
+      let bytes: Buffer;
+      try {
+        bytes = await readFile(full);
+      } catch {
+        // An executable this process may run but not read is the ordinary case,
+        // and a build that produced one still succeeded. The digest is the only
+        // thing this read is for, and a file whose bytes cannot be read has no
+        // digest to report — not a finding, the same rule as `readdir` and
+        // `stat` above. Rejecting here answered a successful build with a raw
+        // `EACCES` instead of a `BuildOutcome`.
+        continue;
+      }
       found.push({ path: full, bytes: info.size, digest: sha256(bytes) });
     }
   };
