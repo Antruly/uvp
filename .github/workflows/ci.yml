@@ -320,25 +320,30 @@ jobs:
           $modules | ForEach-Object { Write-Host "module: $_" }
 
           # This archive ships pkg-config and no CMake package config, which is the
-          # route the generated CMakeLists falls back to. The runner image does not
-          # ship pkg-config, so the lane installs the same one a user would.
+          # route the generated CMakeLists falls back to.
           $pc = Join-Path $prefix 'lib/pkgconfig/uvcpp.pc'
           if (-not (Test-Path $pc)) { throw "the archive has no lib/pkgconfig/uvcpp.pc" }
-          if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
+          # Ask for the executable image by name. The runner image already carries
+          # Strawberry Perl's `pkg-config.bat`, so `Get-Command pkg-config`
+          # succeeds there — while CMake's FindPkgConfig searches for
+          # `pkg-config.exe`/`pkgconf.exe` and reports
+          # `missing: PKG_CONFIG_EXECUTABLE`. That is what the lane's second run
+          # showed; the first run failed because the installed directory was not
+          # on the next step's PATH at all.
+          $pkgConfigExe = Get-Command pkg-config.exe -ErrorAction SilentlyContinue
+          if ($null -eq $pkgConfigExe) {
             choco install pkgconfiglite --no-progress -y
             $env:Path = "$env:ProgramData\chocolatey\bin;$env:Path"
+            $pkgConfigExe = Get-Command pkg-config.exe -ErrorAction Stop
           }
-          # The session PATH above covers this step only. Every later step rebuilds
-          # PATH from GITHUB_PATH, so the directory the tool lives in has to be
-          # recorded there too. Without this, `pkg-config --version` passes here
-          # and CMake's `find_package(PkgConfig REQUIRED)` fails two steps later
-          # with `missing: PKG_CONFIG_EXECUTABLE` — which is how the first run of
-          # this lane failed.
-          $pkgConfig = (Get-Command pkg-config -ErrorAction Stop).Source
+          # Every later step rebuilds PATH from GITHUB_PATH, so the directory the
+          # executable lives in has to be recorded there too. The session PATH above
+          # covers this step only.
+          $pkgConfig = $pkgConfigExe.Source
           Split-Path -Parent $pkgConfig |
             Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          Write-Host "pkg-config: $pkgConfig"
-          pkg-config --version
+          Write-Host "pkg-config.exe: $pkgConfig"
+          & $pkgConfig --version
 
           # Both are read at different times: `PKG_CONFIG_PATH` by CMake's
           # configure, and `PATH` by the DLL loader when the built service starts.
@@ -361,7 +366,11 @@ jobs:
           if errorlevel 1 exit /b 1
           where cl
           where cmake
-          where pkg-config
+          where pkg-config.exe
+          if errorlevel 1 (
+            echo ::error title=pkg-config::pkg-config.exe is not on PATH, so the release archive cannot be found
+            exit /b 1
+          )
           npm run test:toolchain
       - name: Upload toolchain diagnostics
         if: ${{ !cancelled() }}
