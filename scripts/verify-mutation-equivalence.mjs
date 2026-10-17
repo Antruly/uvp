@@ -18,10 +18,14 @@
  * - **A throw is a result**, so a mutant that throws where the module answers is
  *   distinguishable rather than looking like an absent value.
  * - **A blind control refuses the run** with exit 2: a control the comparison
- *   cannot see is the instrument saying it is blind, not clear.
+ *   cannot see is the instrument saying it is blind, not clear. The same code covers
+ *   a mutation that does not apply once, two ids that sanitise to one mutant path
+ *   (the ESM cache would hand the second the first's module), an input file that
+ *   escapes its directory, and an unexpected error while comparing — Node's default
+ *   exit 1 would report the instrument breaking as a distinguishable mutant.
  * - **Each mutant is written beside the module and removed again**, and the module
  *   itself is byte-identical afterwards — the mutation is a comparison, never an
- *   edit of the tree.
+ *   edit of the tree. That includes a refusal after an earlier mutant was written.
  *
  * Exit codes follow the script's own contract: 0 equivalent, 1 distinguishable,
  * 2 untrustworthy.
@@ -49,6 +53,16 @@ const SUM = `export function add(a, b) {
   return a + b;
 }
 `;
+
+const CYCLE = `export function read() {
+  const value = { value: 1 };
+  value.self = value;
+  return value;
+}
+`;
+
+/** The fixture modules, by the path a config names. */
+const MODULES = { "main/reader.mjs": READER, "main/sum.mjs": SUM, "main/cycle.mjs": CYCLE };
 
 const INPUTS = [
   { label: "name only", files: { "data.json": '{"name":"svc"}' } },
@@ -219,6 +233,63 @@ const CASES = [
     ],
   },
   {
+    name: "two ids that sanitise to one mutant path are refused",
+    config: config({
+      mutants: [
+        { id: "a b", what: "the first id", from: "? parsed.count : 0", to: "? parsed.count : 2" },
+        { id: "a_b", what: "the second id", from: "? parsed.count : 0", to: "? parsed.count : 3" },
+      ],
+    }),
+    status: 2,
+    includes: ['mutants "a b" and "a_b" both resolve to'],
+    covers: [
+      "two ids that sanitise to one file name are refused, because the ESM cache would hand the " +
+        "second mutant the first one's module and call it equivalent",
+    ],
+  },
+  {
+    name: "an unexpected error while comparing exits 2 rather than the finding code",
+    config: {
+      module: "main/cycle.mjs",
+      export: "read",
+      call: "arguments",
+      inputs: "argument-inputs.json",
+      mutants: [
+        {
+          id: "control",
+          what: "a control the crash happens before",
+          from: "value: 1",
+          to: "value: 2",
+          control: true,
+        },
+      ],
+    },
+    status: 2,
+    includes: ["the comparison failed"],
+    covers: [
+      "a cyclic result crashes the shape walk, and the run exits 2 — Node's default exit 1 would " +
+        "report the instrument breaking as a distinguishable mutant",
+    ],
+  },
+  {
+    name: "an input file that escapes its directory is refused",
+    config: config({
+      inputs: [
+        {
+          label: "one",
+          files: { "../escape.txt": "outside" },
+        },
+      ],
+      mutants: [EQUIVALENT],
+    }),
+    status: 2,
+    includes: ['input file "../escape.txt" is outside the input\'s directory'],
+    covers: [
+      "a directory input's file name that resolves outside the temporary root is refused rather " +
+        "than written and left behind",
+    ],
+  },
+  {
     name: "the machine-readable report carries the verdicts and the exit code",
     config: config({ mutants: [EQUIVALENT, CONTROL] }),
     json: true,
@@ -310,6 +381,9 @@ const READINGS = [
   "blind",
   "no control was supplied and no mutant differs",
   "not once",
+  "both resolve to",
+  "the comparison failed",
+  "is outside the input's directory",
   '"exitCode": 0',
   "| undefined-first (control) | distinguishable on 1 | 1 |",
   '"module" names no file at',
@@ -346,6 +420,7 @@ const fixture = async (index, testCase) => {
   await mkdir(path.join(directory, "main"), { recursive: true });
   await writeFile(path.join(directory, "main", "reader.mjs"), READER);
   await writeFile(path.join(directory, "main", "sum.mjs"), SUM);
+  await writeFile(path.join(directory, "main", "cycle.mjs"), CYCLE);
   await writeFile(path.join(directory, "inputs.json"), JSON.stringify(INPUTS));
   await writeFile(path.join(directory, "argument-inputs.json"), JSON.stringify(ARGUMENT_INPUTS));
   await writeFile(path.join(directory, "config.json"), JSON.stringify(testCase.config));
@@ -360,7 +435,7 @@ const leftovers = async (directory, testCase) => {
   // `null` for a module the case expected the run to refuse, so the comparison is
   // only made where there is something to compare.
   const restored = await readFile(path.join(directory, module), "utf8").catch(() => null);
-  return { names, restored, expected: module.endsWith("sum.mjs") ? SUM : READER };
+  return { names, restored, expected: MODULES[module] ?? null };
 };
 
 const main = async () => {
@@ -427,9 +502,9 @@ const main = async () => {
     `mutation equivalence: ${String(CASES.length)} fixture(s) — an equivalent mutant and a ` +
       "control are told apart in the verdicts, a difference is named by its input and path, a " +
       "present-but-undefined key and a throw are both differences, a blind control, an ambiguous " +
-      "mutation and a run that demonstrated nothing exit 2, the JSON report carries the verdicts " +
-      "and the exit code, an arguments call passes an explicit undefined, and the tree is left as " +
-      "it was found",
+      "mutation, a colliding id, an escaping input file, an internal crash and a run that " +
+      "demonstrated nothing exit 2, the JSON report carries the verdicts and the exit code, an " +
+      "arguments call passes an explicit undefined, and the tree is left as it was found",
   );
 };
 

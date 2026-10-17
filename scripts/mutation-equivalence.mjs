@@ -32,6 +32,8 @@
  * its own rather than this one bent to it. The same holds for a result that literally
  * equals the `{ "$undefined": true }` sentinel: the walk cannot tell that object from
  * `undefined`, which is the sentinel's cost and is named rather than left to be found.
+ * A cyclic result cannot be walked at all; the run exits 2 saying the comparison
+ * failed, because the instrument breaking is not a finding about the code.
  *
  * ## Controls are part of the verdict
  *
@@ -79,14 +81,20 @@
  * - Each mutant's `from` must occur exactly once in the module. Mutants are written
  *   beside the module — so relative imports resolve to the same files the original
  *   imports — and removed when the run ends, by `finally`, by a refusal, and by
- *   signal.
+ *   signal. Ids must stay distinct after sanitising to a file name: `"a b"` and
+ *   `"a_b"` name one path, and the second `import()` would be handed the first
+ *   module from the ESM cache, so that collision is refused rather than compared.
+ * - A `directory` input's file names must stay inside the input's own directory;
+ *   an absolute path or a `..` segment is refused.
  *
  * Exit codes: **0** every non-control mutant is indistinguishable over these inputs,
  * every control is distinguishable, and the run demonstrated its sight — a run with
  * no control counts only when a non-control differs; **1** a non-control mutant is
  * distinguishable (a finding: these inputs separate it); **2** the comparison cannot
- * be trusted (a blind control, no control and no difference, an ambiguous mutation,
- * or a config this boundary refuses). The `--json` report carries the same verdict
+ * be trusted (a blind control, no control and no difference, an ambiguous mutation, a
+ * config this boundary refuses, or an unexpected error while comparing — the
+ * instrument breaking is not a finding, and Node's default exit 1 would read as
+ * one). The `--json` report carries the same verdict
  * under `untrustworthy`, which is `null` when the run is sound.
  *
  * [#57]: https://github.com/Antruly/uvp/issues/57
@@ -95,7 +103,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, extname, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Exit codes, in one place because the golden asserts them by name. */
@@ -260,12 +268,44 @@ const mutantPathOf = (modulePath, id) => {
   );
 };
 
+/**
+ * Refuses two ids that sanitise to one mutant path.
+ *
+ * `import()` caches by URL, so the second mutant would be handed the first one's
+ * module and compared as a program nobody described — a false "equivalent" is the
+ * instrument's worst answer, so the collision is refused rather than hashed around.
+ */
+const checkPathsDistinct = (modulePath, mutants) => {
+  const named = new Map();
+  for (const mutant of mutants) {
+    const path = mutantPathOf(modulePath, mutant.id);
+    const previous = named.get(path);
+    if (previous !== undefined) {
+      fail(
+        `mutants ${JSON.stringify(previous)} and ${JSON.stringify(mutant.id)} both resolve to ` +
+          `${path}; ids must stay distinct after sanitising`,
+      );
+    }
+    named.set(path, mutant.id);
+  }
+};
+
+/** An input's file path, refused when it would escape the input's own directory. */
+const inputFilePathOf = (root, name) => {
+  const target = resolve(root, name);
+  const inside = relative(root, target);
+  if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+    fail(`input file ${JSON.stringify(name)} is outside the input's directory`);
+  }
+  return target;
+};
+
 /** An input's temporary directory, and the call that runs inside it. */
 const directoryCall = async (fn, input) => {
   const root = await mkdtemp(resolve(tmpdir(), "uvp-equivalence-"));
   try {
     for (const [name, contents] of Object.entries(input.files ?? {})) {
-      const target = resolve(root, name);
+      const target = inputFilePathOf(root, name);
       await mkdir(dirname(target), { recursive: true });
       if (typeof contents === "string") {
         await writeFile(target, contents, "utf8");
@@ -465,6 +505,7 @@ const main = async () => {
   const call = callOf(config);
   const inputs = inputsOf(config, configDir);
   const mutants = mutantsOf(config);
+  checkPathsDistinct(modulePath, mutants);
 
   const source = await readFile(modulePath, "utf8");
   process.once("SIGINT", () => {
@@ -507,4 +548,9 @@ const main = async () => {
   return verdicts.exitCode;
 };
 
-process.exitCode = await main();
+process.exitCode = await main().catch((cause) => {
+  // An unexpected rejection is the instrument breaking, not a finding. Node's
+  // default exit 1 would report it as `distinguishable`, so the third state is
+  // named here rather than left to the runtime's choice of code.
+  fail(`the comparison failed: ${String(cause?.message ?? cause)}`);
+});
