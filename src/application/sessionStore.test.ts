@@ -350,4 +350,46 @@ describe("captures", () => {
     expect(store.capture("cap_0")).toBeUndefined();
     expect(store.capture(`cap_${String(MAX_CAPTURES)}`)).toBeDefined();
   });
+
+  it("closes the proxy it evicts, and leaves the survivors running", () => {
+    // Eviction drops the only handle the caller has: the id is gone from the
+    // store, so `capture stop` cannot reach it. Without the close, the listener
+    // keeps accepting and forwarding with nothing able to stop it.
+    const { store } = storeAt();
+    const closed: string[] = [];
+    const withCloseSpy = (captureId: string): CaptureSession => ({
+      ...capture(captureId),
+      server: { close: () => closed.push(captureId) },
+    });
+
+    for (let index = 0; index <= MAX_CAPTURES; index += 1) {
+      store.addCapture(withCloseSpy(`cap_${String(index)}`));
+    }
+
+    expect(closed).toEqual(["cap_0"]);
+    expect(store.capture("cap_0")).toBeUndefined();
+    expect(store.captures()).toHaveLength(MAX_CAPTURES);
+  });
+
+  it("does not close an evicted session its own stop path already closed", () => {
+    // `capture stop` and the `auto_stop_ms` timer both set `stopped` and call
+    // close. A second close on the same server is not a release; it is an error
+    // path on a resource that is already gone.
+    const { store } = storeAt();
+    const closed: string[] = [];
+    store.addCapture({
+      ...capture("cap_stopped"),
+      stopped: true,
+      server: { close: () => closed.push("cap_stopped") },
+    });
+    for (let index = 0; index < MAX_CAPTURES; index += 1) {
+      store.addCapture({
+        ...capture(`cap_${String(index)}`),
+        server: { close: () => closed.push(`cap_${String(index)}`) },
+      });
+    }
+
+    expect(closed).not.toContain("cap_stopped");
+    expect(store.capture("cap_stopped")).toBeUndefined();
+  });
 });
