@@ -609,7 +609,12 @@ const performHttp2 = (
       settled = true;
       clearTimeout(timer);
       cleanup();
-      client.close();
+      // The attempt is over. `close()` is graceful and lets an active stream
+      // finish, so a caller told `timeout` would still have its request running
+      // while the socket was held — the opposite of what the deadline reports.
+      // `destroy()` tears the session and its streams down, which is the shape
+      // the HTTP/1.1 path gets from `req.destroy`.
+      client.destroy();
       // A withdrawal is not a transport finding; `ERR_HTTP2_STREAM_CANCEL` from
       // the destroy below would otherwise be reported as an unreachable peer.
       if (isCancelledFailure(error)) {
