@@ -113,6 +113,10 @@ author proxy assistant — and the hand-off between them are defined in
 [docs/agent-workflow.md](docs/agent-workflow.md). The author remains the only
 approver, and the author completes the **Author readiness** declarations.
 
+Per-engineer identity, task-taking, hand-back, and upstream rules are in
+[docs/ai-engineer-operations.md](docs/ai-engineer-operations.md); the current
+open work and direction are in [docs/work-plan.md](docs/work-plan.md).
+
 **Disclosure is required, but light.** Add the `ai-assisted` label to a PR with
 substantial AI involvement. If a specific passage is machine-generated and you do
 not fully understand it, mark it in the diff — a comment is enough. There is no

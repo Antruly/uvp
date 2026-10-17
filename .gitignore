@@ -48,3 +48,6 @@ Thumbs.db
 
 # Local requirements notes; not part of the repository.
 dev.md
+
+# Per-agent identity file; local state, never committed.
+dev-identity.md

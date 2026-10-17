@@ -11,6 +11,10 @@ result. The workflow below exists to make that true in practice: one owner per
 task, one branch per issue, evidence instead of assertion, and a human approval
 before anything reaches `main`.
 
+The per-engineer identity, task-taking, hand-back, and upstream rules are in
+[AI engineer operations](ai-engineer-operations.md). The current open work and
+direction are in [Current development plan](work-plan.md).
+
 ## Roles
 
 The roles are duties, not job titles. One person or agent may hold more than one
@@ -20,7 +24,7 @@ role in a small change, but the duties do not disappear when roles are combined.
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Author / maintainer** (human)                            | Scope, final direction, approval, and the human-owner declaration                        | Decide scope; review the final diff; approve a specific PR; complete the Author readiness declaration; merge or authorize a merge                                                                          | Delegate the approval decision to an agent                                                                                                                                                                |
 | **Direction lead**                                         | Requirements, priority, decomposition, the work register, and cross-task conflicts       | Read issues, PRs, CI, and code; prepare a local register; propose triage, assignments, splits, and merge order; with the author's explicit approval, post an approved issue, comment, label, or assignment | Create, edit, close, assign, label, or comment on GitHub without explicit approval; approve, merge, check the Author readiness declaration, or take over another owner's branch; continuously post status |
-| **Development agent** (`dev-ai-1`, `dev-ai-2`, `dev-ai-3`) | One assigned issue at a time: implementation, tests, evidence, and the PR                | Create the issue's branch and draft PR; run validation; answer review findings; keep the PR body current                                                                                                   | Work on an unassigned issue; edit another owner's branch; approve or merge; claim a result it did not observe                                                                                             |
+| **Development agent** (`dev-ai-1`, `dev-ai-2`, `dev-ai-3`) | One owned issue at a time: implementation, tests, evidence, and the PR                   | Claim an eligible unowned issue by commenting with its identity; create the issue's branch and draft PR; run validation; answer review findings; keep the PR body current                                  | Work on an issue owned by another agent; claim without a comment; edit another owner's branch; approve or merge; claim a result it did not observe                                                        |
 | **Review agent**                                           | An independent review of the diff against the issue and the repository rules             | Read the diff and surrounding code; run checks; post blocking and non-blocking findings; request changes                                                                                                   | Rewrite the implementation; approve; merge; take over the issue                                                                                                                                           |
 | **Author proxy assistant**                                 | Collecting approval items for the author and carrying out the author's explicit decision | Prepare an approval packet; add required labels; report status; merge a specific PR after the author's explicit approval at the reviewed commit                                                            | Choose what to approve; approve or attest to human review; complete the Author readiness declaration; push to `main`; merge without a per-PR approval                                                     |
 | **Contributor** (human or agent)                           | A proposed issue, design discussion, or PR                                               | Propose work; comment with evidence; own a PR if a human accepts ownership                                                                                                                                 | Bypass triage, ownership, review, or the human gate                                                                                                                                                       |
@@ -36,7 +40,7 @@ opening a new issue to track a problem: the problem is proposed to the author
 first, and posted only after approval.
 
 This is a limit on the direction lead. It does not change a development agent's
-standing authorization for the issue it was assigned.
+standing authorization for the issue it owns (assigned or claimed).
 
 ### The author is the only approver
 
@@ -70,10 +74,13 @@ Every issue has exactly one owner. The owner is recorded on the issue, in the
 work register, and on the PR. If two agents could plausibly own it, the
 direction lead splits the issue until one owner can finish it.
 
-A development agent works only on its assigned issue. This is deliberate: the
-repository is small enough that uncoordinated parallel edits collide, and broad
-enough that "everyone helps" produces duplicated interpretation and competing
-PRs.
+A development agent works only on the issue it owns — assigned by the direction
+lead, or claimed with a comment under
+[AI engineer operations](ai-engineer-operations.md#task-taking-mode). A claim
+comment is the ownership record until the tracker assignment exists. This is
+deliberate: the repository is small enough that uncoordinated parallel edits
+collide, and broad enough that "everyone helps" produces duplicated
+interpretation and competing PRs.
 
 When an agent is affected by another owner's task, it may comment on that issue
 or PR. The comment must:
@@ -97,17 +104,17 @@ proposal -> triage -> assigned -> in progress -> in review
          -> awaiting author -> approved -> merged -> verified/closed
 ```
 
-| State             | Entry condition                                                        | Who moves it             |
-| ----------------- | ---------------------------------------------------------------------- | ------------------------ |
-| Proposed          | An issue or design discussion exists                                   | Anyone                   |
-| Triaged           | Scope, duplicate check, priority, and design need are recorded         | Direction lead           |
-| Assigned          | One owner and acceptance criteria are named                            | Direction lead           |
-| In progress       | Branch exists; draft PR opens early                                    | Owner                    |
-| In review         | Draft PR is ready for the review agent; validation evidence is current | Owner                    |
-| Awaiting author   | Review has no unresolved blocking finding; approval packet is complete | Proxy assistant          |
-| Approved          | Author has explicitly approved that PR at that commit                  | Author                   |
-| Merged            | Proxy assistant merged under the recorded approval                     | Proxy assistant          |
-| Verified / closed | Post-merge checks on `main` passed; follow-ups filed; issue closed     | Owner and direction lead |
+| State             | Entry condition                                                            | Who moves it                        |
+| ----------------- | -------------------------------------------------------------------------- | ----------------------------------- |
+| Proposed          | An issue or design discussion exists                                       | Anyone                              |
+| Triaged           | Scope, duplicate check, priority, and design need are recorded             | Direction lead                      |
+| Assigned          | One owner and acceptance criteria are named; assignment or a claim comment | Direction lead or claiming engineer |
+| In progress       | Branch exists; draft PR opens early                                        | Owner                               |
+| In review         | Draft PR is ready for the review agent; validation evidence is current     | Owner                               |
+| Awaiting author   | Review has no unresolved blocking finding; approval packet is complete     | Proxy assistant                     |
+| Approved          | Author has explicitly approved that PR at that commit                      | Author                              |
+| Merged            | Proxy assistant merged under the recorded approval                         | Proxy assistant                     |
+| Verified / closed | Post-merge checks on `main` passed; follow-ups filed; issue closed         | Owner and direction lead            |
 
 A blocked task is still owned. Mark it blocked, record the reason and the next
 probe, and keep the owner. Do not silently stall, and do not let another agent

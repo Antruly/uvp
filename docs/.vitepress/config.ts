@@ -45,6 +45,8 @@ export default defineConfig({
           { text: "Testing", link: "/testing" },
           { text: "Releasing", link: "/releasing" },
           { text: "AI development workflow", link: "/agent-workflow" },
+          { text: "AI engineer operations", link: "/ai-engineer-operations" },
+          { text: "Current development plan", link: "/work-plan" },
         ],
       },
     ],

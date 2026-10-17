@@ -4,6 +4,9 @@ uvp is early. This page says what works, what does not, and what is planned —
 including the parts that are not planned, because a roadmap that lists only
 intentions is a roadmap that never says no.
 
+For the current open work and direction, see
+[Current development plan](work-plan.md).
+
 ## Milestone 1 — the closure and the toolbox, in parallel
 
 The first milestone has two halves and they are being built at the same time,
