@@ -433,6 +433,18 @@ server.on("upgrade", (request, socket) => {
     socket.write(serverFrame(Buffer.from("中".repeat(30_000), "utf8")));
   }
 
+  if (url.searchParams.get("oversized_frame") === "1") {
+    // The peer declares a 9 MiB text frame and sends none of its payload: the
+    // 10-byte header is the whole statement. A probe that treats the declaration
+    // as a short read waits for bytes that were never promised, and the frame
+    // disappears from its log.
+    const wide = Buffer.alloc(10);
+    wide[0] = 0x81;
+    wide[1] = 127;
+    wide.writeBigUInt64BE(9n * 1024n * 1024n, 2);
+    socket.write(wide);
+  }
+
   if (closeCode !== null) {
     // The server closes first, with a code and a reason of the caller's choosing.
     // A probe that reported only "the connection ended" would lose both.

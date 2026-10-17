@@ -997,6 +997,43 @@ describe("the websocket probe's text frames", () => {
   );
 });
 
+describe("the websocket probe's refused frames", () => {
+  it(
+    "reports a frame it refused as an error, not as a peer that went quiet",
+    async () => {
+      // The fixture declares a 9 MiB text frame and sends no payload. The
+      // declaration is the peer's whole statement: waiting for the body would
+      // stall until the idle deadline, and the frame would be missing from the
+      // log with nothing saying why. Refusing is a finding, and it is reported
+      // as one.
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?oversized_frame=1`,
+        send: [{ payload: "hi" }],
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", output);
+      expect(output["transport_error"]).toMatch(/Refused a frame declaring 9437184 bytes/u);
+      expect(output["closed_cleanly"]).toBe(false);
+
+      const frames = output["frames"] as {
+        direction: string;
+        opcode: string;
+        bytes: number;
+        text?: string;
+      }[];
+      const refused = frames.find(
+        (frame) => frame.direction === "received" && frame.opcode === "text" && frame.bytes === 0,
+      );
+      // The refused frame is in the log. Asserting its presence is the half of
+      // the issue this change fixes: `refused?.text ?? ""` would also hold when
+      // `find` returned nothing, which is precisely the "silently dropped" state
+      // the issue reports.
+      expect(refused).toMatchObject({ direction: "received", opcode: "text", bytes: 0, text: "" });
+    },
+    TIMEOUT,
+  );
+});
+
 /**
  * Reports the real probe wrote, recorded rather than invented.
  *
