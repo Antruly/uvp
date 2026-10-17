@@ -348,10 +348,13 @@ document does not claim it does.
 **The C++ Windows lane is `windows-toolchain`.** It installs the pinned
 `libuvcpp-1.7.0-msvc-x64` release archive, records the modules its config header
 defines, installs a `pkg-config.exe`, activates MSVC through
-`vswhere`/`vcvars64.bat`, and runs the built toolchain group with Ninja in
-Release. The route is Ninja Release because the archive is a release build with
-the release CRT: the Visual Studio generator is multi-configuration and ignores
-`CMAKE_BUILD_TYPE`, so a Debug build there mixed CRTs. The lane is where the
+`vswhere`/`vcvars64.bat`, and runs the built toolchain group under **two Windows
+generations**, Ninja and the default Visual Studio generator, both in Release.
+The archive is a release build with the release CRT, so a Debug build would mix
+CRTs; the provider passes `--config <type>` to `cmake --build` for the
+multi-configuration Visual Studio generator
+([#144](https://github.com/Antruly/uvp/issues/144)), and the default-generator
+leg observes that selector and the `build/<name>` output property. The lane is where the
 Windows claims in the local provider and the generated code are observed;
 `windows-source` only proves the TypeScript half. Its first runs found four
 lane/stand-in defects (quoted record text, the pkg-config PATH, the `.bat`/`.exe`
