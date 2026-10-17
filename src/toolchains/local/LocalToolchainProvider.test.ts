@@ -132,9 +132,9 @@ const signal = new AbortController().signal;
  * A program, not a banner in a script: the provider chooses this command's
  * arguments itself, so the program is baked into the fake rather than passed to
  * it, and the two hosts bake it in differently. See
- * `tests/support/fakeExecutable.ts` for the two mechanisms. The build tests use
- * the injected `syntheticRun` on Windows, because a copy of Node cannot be handed
- * `-S`/`--build`; this fake remains the subject of the inspection tests.
+ * `tests/support/fakeExecutable.ts` for the two mechanisms. The build tests start
+ * this fake on POSIX; on Windows they use the injected `syntheticRun`, because a
+ * copy of Node cannot be handed `-S`/`--build`.
  */
 const SUCCEEDS_QUIETLY = fileURLToPath(
   new URL("../../../tests/support/fixtures/succeedsQuietly.mjs", import.meta.url),
