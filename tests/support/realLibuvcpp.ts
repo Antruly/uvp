@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { EXE } from "../../src/toolchains/host.js";
+
 /**
  * The shared helper for the lanes that need a real compiler and a real libuvcpp:
  * find the install, generate a workspace, build it, run it, end it, clean up.
@@ -312,7 +314,11 @@ export const createWorkspace = async (
     port,
     root,
     buildDir,
-    binary: join(buildDir, WORKSPACE_NAME),
+    // The host names the executable, not the CMake target: on Windows the build
+    // writes `svc.exe`, and `existsSync` does not apply `CreateProcess`'s `.exe`
+    // suffix the way a spawn does. `EXE` is the product's own answer to how this
+    // host names an executable, and it is empty off Windows.
+    binary: join(buildDir, WORKSPACE_NAME + EXE),
   };
 };
 
