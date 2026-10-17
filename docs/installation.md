@@ -205,6 +205,21 @@ This prints the configuration block for your client and, with `--write`, adds it
 to the client's config file. The server runs over stdio; there is no port and no
 daemon.
 
+The configured command is `npx -y uvp-agents@<version> mcp`, pinned to the
+version you ran. The tool set is part of the interface, so an unpinned `npx`
+would silently upgrade the server under a configuration you wrote months
+earlier; run `uvp setup --write` again after upgrading uvp to move the pin.
+
+`--write` merges. Every other server in the file is kept, every other top-level
+key is kept, and only uvp's own entry is replaced. A file that exists and does
+not parse is refused — the command exits 2 and leaves the bytes exactly as they
+were — because that is more often someone's half-finished edit than a file to
+clean up. It writes no backup copy of the file; what it protects is the content
+it does not own, by keeping it in place.
+
+`--client` chooses `claude-code` (the default), `claude-desktop`, or `cursor`;
+`--path` writes somewhere other than `./.mcp.json` in the working directory.
+
 ### Claude Code
 
 ```bash
