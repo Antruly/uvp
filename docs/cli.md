@@ -549,6 +549,12 @@ named in `skipped_methods`. The same reasoning is why the contract declares no
 target mutation: the absence of the request is the guarantee, not a hope about
 what the request would have done.
 
+A request the capture cut short is skipped for a second reason, and shares the
+list: if the session's recording limit stored only a prefix of a request body,
+sending it would be a request the captured client never made, presented as the
+same one. The per-exchange `reason` says which of the two applies and, for a
+prefix, the byte limit that cut it.
+
 Each exchange is `matched`, `differs`, `skipped`, or `not_comparable`, and the
 run's `outcome` is `verified` only when every exchange it replayed was compared
 and matched. `partial` covers a run that compared fewer facts than the record

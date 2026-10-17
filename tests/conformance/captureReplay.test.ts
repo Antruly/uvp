@@ -331,6 +331,45 @@ describe("what a replay refuses to send", () => {
   );
 
   it(
+    "refuses to replay a request body the recording limit cut",
+    async () => {
+      // A body the session cut at 8 bytes is a prefix. Sending it would be a
+      // request the captured client never made — a different request presented
+      // as the same one — so there is nothing to replay, and the exchange is
+      // skipped by name rather than approximated.
+      //
+      // The target is `/bulk?bytes=0`, whose answer is empty whatever the
+      // request carried, so the *response* is whole: a matched verdict here
+      // would have to be about the request, not about a cut response body.
+      await withCapture({ max_body_bytes: 8, max_exchanges: 10 }, async (capture) => {
+        const sent = await through(capture, "/bulk?bytes=0", { body: "0123456789abcdef" });
+        expect(sent.status).toBe(200);
+
+        const output = await replay(capture);
+
+        expect(output["replayed"]).toBe(0);
+        expect(output["skipped"]).toBe(1);
+        // The field means "methods that were not sent", not "methods that
+        // write": this GET is in it because its recorded body is a prefix, and
+        // the summary keeps it so the count and the list stay one statement.
+        expect(output["skipped_methods"]).toEqual(["GET"]);
+        // Nothing was compared, so the run is not evidence about the service at
+        // all — the same verdict an empty or unreachable window gets.
+        expect(output["outcome"]).toBe("unknown");
+
+        const [entry] = exchangesOf(output);
+        expect(entry?.outcome).toBe("skipped");
+        expect(entry?.compared).toEqual([]);
+        // Nothing was sent, so there is no status to report as observed.
+        expect(entry?.observed_status).toBeUndefined();
+        expect(entry?.reason).toContain("request body");
+        expect(entry?.reason).toContain("8 bytes");
+      });
+    },
+    TIMEOUT,
+  );
+
+  it(
     "refuses a target that carries a path, rather than guessing where the path goes",
     async () => {
       await withCapture({}, async (capture) => {

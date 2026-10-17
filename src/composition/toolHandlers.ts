@@ -981,7 +981,8 @@ export const createToolHandlers = (
                 ? []
                 : [
                     `${String(replay.skipped)} recorded exchange(s) were not sent at all, because ` +
-                      `replaying a method that writes would write a second time: ` +
+                      `replaying a method that writes would write a second time, or because the ` +
+                      `recorded request body is a prefix: ` +
                       `${replay.skipped_methods.join(", ")}. Their absence is not a pass.`,
                   ]),
               ...(replay.not_comparable === 0

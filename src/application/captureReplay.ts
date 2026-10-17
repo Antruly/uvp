@@ -348,7 +348,8 @@ const replayLimitations = (
   if (skipped.length > 0) {
     limitations.push(
       `${String(skipped.length)} recorded exchange(s) were not sent at all (${[...new Set(skipped.map((entry) => entry.method.toUpperCase()))].sort().join(", ")}), ` +
-        "because replaying a method that writes would write a second time",
+        "because replaying a method that writes would write a second time, or because the recorded " +
+        "request body is a prefix; each skipped exchange names its own reason",
     );
   }
   const notComparable = exchanges.filter((entry) => entry.outcome === "not_comparable").length;
@@ -532,6 +533,24 @@ const replayOne = async (
       reason:
         `${method} was not replayed: sending it again would be a second write, and nothing here ` +
         "knows whether the endpoint is idempotent",
+      compared: [],
+    };
+  }
+
+  if (recorded.requestBodyTruncated) {
+    // The captured request is a prefix: the session's limit cut it before it was
+    // stored. Sending those bytes would be a request the captured client never
+    // made, presented as the same one — and the response it got would be
+    // compared against the recorded exchange as though the two were comparable.
+    // There is no whole request to replay, so this is a skip with a name, not an
+    // approximation.
+    return {
+      ...base,
+      outcome: "skipped",
+      reason:
+        "the recorded request body is a prefix — the capture retained at most " +
+        `${String(maxBodyBytes)} bytes of it — so replaying it would send a request the capture ` +
+        "never saw",
       compared: [],
     };
   }
