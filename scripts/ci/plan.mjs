@@ -187,14 +187,15 @@ const EXPECTED_LANES = [
   ["src/application/WebService.ts", ["code"]],
   ["docs/testing.md", ["docs"]],
   ["README.md", ["docs"]],
-  // Every lane, because `ci.yml` defines every lane. The three lines below it
-  // are the distinctions that keep this from being a directory-wide rule: a
-  // workflow that defines no lane of its own, a file that only lives under
-  // `.github/`, and the shared action the lanes use rather than define. Each one
+  // Every lane, because `ci.yml` defines every lane. The lines below it are the
+  // distinctions that keep this from being a directory-wide rule: a workflow
+  // that defines no lane of its own, a file that only lives under `.github/`,
+  // and the shared action the lanes use rather than define. Each one
   // is a claim about selection, and the last is the narrowest — if any of them
   // ever starts selecting `toolchain`, the plan says which path changed its mind.
   [".github/workflows/ci.yml", ["code", "docs", "package", "toolchain", "workflows"]],
   [".github/workflows/pages.yml", ["workflows"]],
+  [".github/workflows/release-please.yml", ["workflows"]],
   [".github/ISSUE_TEMPLATE/bug_report.yml", ["workflows"]],
   [".github/actions/npm-cache/action.yml", ["workflows"]],
   [".github/dependabot.yml", ["workflows"]],

@@ -1,0 +1,45 @@
+name: Release please
+
+# Opens and updates the release PR on `main`. It never edits a version or a tag
+# by hand: release-please computes both from the conventional commits, and the
+# tag is created when the release PR merges.
+#
+# Scope decision (Option B), recorded on #160:
+# https://github.com/Antruly/uvp/issues/160#issuecomment-6233157938
+#
+# This workflow does **not** push to the release PR branch. `sbom.cdx.json`
+# carries the version in two compound strings that `extra-files` cannot rewrite,
+# so its regeneration stays a maintainer step: after the bump, a maintainer runs
+# `npm run docs:generate` and commits the result to the release PR. The release
+# PR is expected to be red on `docs:check` until that commit; this workflow does
+# not claim the pre-regeneration head is green.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Open or update the release PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The release-please action needs to write the release branch, the release
+    # PR, and the labels it puts on that PR. Nothing else in this repository
+    # takes write access beyond the job that needs it.
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

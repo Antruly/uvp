@@ -3,25 +3,54 @@
 Releases are cut by release-please from conventional commits. No one edits a
 version by hand, and no one tags by hand.
 
-This page describes how a release is meant to be cut, and the parts of it that
-exist are the configuration (`release-please-config.json`), the changelog rules,
-and the gate on pull request titles. The workflow that would run release-please
-does not exist yet, so no release has been cut — see
-[Pre-release checks](#pre-release-checks).
+The configuration (`release-please-config.json`), the changelog rules, the gate
+on pull request titles, and the workflow that runs release-please
+(`.github/workflows/release-please.yml`, added in #160) exist. No release has
+been cut yet, so the flow below is written from the configuration and has not
+been observed end to end — see [Pre-release checks](#pre-release-checks).
 
 ## The flow
 
 1. A pull request merges to `main` with a conventional-commit title.
 2. release-please opens or updates a release PR. It carries the version bump, the
    changelog entry, and the files that embed a version.
-3. A maintainer reviews that PR like any other — the changelog is the part that
+3. A maintainer runs `npm run docs:generate` and commits the regenerated files to
+   the release PR, because `sbom.cdx.json` carries the version in two compound
+   strings that `extra-files` cannot rewrite. This is a maintainer step by
+   decision, not an oversight: the scope decision on #160
+   ([Option B](https://github.com/Antruly/uvp/issues/160#issuecomment-6233157938))
+   keeps the workflow to opening and updating the PR, so no workflow gets write
+   access to a pull request branch.
+4. A maintainer reviews that PR like any other — the changelog is the part that
    gets read, because it is what users will see.
-4. Merging the release PR tags the commit and publishes.
+5. Merging the release PR tags the commit and publishes.
 
 The tag has no `v` prefix (`include-v-in-tag: false`). The npm package is
 `uvp-agents`; the repository is `uvp`. That difference is intentional and
 permanent — the repository name says what the project is, the package name says
 what it installs.
+
+## The token, and what it does not trigger
+
+The workflow runs `googleapis/release-please-action` with the job's
+`GITHUB_TOKEN`; no additional credential is configured. That one job declares
+only the permissions the action needs (`contents: write`,
+`pull-requests: write`, `issues: write`), and every other workflow in this
+repository keeps `contents: read` or nothing.
+
+Two consequences are GitHub behaviour rather than this repository's policy, and
+both matter for a release:
+
+- The repository setting **Allow GitHub Actions to create and approve pull
+  requests** must be enabled, or the release PR cannot be opened.
+- A pull request opened with `GITHUB_TOKEN` does not trigger `pull_request`
+  workflows. The release PR therefore may carry no CI results of its own, and
+  the pre-release checks below are run by the maintainer rather than read from
+  the PR. Granting the workflow a personal access token so those workflows run
+  is a new-credential decision; it has not been made.
+
+Neither setting is observable from the source tree, so they are stated here
+rather than asserted by a check.
 
 ## Every release bumps the minor
 
@@ -73,8 +102,11 @@ first two and cannot update the last two without destroying them. That is why
 `package.json` and re-derives the `serialNumber` from the result. Nothing is
 silently stale if that step is skipped — `docs:check` runs on every pull request
 and compares the file byte for byte, so the release PR is red until it is
-regenerated. The lane that drives release-please does not exist yet, so this is a
-requirement on it rather than a description of it.
+regenerated. The release-please workflow does **not** perform that regeneration:
+the scope decision on #160 keeps it out, so no workflow takes write access to a
+pull request branch. The step is the maintainer's, and whether the PR shows the
+red check depends on whether CI ran on it at all — see
+[the token this workflow runs with](#the-token-and-what-it-does-not-trigger).
 
 ## Changelog sections
 
@@ -139,11 +171,11 @@ and what it does not.
 
 ## Pre-release checks
 
-These are the pre-release checks. Nothing runs them on your behalf yet: the
-configuration below is in place but the workflow that would drive it is not
-written, so no release has been cut and every step here is a thing a maintainer
-does by hand. The intent is a lane that fails closed — nothing publishes if any
-of this fails:
+These are the pre-release checks. The release workflow does not run them: it
+only opens and updates the release PR. No release has been cut yet, so every
+step here is still a thing a maintainer does by hand, on the release PR's head.
+The intent is a lane that fails closed — nothing publishes if any of this
+fails:
 
 ```bash
 npm ci
@@ -218,6 +250,9 @@ Before merging a release PR:
       `serialNumber` both change with the version.
 - [ ] The packaged install was run, not assumed.
 - [ ] `uvp --version` reports the new version after a packaged install.
+- [ ] The [pre-release checks](#pre-release-checks) were run on the release PR's
+      head, because the token that opened it does not trigger `pull_request`
+      workflows.
 - [ ] The release PR's `Human owner:` line is filled in. See the
       [AI contribution policy](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md#ai-contribution-policy).
 

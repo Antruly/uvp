@@ -212,9 +212,11 @@ MySQL 和 PostgreSQL 走的是同一份生成代码、同一条运行时加载�
 对任何服务都能用，不只对 uvp 生成的。它还缺的是触达范围：工具链 provider 的
 **端口（port）**已经定义，`local` provider 已实现；容器与远程 SSH provider 尚未编写。
 
-**尚未开始。** 发布自动化：`release-please-config.json` 和针对 PR 标题的
-传统提交（Conventional Commits）门禁都已经存在，但还没有任何工作流去跑它们，
-所以至今没有切过版本，包只能从 clone 或 tarball 安装。路线图里列出的加固项
+**进行中。** 发布自动化：`release-please-config.json`、针对 PR 标题的
+传统提交（Conventional Commits）门禁，以及运行 release-please 的工作流
+（`.github/workflows/release-please.yml`，#160）都已存在，但至今没有切过版本，
+包只能从 clone 或 tarball 安装。发布 PR 上的派生文件仍由维护者手动重新生成，
+这是 #160 记录在案的决定。路线图里列出的加固项
 只剩下最后一项：`local-msvc` 的 Windows 通道。同一列表里的其余各项已经落地并有检查兜底：
 `.github/` 下的每个 action 都固定到 SHA 并在旁边写明release
 （`npm run verify:actions`），tarball 无论从工作树打包、从解包到另一路径的副本打包，
