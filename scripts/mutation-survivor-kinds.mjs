@@ -26,7 +26,9 @@
  * belongs to. The report's own embedded `source` is the authority for the restore
  * — never a copy taken when the run started, which is how a probe silently reverts
  * a refactor — the file is restored in a `finally`, a signal restores it too, and
- * every file is compared against the report's source again at the end.
+ * every file is compared against the report's source again at the end. That same
+ * source is what each location is validated against: a span that names no place in
+ * it is `undetermined`, not a mutation applied to a program nobody described.
  *
  * Usage: `node scripts/mutation-survivor-kinds.mjs [report]`
  *
@@ -69,15 +71,53 @@ const lineStarts = (source) => {
 // mutated span is `[start, end)` in characters.
 const offset = (starts, position) => starts[position.line - 1] + (position.column - 1);
 
-/** The source with one mutant's replacement applied to the span it reports. */
-const mutated = (source, mutant) => {
-  const starts = lineStarts(source);
-  return (
-    source.slice(0, offset(starts, mutant.location.start)) +
-    mutant.replacement +
-    source.slice(offset(starts, mutant.location.end))
+/**
+ * The character span a mutant names, or the reason it names nothing applicable.
+ *
+ * The report is a file like any other and a location is arithmetic until it is
+ * checked: `starts[line - 1]` is `undefined` past the last line, and `slice` turns
+ * the resulting `NaN` into `""` or the whole source — a program nobody described,
+ * classified by the compiler's answer about it. A mutant that does not fit is
+ * `undetermined`, the same third state this file keeps for a command that failed
+ * without naming a diagnostic.
+ */
+const spanOf = (source, starts, mutant) => {
+  const { start, end } = mutant.location ?? {};
+  const named = [start, end].every(
+    (position) =>
+      Number.isInteger(position?.line) &&
+      position.line >= 1 &&
+      Number.isInteger(position?.column) &&
+      position.column >= 1,
   );
+  if (!named) {
+    return { problem: "the report names no complete 1-based location" };
+  }
+  if (typeof mutant.replacement !== "string") {
+    return { problem: "the report names no replacement text" };
+  }
+  const at = (position) => (position.line > starts.length ? undefined : offset(starts, position));
+  const from = at(start);
+  const to = at(end);
+  if (from === undefined || to === undefined) {
+    return {
+      problem:
+        `the location ${String(start.line)}:${String(start.column)}–` +
+        `${String(end.line)}:${String(end.column)} is past the source's last line`,
+    };
+  }
+  if (to > source.length) {
+    return { problem: "the location ends past the end of the source" };
+  }
+  if (to < from) {
+    return { problem: "the location ends before it starts" };
+  }
+  return { from, to };
 };
+
+/** The source with one mutant's replacement applied to the span it reports. */
+const mutated = (source, { from, to }, replacement) =>
+  source.slice(0, from) + replacement + source.slice(to);
 
 /**
  * The project's own compiler, resolved from the package that owns it rather than
@@ -200,13 +240,25 @@ const main = () => {
     }
 
     const mutants = [];
+    const starts = lineStarts(source);
     for (const mutant of entry.mutants ?? []) {
       if (!SURVIVING_STATUSES.has(mutant.status)) continue;
-      const site = `${String(mutant.location.start.line)}:${String(mutant.location.start.column)}`;
+      const site = `${String(mutant.location?.start?.line ?? "?")}:${String(mutant.location?.start?.column ?? "?")}`;
+      const span = spanOf(source, starts, mutant);
+      if (span.problem !== undefined) {
+        mutants.push({
+          site,
+          mutator: mutant.mutatorName,
+          replacement: mutant.replacement,
+          verdict: "undetermined",
+          reason: span.problem,
+        });
+        continue;
+      }
       pending = { file, source };
       let verdict;
       try {
-        writeFileSync(file, mutated(source, mutant), "utf8");
+        writeFileSync(file, mutated(source, span, mutant.replacement), "utf8");
         verdict = typecheck(command);
       } finally {
         restorePending();

@@ -192,6 +192,61 @@ const CASES = [
     excludes: ["| **total**"],
     covers: ["a report that could not be read is reported rather than treated as no survivors"],
   },
+  {
+    name: "a location past the source's last line is undetermined, not compiling",
+    report: report([
+      {
+        mutatorName: "StringLiteral",
+        replacement: "1",
+        status: "Survived",
+        location: { start: { line: 9, column: 11 }, end: { line: 9, column: 12 } },
+      },
+    ]),
+    status: 0,
+    seen: 1,
+    includes: [
+      "| src/example.ts | 1 | 0 | 0 | 1 |",
+      "Unknown: 1 survivor(s) the typecheck did not answer for.",
+      "9:11: the location 9:11–9:12 is past the source's last line",
+    ],
+    excludes: ["| src/example.ts | 1 | 1 | 0 | 0 |"],
+    covers: [
+      "a location past the last line is undetermined rather than applied as an offset of NaN, " +
+        "which would leave the replacement prepended to an unmodified program classified as " +
+        "compiling",
+    ],
+  },
+  {
+    name: "a location that ends before it starts is undetermined",
+    report: report([
+      {
+        mutatorName: "StringLiteral",
+        replacement: "1",
+        status: "Survived",
+        location: { start: { line: 2, column: 12 }, end: { line: 1, column: 11 } },
+      },
+    ]),
+    status: 0,
+    seen: 1,
+    includes: ["| src/example.ts | 1 | 0 | 0 | 1 |", "2:12: the location ends before it starts"],
+    covers: [
+      "an inverted span is undetermined, because slicing it duplicates the source rather than " +
+        "describing a mutation",
+    ],
+  },
+  {
+    name: "a survivor with no location is undetermined",
+    report: report([{ mutatorName: "StringLiteral", replacement: "1", status: "Survived" }]),
+    status: 0,
+    seen: 1,
+    includes: [
+      "| src/example.ts | 1 | 0 | 0 | 1 |",
+      "?:?: the report names no complete 1-based location",
+    ],
+    covers: [
+      "a survivor with no location is named rather than crashing the run on `location.start.line`",
+    ],
+  },
 ];
 
 /**
@@ -208,6 +263,9 @@ const READINGS = [
   "The pristine tree does not typecheck (TS2375)",
   "Nothing was classified.",
   "Could not read",
+  "is past the source's last line",
+  "the location ends before it starts",
+  "the report names no complete 1-based location",
 ];
 
 /**
@@ -342,9 +400,10 @@ const main = async () => {
       `${String(READINGS.length)} readings — compiling, refused-with-a-diagnostic and ` +
       "undetermined are each counted and tabled as this check expects, the diagnostics behind " +
       "them are tallied with a survivor naming two counted under both, a mutation is applied to " +
-      "the span its report names and the file is restored after it, a moved file and a report " +
-      "without a source stay unclassified, and a tree that does not typecheck is refused before " +
-      "anything is classified",
+      "the span its report names and the file is restored after it, a location past the last line " +
+      "or ending before it starts — or absent — is undetermined rather than applied, a moved file " +
+      "and a report without a source stay unclassified, and a tree that does not typecheck is " +
+      "refused before anything is classified",
   );
 };
 
