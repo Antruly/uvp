@@ -53,7 +53,8 @@ largest remaining gap is not a feature: **release automation and publishing**.
      only after #161.
    - **#163** clean-environment setup acceptance — harness/tests may start now;
      the real `npx` run only after #161.
-   - **#178** first-release support matrix — independent, can start now.
+   - **#178** first-release support matrix — independent, open and unclaimed
+     after the earlier claim was released; can start now.
    - **#179** first-release notes and upgrade guidance — independent, can start
      now; finalize before the release PR merges.
 2. **Windows/MSVC polish.** MSVC link diagnostics (#142 / PR #143) and the
@@ -61,8 +62,9 @@ largest remaining gap is not a feature: **release automation and publishing**.
    is the external Chocolatey/pkgconfiglite failure on the Windows MSVC lane
    (#166); the maintainer decides whether to wait, rerun, pin, or mark it a named
    gap.
-3. **Remaining reliability fix.** Workspace-name validation (#87 / PR #91) is
-   clean and awaiting review/approval; it is not a new claim.
+3. **Remaining reliability fix.** Workspace-name validation (#87 / PR #91): the
+   review's blocking reserved-name finding was fixed at `dc91b78`; CI is green
+   and the PR is a draft awaiting re-review. It is not a new claim.
 4. **Documentation and status accuracy.** #178 (support matrix) and #179
    (release notes) are the parallel documentation lane.
 5. **Agent onboarding acceptance.** #163 is the clean-environment proof of
@@ -77,28 +79,29 @@ Claim by commenting with your identity, as described in
 [AI engineer operations](ai-engineer-operations.md#task-taking-mode). The
 dependency is on **merge/publish/execute**, not on starting the preparation.
 
-| Task                                     | Issue | Can start              | Execute after            | Status                                |
-| ---------------------------------------- | ----- | ---------------------- | ------------------------ | ------------------------------------- |
-| Release-please workflow                  | #160  | Now                    | —                        | **Claimed by Antruly-dev-1**; PR #177 |
-| npm publish                              | #161  | Now                    | #160 and the release tag | Open, unclaimed                       |
-| MCP registry publish                     | #162  | Now (validate/dry-run) | #161                     | Open, unclaimed                       |
-| Clean-environment setup acceptance       | #163  | Now (harness/tests)    | #161                     | Open, unclaimed                       |
-| First-release support matrix             | #178  | Now                    | —                        | Open, unclaimed                       |
-| First-release notes and upgrade guidance | #179  | Now                    | #161 for final content   | Open, unclaimed                       |
+| Task                                     | Issue | Can start              | Execute after            | Status                                   |
+| ---------------------------------------- | ----- | ---------------------- | ------------------------ | ---------------------------------------- |
+| Release-please workflow                  | #160  | Now                    | —                        | **Claimed by Antruly-dev-1**; PR #177    |
+| npm publish                              | #161  | Now                    | #160 and the release tag | Open, unclaimed                          |
+| MCP registry publish                     | #162  | Now (validate/dry-run) | #161                     | Open, unclaimed                          |
+| Clean-environment setup acceptance       | #163  | Now (harness/tests)    | #161                     | Open, unclaimed                          |
+| First-release support matrix             | #178  | Now                    | —                        | Open, unclaimed (earlier claim released) |
+| First-release notes and upgrade guidance | #179  | Now                    | #161 for final content   | Open, unclaimed                          |
 
 One active task per engineer. The claim comment is the ownership record until the
 tracker assignment exists. Do not merge, publish, or run the final acceptance
-before the dependency has landed.
+before the dependency has landed. Antruly-dev-1 briefly claimed #178, released it
+at 11:25:10Z to keep one active task, and no branch or PR was opened for it.
 
 ## Suggested parallel lanes
 
 These are recommendations for self-claiming, not assignments:
 
-| Engineer      | Now                              | Next                  |
-| ------------- | -------------------------------- | --------------------- |
-| Antruly-dev-1 | #160 (in progress)               | #161 npm publish      |
-| Antruly-dev-2 | #178 support matrix              | #179 release notes    |
-| Antruly-dev-3 | #162 registry validation/dry-run | #163 setup acceptance |
+| Engineer      | Now                          | Next                                               |
+| ------------- | ---------------------------- | -------------------------------------------------- |
+| Antruly-dev-1 | #160 (in progress)           | #161 npm publish                                   |
+| Antruly-dev-2 | #178 support matrix          | #179 release notes                                 |
+| Antruly-dev-3 | #91 re-review/merge (author) | #162 registry validation/dry-run → #163 after #161 |
 
 The lanes are independent until the execute gate. An engineer who finishes early
 may claim the next task in the table; one active task per engineer still applies.
@@ -107,7 +110,7 @@ may claim the next task in the table; one active task per engineer still applies
 
 | Area                      | Issue | PR  | Status                      | Next                                     |
 | ------------------------- | ----- | --- | --------------------------- | ---------------------------------------- |
-| Workspace name validation | #87   | #91 | PR clean, draft             | Review/approve; no new claim             |
+| Workspace name validation | #87   | #91 | PR clean, draft (`dc91b78`) | Awaiting re-review; no new claim         |
 | Windows MSVC CI           | #166  | —   | External Chocolatey failure | Maintainer decision: wait/rerun/pin/skip |
 | Mutation attribution      | #41   | —   | Upstream blocked            | Watch Stryker #6210/#6214                |
 
@@ -165,7 +168,7 @@ the documented support matrix matches the lanes that actually ran.
 
 The current estimate is **about one to two weeks of focused work** for a first
 public release. The critical path is #160 → #161 → #162/#163, with #178/#179 in
-parallel and #91 waiting on review/approval. The release pipeline has never been
+parallel and #91 awaiting re-review after the author's `dc91b78` fix. The release pipeline has never been
 run, so this estimate is derived rather than observed.
 
 ## How to claim
