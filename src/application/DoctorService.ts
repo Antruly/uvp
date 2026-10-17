@@ -125,18 +125,24 @@ export const headerProbeAt = (installPrefix: string | undefined): HeaderProbe =>
       join(installPrefix, "include", header),
       join(installPrefix, header),
     ];
+    // Set when a candidate failed in a way that is neither presence nor
+    // absence. The walk continues: a later layout holding the header is a
+    // positive observation and decides the question. Only when none does is the
+    // answer undecided rather than negative.
+    let undecided = false;
     for (const candidate of candidates) {
       try {
         await stat(candidate);
         return true;
       } catch (cause) {
         const code = (cause as NodeJS.ErrnoException).code;
-        // The first two layouts not existing is the ordinary case; only an
-        // unreadable-but-present path is genuinely undecidable.
-        if (code === "EACCES" || code === "EPERM") return undefined;
+        // ENOENT and ENOTDIR are the two ways a path is simply not there. Any
+        // other failure — a permission error, a symlink loop, an I/O error — is
+        // a look that did not happen, and "could not look" is not absence.
+        if (code !== "ENOENT" && code !== "ENOTDIR") undecided = true;
       }
     }
-    return false;
+    return undecided ? undefined : false;
   };
 };
 
