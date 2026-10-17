@@ -1116,10 +1116,11 @@ substitution rather than the behaviour, and #61's fix removes them along with th
 siblings the compiler already refuses. The comparator is a scratch script under `/tmp`,
 so these numbers are quotable but not re-runnable from the repository — the same gap
 [#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
-**67** survivors are still unread — `bundleDiff.ts` 54 (52 readable), `evidence.ts` 8
-(2), `ToolchainProvider.ts` 5 — **59** readable once the classification below is
+**62** survivors are still unread — `bundleDiff.ts` 54 (52 readable), `evidence.ts` 8
+(2), `ToolchainProvider.ts` 5 — **54** readable once the classification below is
 applied. The baseline's **78** have shrunk because tests the earlier reads added killed
-seven of them, and the four in the `unknown.ts` read above are the next four.
+seven of them, and the four `unknown.ts` survivors and five `ToolchainProvider.ts`
+survivors read below are the next nine.
 
 **`unknown.ts`'s four have been read, and all four are pinned**
 ([#66](https://github.com/Antruly/uvp/issues/66)). The file is the vocabulary for
@@ -1133,6 +1134,19 @@ table for the id: 22 hex digits accepted, 21 and 23 refused, trailing characters
 refused, and an `unk_` that does not start the id refused — the last two being the
 inputs the dropped anchors would have accepted. The file measures **100.00%** on the
 branch, 43 killed of 43, against 90.70% before the read.
+
+**`ToolchainProvider.ts`'s five have been read, and they are four rows of the feature
+table plus one sentence** ([#67](https://github.com/Antruly/uvp/issues/67)). The test
+file pinned the whole requirements row for websocket, soap, http3, and grpc, and never
+looked at http2's `cmakeOptions` or at db at all — so `UVCPP_ENABLE_NGHTTP2` and
+`UVCPP_ENABLE_DB` could become `[]` or `""` with the suite green, and the gap record a
+caller acts on would name no switch. Both rows are now pinned whole, switch, config
+symbol, and header together. The fifth survivor was the no-probe branch's reason text,
+unpinned while its sibling — probe answered `undefined` — was only checked for
+mentioning the header, so the two third-state sentences were interchangeable. Both are
+now asserted exactly, because which sentence a caller reads is what tells them whether
+they forgot to supply a probe or the install could not be read. The file measures
+**100.00%** on the branch, 90 killed of 90, against 94.44% before the read.
 
 **A third of the survivor table is damage the build refuses, which segments the
 queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the

@@ -91,6 +91,31 @@ describe("FEATURE_REQUIREMENTS", () => {
     ]);
   });
 
+  it("gates HTTP/2 on the nghttp2 switch, which is the only way the module is built", () => {
+    // The config symbol decides whether *this* install has http2; `cmakeOptions`
+    // is what the gap record tells a caller to turn on to get one. Without the
+    // switch the record says http2 is missing and names nothing to change, which
+    // is an absence the caller cannot act on. Pin the whole row so the switch,
+    // the symbol, and the header move together.
+    expect(FEATURE_REQUIREMENTS.http2).toEqual({
+      cmakeOptions: ["UVCPP_ENABLE_NGHTTP2"],
+      configSymbols: ["UVCPP_NGHTTP2_ENABLE"],
+      header: "http2/uvcpp_h2_common.h",
+    });
+  });
+
+  it("gates db on its single switch, which is the whole requirement", () => {
+    // db is the one feature whose requirement is a single switch and a single
+    // symbol. There is no second layer to notice a mistake here, so the row is
+    // pinned whole: a build that drops `UVCPP_ENABLE_DB` installs no db module,
+    // and the gap record has to name that exact switch.
+    expect(FEATURE_REQUIREMENTS.db).toEqual({
+      cmakeOptions: ["UVCPP_ENABLE_DB"],
+      configSymbols: ["UVCPP_DB_ENABLE"],
+      header: "db",
+    });
+  });
+
   it("gives grpc no switches at all, because libuvcpp declares none", () => {
     // The empty list means "nothing to turn on", not "nothing needed": grpc is
     // decided by whether its header ships, which is why it takes the other path.
@@ -198,19 +223,34 @@ describe("assessFeatures", () => {
       const assessment = await assessFeatures(["grpc"], [], probeAnswering(undefined));
       expect(assessment.unmet).toEqual([]);
       expect(assessment.satisfied).toEqual([]);
-      expect(assessment.undetermined).toHaveLength(1);
-      expect(assessment.undetermined[0]?.feature).toBe("grpc");
-      expect(assessment.undetermined[0]?.reason).toContain(FEATURE_REQUIREMENTS.grpc.header);
+      expect(assessment.undetermined).toEqual([
+        {
+          feature: "grpc",
+          reason:
+            "libuvcpp has no configuration switch for grpc, and grpc could not be inspected under the install root.",
+        },
+      ]);
     });
 
     it("reports grpc undetermined when no probe was supplied at all", async () => {
       // An install uvp does not know how to read is the same third state as an
       // unreadable one. The absence of a probe is a limit on uvp, not on libuvcpp.
+      //
+      // The reason is pinned exactly, because it is the only thing that tells a
+      // caller *which* third state this is: no probe existed to run, as against
+      // a probe that ran and could not answer. The two sentences below differ in
+      // exactly that clause, and a caller that gets the wrong one goes looking
+      // for a broken install instead of supplying the probe it forgot.
       const assessment = await assessFeatures(["grpc"], []);
       expect(assessment.unmet).toEqual([]);
       expect(assessment.satisfied).toEqual([]);
-      expect(assessment.undetermined).toHaveLength(1);
-      expect(assessment.undetermined[0]?.feature).toBe("grpc");
+      expect(assessment.undetermined).toEqual([
+        {
+          feature: "grpc",
+          reason:
+            "libuvcpp has no configuration switch for grpc, and no header probe was supplied to check for grpc.",
+        },
+      ]);
     });
   });
 

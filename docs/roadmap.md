@@ -1056,8 +1056,12 @@ the two rows [#61](https://github.com/Antruly/uvp/issues/61) is for.
 ([#66](https://github.com/Antruly/uvp/issues/66)): its four current survivors — two
 reason members that could become the empty string with the suite green, and the two
 anchors of the id grammar — are pinned by an enumeration of the published vocabulary
-and a boundary table for `unk_` ids, and the file moves to **100.00%**, 43 killed of 43. The other **67** survivors are still unread, **59** of them readable. The
-instrument for it is committed
+and a boundary table for `unk_` ids, and the file moves to **100.00%**, 43 killed of 43. `ToolchainProvider.ts`'s five have been read as well
+([#67](https://github.com/Antruly/uvp/issues/67)): four were the http2 and db rows of
+the feature table, whose `cmakeOptions` no test read, and the fifth was the no-probe
+branch's reason, which now is asserted exactly and told apart from the unreadable
+probe's. The file moves to **100.00%**, 90 killed of 90. The other **62** survivors
+are still unread, **54** of them readable. The instrument for it is committed
 (`scripts/mutation-survivor-kinds.mjs`, with a producer golden in `check:pr`) rather
 than left in a scratch directory.
 [testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.
