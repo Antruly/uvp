@@ -488,7 +488,15 @@ class LocalToolchainClient implements ToolchainClient {
     }
 
     const compileStart = Date.now();
-    const buildArgs = ["--build", request.buildDir, ...jobs];
+    // `--config` is the configuration selector for multi-configuration generators
+    // (Visual Studio, Xcode); they ignore `CMAKE_BUILD_TYPE`, which the configure
+    // step sets for single-configuration ones. Passing it unconditionally is
+    // safe: CMake accepts it with Makefiles and Ninja and keeps the configure's
+    // type — measured on this host, configure Debug then
+    // `cmake --build build --config Release` exits 0 and builds Debug. Without it,
+    // `uvp build --build-type Release` built Debug on the default Windows and
+    // macOS generators.
+    const buildArgs = ["--build", request.buildDir, "--config", request.buildType, ...jobs];
     if (request.target !== undefined) buildArgs.push("--target", request.target);
     if (request.clean) buildArgs.push("--clean-first");
 
