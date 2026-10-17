@@ -279,10 +279,10 @@ describe("parseAssertionList", () => {
 describe("the regex forms and the evaluator", () => {
   it("puts a body regex where the evaluator reads it, so the check can fail", () => {
     // The pattern belongs in `expected`, which is where `bodyMatches` reads it —
-    // the shape `header_matches` already used. In `target` it is never read, and
-    // the evaluator falls back to the empty pattern, which matches every body:
-    // `uvp assert --assert 'body~=x'` would report success whatever came back,
-    // which is the worst outcome a verification tool can produce.
+    // the shape `header_matches` already used. In `target` it is never read, so
+    // the assertion would carry no expectation: the engine reports that as a
+    // check it could not run, and `uvp assert --assert 'body~=x'` would come
+    // back without the answer it was asked for.
     expect(parseAssertion("body~=^hello$")).toEqual({ kind: "body_matches", expected: "^hello$" });
     // Cross-checked against the evaluator's own reading of the field, so this
     // test cannot pass merely by agreeing with the lowering.

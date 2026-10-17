@@ -50,6 +50,10 @@ const only = (record: ExchangeRecord, spec: AssertionSpec): AssertionOutcome => 
   return outcome;
 };
 
+/** A record whose response carries exactly these headers, with all of them read. */
+const withHeaders = (headers: Record<string, string>): ExchangeRecord =>
+  exchange({ responseHeaders: headers });
+
 describe("evaluateAssertions", () => {
   it("returns one outcome per spec, in the order it was given them", () => {
     const outcomes = evaluateAssertions(exchange(), [
@@ -255,9 +259,6 @@ describe("status_in", () => {
 });
 
 describe("header assertions", () => {
-  const withHeaders = (headers: Record<string, string>): ExchangeRecord =>
-    exchange({ responseHeaders: headers });
-
   it("header_equals passes on an exact match, lower-casing the target it looks up", () => {
     const outcome = only(withHeaders({ "content-type": "application/json" }), {
       kind: "header_equals",
@@ -317,6 +318,53 @@ describe("header assertions", () => {
     expect(outcome.observed).toBeUndefined();
   });
 
+  // DEFECT (reported): `headerExists` builds its message as `header <name>
+  // present` unconditionally, so a failing header_exists — which failed *because*
+  // the header was absent — is surfaced by uvp_assert_exchange as the failure
+  // text "header authorization present". The message must state the observation
+  // it made, as header_equals does ("header content-type is absent").
+  it("header_exists describes the absence it found, rather than claiming presence", () => {
+    const outcome = only(withHeaders({}), { kind: "header_exists", target: "Authorization" });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe("header authorization is absent");
+  });
+
+  it("header_exists describes the presence it found, whatever the value was", () => {
+    // The other outcome of the same choice. A message built without reading it
+    // back reports a pass as "is absent" and a failure as "is present", which is
+    // the defect the test above names, one direction over.
+    const outcome = only(withHeaders({ authorization: "Bearer token" }), {
+      kind: "header_exists",
+      target: "Authorization",
+    });
+    expect(outcome.status).toBe("satisfied");
+    expect(outcome.observed).toBe("Bearer token");
+    expect(outcome.message).toBe("header authorization is present");
+  });
+
+  it("looks up the empty name when a header assertion names no target", () => {
+    // `target` is optional in the contract, so a spec without one is reachable.
+    // What it looks up is then the empty string — a name that is not in the
+    // response — rather than a word the engine invents for the occasion. The
+    // message reads with the gap in it because the name really is empty.
+    const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+      kind: "header_equals",
+      expected: "text/plain",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe("header  is absent");
+  });
+});
+
+/**
+ * The kind whose expectation is a pattern rather than a value.
+ *
+ * A describe of its own rather than a group inside the one above, because
+ * `header_matches` is the one header kind that compiles its expectation instead
+ * of comparing it, so what an expectation may be is a question about this kind
+ * alone — and because the group above had passed the file's own 150-line limit.
+ */
+describe("header_matches", () => {
   it("header_matches passes when the value matches the pattern", () => {
     expect(
       only(withHeaders({ "content-type": "application/json; charset=utf-8" }), {
@@ -374,41 +422,60 @@ describe("header assertions", () => {
     expect(outcome.message).toContain("invalid regular expression");
   });
 
-  // DEFECT (reported): `headerExists` builds its message as `header <name>
-  // present` unconditionally, so a failing header_exists — which failed *because*
-  // the header was absent — is surfaced by uvp_assert_exchange as the failure
-  // text "header authorization present". The message must state the observation
-  // it made, as header_equals does ("header content-type is absent").
-  it("header_exists describes the absence it found, rather than claiming presence", () => {
-    const outcome = only(withHeaders({}), { kind: "header_exists", target: "Authorization" });
-    expect(outcome.status).toBe("unmet");
-    expect(outcome.message).toBe("header authorization is absent");
-  });
+  it.each([
+    [42, "the expected value is not a pattern: 42"],
+    [{ a: 1 }, 'the expected value is not a pattern: {"a":1}'],
+    [null, "the expected value is not a pattern: null"],
+  ] as const)(
+    "header_matches reports %j as a check that cannot run, not a match",
+    (expected, message) => {
+      // Read as the empty string, an expectation that is not a string matched
+      // everything: this reported `satisfied`, a claim about the service for a
+      // check that never compared the caller's expectation with the header. The
+      // message has to name the value, or the caller cannot tell which
+      // expectation the engine could not use.
+      const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+        kind: "header_matches",
+        target: "content-type",
+        expected,
+      });
+      expect(outcome.status).toBe("undetermined");
+      expect(outcome.observed).toBe("text/plain");
+      expect(outcome.message).toBe(message);
+    },
+  );
 
-  it("header_exists describes the presence it found, whatever the value was", () => {
-    // The other outcome of the same choice. A message built without reading it
-    // back reports a pass as "is absent" and a failure as "is present", which is
-    // the defect the test above names, one direction over.
-    const outcome = only(withHeaders({ authorization: "Bearer token" }), {
-      kind: "header_exists",
-      target: "Authorization",
-    });
-    expect(outcome.status).toBe("satisfied");
-    expect(outcome.observed).toBe("Bearer token");
-    expect(outcome.message).toBe("header authorization is present");
-  });
-
-  it("looks up the empty name when a header assertion names no target", () => {
-    // `target` is optional in the contract, so a spec without one is reachable.
-    // What it looks up is then the empty string — a name that is not in the
-    // response — rather than a word the engine invents for the occasion. The
-    // message reads with the gap in it because the name really is empty.
+  it("header_matches reports a missing expectation as absent, not as a pattern", () => {
     const outcome = only(withHeaders({ "content-type": "text/plain" }), {
-      kind: "header_equals",
-      expected: "text/plain",
+      kind: "header_matches",
+      target: "content-type",
     });
-    expect(outcome.status).toBe("unmet");
-    expect(outcome.message).toBe("header  is absent");
+    expect(outcome.status).toBe("undetermined");
+    expect(outcome.message).toBe("the expected value is not a pattern: absent");
+  });
+
+  it("header_matches reports the same fact in the negated direction", () => {
+    // The defect read backwards: negating `satisfied` gives `unmet`, a statement
+    // that the header does *not* match a pattern nobody supplied.
+    const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+      kind: "header_matches",
+      target: "content-type",
+      expected: 42,
+      negate: true,
+    });
+    expect(outcome.status).toBe("undetermined");
+    expect(outcome.message).toBe("negated: the expected value is not a pattern: 42");
+  });
+
+  it("bounds the expectation it names, so a document cannot become a message", () => {
+    const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+      kind: "header_matches",
+      target: "content-type",
+      expected: { note: "x".repeat(200) },
+    });
+    expect(outcome.status).toBe("undetermined");
+    expect(outcome.message.endsWith("…")).toBe(true);
+    expect(outcome.message.length).toBeLessThan(120);
   });
 });
 
@@ -562,6 +629,29 @@ describe("body assertions", () => {
     const outcome = only(withBody("anything"), { kind: "body_matches", expected: "[" });
     expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("invalid regular expression");
+  });
+
+  it.each([
+    [42, "the expected value is not a pattern: 42"],
+    [["^service"], 'the expected value is not a pattern: ["^service"]'],
+  ] as const)(
+    "body_matches reports %j as a check that cannot run, not a match",
+    (expected, message) => {
+      // The same reading as `header_matches`, over the body. An array of patterns
+      // is the tempting input: it looks like "any of these", and read as the
+      // empty string it reported a body that matches nothing as matching.
+      const outcome = only(withBody("service ready"), { kind: "body_matches", expected });
+      expect(outcome.status).toBe("undetermined");
+      expect(outcome.observed).toBe("service ready");
+      expect(outcome.message).toBe(message);
+    },
+  );
+
+  it("body_matches keeps the bounded excerpt when no pattern was given", () => {
+    const outcome = only(withBody("x".repeat(600)), { kind: "body_matches", expected: 42 });
+    expect(outcome.status).toBe("undetermined");
+    expect(String(outcome.observed)).toHaveLength(512);
+    expect(outcome.message).toBe("the expected value is not a pattern: 42");
   });
 
   it("compiles a caller's pattern in unicode mode", () => {
@@ -971,7 +1061,12 @@ describe("status", () => {
       durationMs: 5,
     });
     for (const kind of ASSERTION_KINDS) {
-      expect(only(complete, { kind, target: "$.ok", expected: 1 }).status, kind).not.toBe(
+      // Each kind gets an expectation it can use. `body_matches` compiles its
+      // expectation as a pattern, so a number is a check that cannot run rather
+      // than a fact the record is missing — and the record is what this control
+      // is about.
+      const expected = kind === "body_matches" ? "^\\{" : 1;
+      expect(only(complete, { kind, target: "$.ok", expected }).status, kind).not.toBe(
         "undetermined",
       );
     }

@@ -1074,8 +1074,11 @@ production, and every part of that question is optional, so all four of their
 conditionals were mutated in both directions and the cap at 80 characters four ways.
 
 **What the read killed is more than the readable survivors, and that is a finding about
-the class below.** Of the 129 survivors the baseline reported, **107** are gone from
-the table: **84 of the 90 readable**, and **23 of the 39 the compiler refuses**. A
+the class below.** Of the 129 survivors the baseline reported, **107** were gone when
+the read landed: **84 of the 90 readable**, and **23 of the 39 the compiler refuses**.
+[#61](https://github.com/Antruly/uvp/issues/61) added the other four — the read's last
+two readable rows and the two refused siblings at the same sites — so **111** of the
+129 are now gone and the table holds **18**. A
 refused mutant is not therefore an unkillable one — the mutation group runs `src/`
 through Vitest, which strips types rather than checking them, so a refused mutant whose
 behaviour a new test exercises is a kill like any other, and this read has 23 of them.
@@ -1096,7 +1099,7 @@ walk. That is a third state collapsing into a resolved value, which is the damag
 #61's two rows do as well, so the row is pinned rather than recorded: two rows in the
 refusal table, and the first sweep's 23 survivors are 22.
 
-The **22** that remain are recorded rather than chased. **Four** are equivalent
+The **18** that remain are recorded rather than chased. **Four** are equivalent
 mutants, measured by driving the compiled module — mutated and unmutated — through
 **121,908** inputs: 23 exchange records against all 12 assertion kinds × 10
 expectations × 11 targets × 2 negation states, each spec with and without an
@@ -1105,15 +1108,19 @@ is a shape walk that counts a key present with the value `undefined` as a differ
 because that is the difference an object-literal mutant makes; **no input distinguishes
 any of the four**, while four controls travelling with them were caught on **392**,
 **1532**, **440** and **4680** of those inputs, so the verdict is the comparison's
-finding rather than a comparison that cannot see. A fifth measured site, `:85:11`'s
-`if (close < 0)`, is one of the 16 the compiler refuses, which is why the four above
-are four. The two left for a fix are [#61](https://github.com/Antruly/uvp/issues/61):
-`header_matches` and `body_matches` at `:285:71` and `:315:71` read an expectation that
-is not a string as the empty pattern, so a check that could not run reports
-`satisfied` — measured at **1280** and **7744** of the same 121,908 inputs. Those rows
-are left in the report on purpose, because the test that kills them asserts the
-substitution rather than the behaviour, and #61's fix removes them along with the two
-siblings the compiler already refuses. The comparator is a scratch script under `/tmp`,
+finding rather than a comparison that cannot see. The `:85:11` site, `if (close < 0)`,
+has two mutants: the `ConditionalExpression` one is refused by the compiler, which is
+why the fourth equivalent is the `EqualityOperator` one rather than both. The two rows
+left for a fix were [#61](https://github.com/Antruly/uvp/issues/61)'s — `header_matches`
+and `body_matches` read an expectation that is not a string as the empty pattern, so a
+check that could not run reported `satisfied` — and they are fixed: the expectation is
+resolved once, in `patternOf`, and one that is not a string is a check that did not
+run, reported `undetermined` with the reason naming the value. The **1280** and
+**7744** differences of the lattice are therefore the record of what the substitution
+cost rather than a survivor's measurement. The fresh sweep reports **376 killed of
+395, 1 timeout, 18 survived — 95.44%**, the four above plus **14** damage the compiler
+refuses; the 15 mutants the new helper and its two call sites add are all killed, and
+the mutation group is **494** tests. The comparator is a scratch script under `/tmp`,
 so these numbers are quotable but not re-runnable from the repository — the same gap
 [#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
 **60** survivors are still unread — `bundleDiff.ts` 54 (52 readable) and the six in
