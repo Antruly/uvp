@@ -109,9 +109,10 @@ to store or rotate. What that requires:
 **The first publish is manual, by decision.** Trusted publishing is configured
 from an existing package's settings page, and npm's `npm trust` documentation
 states the requirement directly: _"The package you're configuring must already
-exist on the npm registry."_ `uvp-agents` has never been published, so the
-maintainer's decision (recorded on
-[#161](https://github.com/Antruly/uvp/issues/161#issuecomment-6233847724)) is:
+exist on the npm registry."_ `uvp-agents` has never been published, so a first
+publish cannot use trusted publishing. The maintainer authorized the direction
+lead to choose the bootstrap, and the choice recorded on
+[#161](https://github.com/Antruly/uvp/issues/161#issuecomment-6233847724) is:
 
 1. Publish the first version by hand, from the tag `uvp-agents-0.2.0`, to the
    official registry (`registry.npmjs.org` — not a mirror, and not a local
