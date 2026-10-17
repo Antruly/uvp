@@ -369,6 +369,7 @@ const probeOutputFrames = (frames: readonly ProbeFrame[]): ProbeOutputFrame[] =>
         bytes: frame.bytes,
         ...(payload.text === undefined ? {} : { text: payload.text }),
         ...(payload.base64 === undefined ? {} : { base64: payload.base64 }),
+        ...(payload.textOmitted === undefined ? {} : { text_omitted: payload.textOmitted }),
         at_ms: frame.atMs,
         // Either the stack cut this payload before reporting it, or the limit cut
         // it here. Both mean the same thing to a caller reading the field.
