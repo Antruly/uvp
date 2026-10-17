@@ -1060,8 +1060,13 @@ and a boundary table for `unk_` ids, and the file moves to **100.00%**, 43 kille
 ([#67](https://github.com/Antruly/uvp/issues/67)): four were the http2 and db rows of
 the feature table, whose `cmakeOptions` no test read, and the fifth was the no-probe
 branch's reason, which now is asserted exactly and told apart from the unreadable
-probe's. The file moves to **100.00%**, 90 killed of 90. The other **62** survivors
-are still unread, **54** of them readable. The instrument for it is committed
+probe's. The file moves to **100.00%**, 90 killed of 90.
+`evidence.ts`'s have been read as well
+([#65](https://github.com/Antruly/uvp/issues/65)): the two readable survivors — the
+anchors of the `ev_` id grammar — are pinned by a boundary table, and the six that
+remain are enum-member mutations the compiler refuses (`TS2322`), so the file measures
+**85.00%**, 34 killed of 40. The other **60** survivors are still unread, **52** of
+them readable. The instrument for it is committed
 (`scripts/mutation-survivor-kinds.mjs`, with a producer golden in `check:pr`) rather
 than left in a scratch directory.
 [testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.

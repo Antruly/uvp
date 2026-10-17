@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createEvidence, evidenceDigest, evidenceRef } from "./evidence.js";
+import { createEvidence, evidenceDigest, evidenceRef, evidenceSchema } from "./evidence.js";
 import { newId } from "./identity.js";
 
 /**
@@ -57,6 +57,29 @@ describe("createEvidence", () => {
 
   it("refuses coverage with no scope", () => {
     expect(() => evidenceOf({ coverage: { scope: "", status: "complete" } })).toThrow();
+  });
+});
+
+describe("the evidence id grammar", () => {
+  const hex22 = "0123456789abcdef012345";
+  const accepts = (evidenceId: string) =>
+    evidenceSchema.safeParse({ ...evidenceOf(), evidence_id: evidenceId }).success;
+
+  // The id is the handle a caller stores to refer back to a claim, and it is
+  // two facts — the `ev_` prefix that marks evidence and the 22 hex digits that
+  // identify one. A regex that stops anchoring either end accepts an id the
+  // contract never mints: a length that does not exist, junk after the digits,
+  // or an `ev_` buried inside a longer prefix. These rows are the boundaries.
+  it.each([
+    ["the prefixed 22 hex digits the contract mints", `ev_${hex22}`, true],
+    ["21 hex digits, one short of the contract", `ev_${hex22.slice(0, 21)}`, false],
+    ["23 hex digits, one past the contract", `ev_${hex22}0`, false],
+    ["trailing characters after the digits", `ev_${hex22}-extra`, false],
+    ["an `ev_` that does not start the id", `xev_${hex22}`, false],
+    ["a different prefix of the right shape", `unk_${hex22}`, false],
+    ["uppercase hex digits, which the contract does not mint", `ev_${hex22.toUpperCase()}`, false],
+  ])("%s", (_label, evidenceId, accepted) => {
+    expect(accepts(evidenceId)).toBe(accepted);
   });
 });
 
