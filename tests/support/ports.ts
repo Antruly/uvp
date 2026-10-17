@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 
 /**
  * Port reservation, shared by the lanes that need a number before anything is
@@ -130,6 +130,34 @@ const remember = (port: number): number => {
 
 /** Whether this host has a window to reserve from, which the walk needs. */
 export const reservationWindowIsAvailable = ephemeralFloor !== undefined;
+
+/**
+ * Whether something answers on a port, or `undefined` when the probe could not
+ * tell.
+ *
+ * The third state is the reason this is not a boolean: a connect that neither
+ * completes nor is refused — a firewall dropping packets, a timeout — is not
+ * evidence that the port is free, and a caller deciding whether its premise
+ * still holds must not read it as one. Only `true` says "something listens";
+ * `false` says "the kernel refused"; `undefined` says "ask again later".
+ */
+export const portAnswers = async (port: number, timeoutMs = 1_000): Promise<boolean | undefined> =>
+  await new Promise<boolean | undefined>((resolve) => {
+    const probe = createConnection({ host: "127.0.0.1", port });
+    const settle = (answers: boolean | undefined): void => {
+      probe.destroy();
+      resolve(answers);
+    };
+    probe.setTimeout(timeoutMs, () => {
+      settle(undefined);
+    });
+    probe.once("connect", () => {
+      settle(true);
+    });
+    probe.once("error", () => {
+      settle(false);
+    });
+  });
 
 export const freePort = async (): Promise<number> => {
   if (ephemeralFloor === undefined) return remember(await anyFreePort());
