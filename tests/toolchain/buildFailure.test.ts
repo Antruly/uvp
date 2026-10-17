@@ -333,7 +333,7 @@ describe.skipIf(realLibuvcpp === undefined)(
 
     it.skipIf(isWindows)(
       isWindows
-        ? "reports a link failure as a link failure, with the linker's own diagnostic — skipped: MSVC link diagnostics (LNK2019/LNK2001) are deliberately unmatched"
+        ? "reports a link failure as a link failure, with the linker's own diagnostic — skipped: this fixture drives a real GNU ld and asserts its wording, which this host's link.exe does not produce"
         : "reports a link failure as a link failure, with the linker's own diagnostic",
       async () => {
         const workspace = await generatedThenBroken("hello-http", 8100, breakLink);
@@ -372,7 +372,7 @@ describe.skipIf(realLibuvcpp === undefined)(
 
     it.skipIf(isWindows)(
       isWindows
-        ? "asks the linker for English even when the caller's own locale is not English — skipped: MSVC link diagnostics (LNK2019/LNK2001) are deliberately unmatched"
+        ? "asks the linker for English even when the caller's own locale is not English — skipped: this fixture drives a real GNU ld and asserts its wording, which this host's link.exe does not produce"
         : "asks the linker for English even when the caller's own locale is not English",
       async () => {
         const probe = probeHostLinkerLocale();
