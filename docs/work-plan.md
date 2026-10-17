@@ -1,6 +1,6 @@
 # Current development plan
 
-**Snapshot:** 2026-10-17T11:57Z. This is a snapshot, not a live dashboard. The
+**Snapshot:** 2026-10-17T12:03Z. This is a snapshot, not a live dashboard. The
 direction lead updates it per batch with the maintainer's approval; counts and
 open items will drift between snapshots.
 
@@ -15,7 +15,7 @@ Follow [the AI development workflow](agent-workflow.md) and
 
 ## Where we are
 
-- **82 merged PRs**, **80 closed issues**; **9 open issues**, **3 open PRs** at
+- **82 merged PRs**, **80 closed issues**; **10 open issues**, **5 open PRs** at
   this snapshot.
 - **Roadmap:** 50 of 54 marked items are done. The four open rows are
   `remote-ssh/` (blocked on verification), two CI observations/flakes, and the
@@ -50,15 +50,18 @@ The first release PR is open as #188.
    `npm run docs:generate` on the release branch, run the pre-release checks,
    record the human approval, and merge. Merging #188 tags the commit and creates
    the GitHub release; it does **not** publish to npm.
-   - **#161** npm publish — preparation may start now; publish only after #188
-     merges and the tag exists.
-   - **#162** MCP registry publish — validation/dry-run may start now; publish
-     only after #161.
-   - **#163** clean-environment setup acceptance — harness/tests may start now;
-     the real `npx` run only after #161.
-   - **#178** first-release support matrix — independent; open and unclaimed.
-   - **#179** first-release notes and upgrade guidance — independent; finalize
-     before the release PR merges.
+   - **#161** npm publish — **claimed by Antruly-dev-1** at 11:59Z; preparation
+     only, publish after #188 merges and the tag exists.
+   - **#162** MCP registry publish — **claimed by Antruly-dev-3** at 12:00Z;
+     prep PR #191 is open. It fixed a real schema failure (`server.json`
+     description was 113 characters, the schema caps it at 100) and added a
+     registry check to `metadata:check`; no publication yet.
+   - **#163** clean-environment setup acceptance — open; the real `npx` run waits
+     for #161.
+   - **#178** first-release support matrix — **claimed by Antruly-dev-2** at
+     12:02Z; branch `docs/178-support-matrix`, no PR yet.
+   - **#179** first-release notes and upgrade guidance — open; Antruly-dev-2
+     takes it after #178.
 2. **Windows/MSVC.** The MSVC link diagnostics and Windows database fixes have
    landed. The remaining tracked item is the external Chocolatey/pkgconfiglite
    failure on the Windows MSVC lane (#166); the maintainer decides whether to
@@ -80,13 +83,13 @@ Claim by commenting with your identity, as described in
 [AI engineer operations](ai-engineer-operations.md#task-taking-mode). The
 dependency is on **merge/publish/execute**, not on starting the preparation.
 
-| Task                                     | Issue | Can start              | Execute after          | Status          |
-| ---------------------------------------- | ----- | ---------------------- | ---------------------- | --------------- |
-| npm publish                              | #161  | Now                    | #188 merge and tag     | Open, unclaimed |
-| MCP registry publish                     | #162  | Now (validate/dry-run) | #161                   | Open, unclaimed |
-| Clean-environment setup acceptance       | #163  | Now (harness/tests)    | #161                   | Open, unclaimed |
-| First-release support matrix             | #178  | Now                    | —                      | Open, unclaimed |
-| First-release notes and upgrade guidance | #179  | Now                    | #161 for final content | Open, unclaimed |
+| Task                                     | Issue | Can start              | Execute after          | Status                                                         |
+| ---------------------------------------- | ----- | ---------------------- | ---------------------- | -------------------------------------------------------------- |
+| npm publish                              | #161  | Now                    | #188 merge and tag     | **Claimed by Antruly-dev-1**                                   |
+| MCP registry publish                     | #162  | Now (validate/dry-run) | #161                   | **Claimed by Antruly-dev-3**; PR #191                          |
+| Clean-environment setup acceptance       | #163  | Now (harness/tests)    | #161                   | Open, unclaimed                                                |
+| First-release support matrix             | #178  | Now                    | —                      | **Claimed by Antruly-dev-2**; branch `docs/178-support-matrix` |
+| First-release notes and upgrade guidance | #179  | Now                    | #161 for final content | Open; Antruly-dev-2 next                                       |
 
 #160 is closed; #188 is the release PR, not a claimable task. One active task per
 engineer. The claim comment is the ownership record until the tracker assignment
@@ -96,24 +99,25 @@ exists.
 
 These are recommendations for self-claiming, not assignments:
 
-| Engineer      | Now                              | Next                             |
-| ------------- | -------------------------------- | -------------------------------- |
-| Antruly-dev-1 | #161 npm publish preparation     | #162/#163 execution after #161   |
-| Antruly-dev-2 | #178 support matrix              | #179 release notes               |
-| Antruly-dev-3 | #162 registry validation/dry-run | #163 setup acceptance after #161 |
+| Engineer      | Now                                          | Next                             |
+| ------------- | -------------------------------------------- | -------------------------------- |
+| Antruly-dev-1 | #161 npm publish preparation (claimed)       | Publish after #188 merges/tags   |
+| Antruly-dev-2 | #178 support matrix (claimed)                | #179 release notes               |
+| Antruly-dev-3 | #162 registry preparation (claimed, PR #191) | #163 setup acceptance after #161 |
 
 The lanes are independent until the execute gate. An engineer who finishes early
 may claim the next task in the table; one active task per engineer still applies.
 
 ## Open work at this snapshot
 
-| Area                        | Issue | PR   | Status                                    | Next                                     |
-| --------------------------- | ----- | ---- | ----------------------------------------- | ---------------------------------------- |
-| First public release        | —     | #188 | Release PR, no CI, `autorelease: pending` | Owner pre-merge checklist; then merge    |
-| WebSocket opening handshake | #182  | #184 | Draft PR, clean                           | Owner review/approval                    |
-| HTTP/2 abandoned session    | #183  | #185 | Draft PR, clean                           | Owner review/approval                    |
-| Windows MSVC CI             | #166  | —    | External Chocolatey failure               | Maintainer decision: wait/rerun/pin/skip |
-| Mutation attribution        | #41   | —    | Upstream blocked                          | Watch Stryker #6210/#6214                |
+| Area                        | Issue | PR   | Status                                            | Next                                          |
+| --------------------------- | ----- | ---- | ------------------------------------------------- | --------------------------------------------- |
+| First public release        | —     | #188 | Release PR, no CI, `autorelease: pending`         | Owner pre-merge checklist; then merge         |
+| MCP registry preparation    | #162  | #191 | Draft PR, CI pending; schema fix + metadata check | Review; apply `ai-assisted`; publish is gated |
+| WebSocket opening handshake | #182  | #184 | Draft PR, clean                                   | Owner review/approval                         |
+| HTTP/2 abandoned session    | #183  | #185 | Draft PR, clean                                   | Owner review/approval                         |
+| Windows MSVC CI             | #166  | —    | External Chocolatey failure                       | Maintainer decision: wait/rerun/pin/skip      |
+| Mutation attribution        | #41   | —    | Upstream blocked                                  | Watch Stryker #6210/#6214                     |
 
 #87/#91, #122/#130, #142/#143, #154/#155, and #160/#177 are merged/closed. Do
 not open a competing PR for an issue that already has one.
@@ -170,10 +174,10 @@ the documented support matrix matches the lanes that actually ran.
 Release PR #188 is open at `0.2.0`. The owner must decide the version and
 whole-history changelog, run `npm run docs:generate` and the pre-release checks on
 the release branch, record the approval, and merge. Merging #188 creates the tag
-and GitHub release; #161 publishes to npm, then #162/#163. The critical path is
-#188 → #161 → #162/#163, with #178/#179 in parallel and #184/#185 awaiting
-review/approval. The release pipeline is now observed up to the open PR; the
-publish path is still unobserved.
+and GitHub release; #161 publishes to npm, then #162/#163. The prep work is in
+progress: #161 is claimed by dev-1, #162 by dev-3 (PR #191), and #178 by dev-2.
+#184/#185 await review/approval. The release pipeline is now observed up to the
+open PR; the publish path is still unobserved.
 
 ## How to claim
 
