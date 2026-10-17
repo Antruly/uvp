@@ -372,6 +372,8 @@ otherwise.
   from a libuvcpp build, verified against 1.7.0
 - [First-release support matrix](docs/support-matrix.md) — what the CI lanes have
   observed, derived, and left unknown
+- [Release notes](docs/release-notes.md) — what shipped in the first public
+  release and what remains unknown
 - [Tool design](docs/tool-design.md) — how a uvp tool boundary is chosen
 - [Testing](docs/testing.md) — test depths and real-toolchain lanes
 - [Roadmap](docs/roadmap.md) — what is planned and what gates admission

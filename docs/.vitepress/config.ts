@@ -37,6 +37,7 @@ export default defineConfig({
           { text: "MCP contracts", link: "/mcp-contracts" },
           { text: "libuvcpp feature mapping", link: "/libuvcpp-features" },
           { text: "First-release support matrix", link: "/support-matrix" },
+          { text: "Release notes", link: "/release-notes" },
         ],
       },
       {
