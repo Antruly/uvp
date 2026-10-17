@@ -2327,6 +2327,41 @@ describe("a verification pass the caller stopped", () => {
     },
     TIMEOUT,
   );
+
+  it(
+    "treats an interrupt during a request as a cancellation and sends no further request",
+    async () => {
+      // `/slow` is the fixture route that answers after 30 s, so the abort at
+      // 600 ms is what ends this call. Before the transport carried the signal,
+      // the request could only end at its own deadline: the exchange then
+      // completed, `httpRequest` threw a cancellation *after* it, and verify's
+      // catch recorded that as a failed request and went on to the second one.
+      const port = await freePort();
+      const svc = await writeFakeService(harness.workspace, "svc", port);
+      const before = harness.services.store.totalExchanges();
+
+      const failure = await callAbortingAfter(600, "uvp_verify", {
+        path: harness.workspace,
+        run: { args: svc.args, port, ready_path: "/healthz", timeout_ms: 15_000 },
+        requests: [
+          { name: "slow", path: "/slow" },
+          { name: "after", path: "/hello" },
+        ],
+      }).then(
+        () => undefined,
+        (cause: unknown) => toUvpError(cause),
+      );
+
+      expect(failure, "uvp_verify answered after its call had been cancelled").toBeDefined();
+      expect(failure?.code).toBe("cancelled");
+      // The withdrawn request recorded nothing, and the second was never put, so
+      // the session's exchange log is unchanged. A pass that continued would have
+      // `/hello`'s exchange here — and would have returned a bundle, which is
+      // what made the defect look like a pass with one failed request.
+      expect(harness.services.store.totalExchanges()).toBe(before);
+    },
+    TIMEOUT,
+  );
 });
 
 /**

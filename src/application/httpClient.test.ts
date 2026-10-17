@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { performRequest, transportFailureKind } from "./httpClient.js";
 import type { HttpRequestSpec, TransportFailureKind } from "./httpClient.js";
+import { toUvpError } from "../domain/errors.js";
 
 /**
  * The transport, asked what it saw.
@@ -444,4 +445,72 @@ describe("the deadline", () => {
     expect(exchange.httpVersion).toBe("2.0");
     expect(exchange.body.toString("utf8")).toBe("through the fallback");
   }, 10_000);
+});
+
+/**
+ * A request the caller withdrew.
+ *
+ * `performRequest` had no signal at all: a request already in flight could only
+ * end at its own deadline or when the peer answered, and the WebService checked
+ * the signal *after* the exchange had completed. That made a cancellation
+ * indistinguishable from a completed request for as long as the request took,
+ * and it left the caller waiting on a question they had abandoned. A
+ * cancellation is also not a transport finding, so it must not arrive as one.
+ */
+describe("a withdrawn request", () => {
+  const aborted = async (
+    spec: HttpRequestSpec,
+  ): Promise<{ readonly code: string; readonly elapsedMs: number }> => {
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = performRequest(spec, controller.signal).then(
+      () => undefined,
+      (cause: unknown) => toUvpError(cause),
+    );
+    setTimeout(() => controller.abort(), 50);
+    const failure = await pending;
+    return { code: failure?.code ?? "resolved", elapsedMs: Date.now() - started };
+  };
+
+  it("stops an in-flight HTTP/1.1 request and rejects as cancelled", async () => {
+    const port = await startSilent();
+    const { code, elapsedMs } = await aborted({
+      ...SPEC,
+      url: url(port),
+      httpVersion: "1.1",
+      timeoutMs: 30_000,
+    });
+    expect(code).toBe("cancelled");
+    // The 30 s deadline is not what ended this call.
+    expect(elapsedMs).toBeLessThan(1_000);
+  }, 10_000);
+
+  it("destroys an in-flight HTTP/2 request rather than letting it finish", async () => {
+    const port = await startSilent();
+    const { code, elapsedMs } = await aborted({
+      ...SPEC,
+      url: url(port),
+      httpVersion: "2",
+      timeoutMs: 30_000,
+    });
+    expect(code).toBe("cancelled");
+    expect(elapsedMs).toBeLessThan(1_000);
+  }, 10_000);
+
+  it("opens nothing when the caller had already withdrawn", async () => {
+    // A signal that fired before the call is not permission to dial the peer
+    // and report a connection that was opened on the caller's behalf.
+    const { port, connections } = await startCountedDeadEnd();
+    const controller = new AbortController();
+    controller.abort();
+    const failure = await performRequest(
+      { ...SPEC, url: url(port), httpVersion: "1.1" },
+      controller.signal,
+    ).then(
+      () => undefined,
+      (cause: unknown) => toUvpError(cause),
+    );
+    expect(failure?.code).toBe("cancelled");
+    expect(connections()).toBe(0);
+  });
 });
