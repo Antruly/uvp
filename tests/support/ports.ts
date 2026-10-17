@@ -143,18 +143,18 @@ export const reservationWindowIsAvailable = ephemeralFloor !== undefined;
  */
 export const portAnswers = async (port: number, timeoutMs = 1_000): Promise<boolean | undefined> =>
   await new Promise<boolean | undefined>((resolve) => {
-    const probe = createConnection({ host: "127.0.0.1", port });
+    const socket = createConnection({ host: "127.0.0.1", port });
     const settle = (answers: boolean | undefined): void => {
-      probe.destroy();
+      socket.destroy();
       resolve(answers);
     };
-    probe.setTimeout(timeoutMs, () => {
+    socket.setTimeout(timeoutMs, () => {
       settle(undefined);
     });
-    probe.once("connect", () => {
+    socket.once("connect", () => {
       settle(true);
     });
-    probe.once("error", () => {
+    socket.once("error", () => {
       settle(false);
     });
   });
