@@ -1120,9 +1120,16 @@ run, reported `undetermined` with the reason naming the value. The **1280** and
 cost rather than a survivor's measurement. The fresh sweep reports **376 killed of
 395, 1 timeout, 18 survived — 95.44%**, the four above plus **14** damage the compiler
 refuses; the 15 mutants the new helper and its two call sites add are all killed, and
-the mutation group is **494** tests. The comparator is a scratch script under `/tmp`,
-so these numbers are quotable but not re-runnable from the repository — the same gap
-[#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
+the mutation group is **494** tests. The comparison is now
+`scripts/mutation-equivalence.mjs`: it takes a built module, the text edits a report
+implies, and the caller's inputs, and it refuses to call anything equivalent when a
+control travelling with it is not distinguishable. The numbers above are **not**
+re-measured with it — their input lattices were built for their targets and are not in
+the repository, which is the part [#57](https://github.com/Antruly/uvp/issues/57) leaves
+with each target rather than guessing at — and
+`scripts/verify-mutation-equivalence.mjs`, in `check:pr`, holds the instrument with
+fixtures whose expected verdicts are arithmetic rather than a claim about any real
+read. The sweep's other
 **7** survivors are still unread — the six in `evidence.ts` the read below leaves
 compiler-refused and `bundleDiff.ts`'s one equivalent — **0** readable once the
 classification below is applied. The baseline's **78** had already shrunk to **71**
