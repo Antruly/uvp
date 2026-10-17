@@ -1221,7 +1221,10 @@ the authority for the restore rather than a copy taken when the run started. Tha
 source is also what each location is checked against: a span past its last line, an
 inverted span, or a missing one is reported as `undetermined` with the reason rather
 than applied, because an unchecked `NaN` offset writes a program nobody described
-and the compiler's answer about it would be counted as the mutant's. Over run
+and the compiler's answer about it would be counted as the mutant's. A signal
+that arrives while a mutant is compiled restores it too — `SIGINT`, `SIGTERM` and
+`SIGHUP`, the last of which a closed terminal sends and whose default action would
+otherwise end the run with the mutant still in the tree. Over run
 [`38919206652`](https://github.com/Antruly/uvp/actions/runs/38919206652)'s report:
 **108 of the 344 do not compile** — `assertions.ts` 39 of 129, `evidenceHelpers.ts`
 28 of 70, `workspaceManifest.ts` 25 of 53, `evidence.ts` 10 of 13, `errors.ts` 4 of

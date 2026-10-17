@@ -22,14 +22,18 @@
  * that directory as its working directory, so nothing here touches the repository.
  */
 
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { REPO_ROOT } from "./lib/paths.mjs";
 
 const FILE_UNDER_TEST = path.join(REPO_ROOT, "scripts", "mutation-survivor-kinds.mjs");
 const TARGET = "src/example.ts";
+
+/** How long the signal fixture waits for the stub to reach its second run. */
+const START_BOUND_MS = 10_000;
 
 /**
  * The stub compiler. It is the whole of this check's independence from the real
@@ -60,6 +64,26 @@ process.exit(0);
 
 /** `const a = 1;\nconst b = 2;\n` — two one-character spans, at 1:11 and 2:11. */
 const PRISTINE = "const a = 1;\nconst b = 2;\n";
+
+/**
+ * The stub that holds a compile open long enough to signal it. Used by the one
+ * check that cannot run through `spawnSync`: a signal has to arrive while the
+ * file is mutated and the compiler is running, because that is the window in
+ * which a handler-less signal ends the process with the mutant still in place.
+ *
+ * It records each run in `runs.txt` and `ran-N.txt`; the check waits for `ran-2`
+ * — the baseline is run 1, the mutant is run 2 — before sending the signal.
+ */
+const SLOW_MS = 1500;
+const SLOW_STUB = `import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { setTimeout } from "node:timers/promises";
+const runs = existsSync("runs.txt") ? Number(readFileSync("runs.txt", "utf8")) : 0;
+writeFileSync("runs.txt", String(runs + 1));
+writeFileSync("ran-" + String(runs + 1) + ".txt", "ran\\n");
+appendFileSync("seen.jsonl", JSON.stringify(readFileSync("${TARGET}", "utf8")) + "\\n");
+await setTimeout(${String(SLOW_MS)});
+process.exit(0);
+`;
 
 /** A survivor at the span `line:11-12`, which is the digit on that line. */
 const survivor = (line, replacement) => ({
@@ -313,6 +337,103 @@ const fixture = async (index, testCase) => {
   return { directory, reportFile, source };
 };
 
+/**
+ * The signal fixture: `SIGHUP` while a mutant is in the tree.
+ *
+ * This is the one behaviour a `spawnSync` case cannot reach, because the check has
+ * to act while the child is still running. `SIGHUP` is what a closed terminal or a
+ * dropped session sends, and it is the signal whose default action is to end the
+ * process without unwinding — no `finally`, no restore. The assertions are the two
+ * that defect changes: the run must not be terminated by the signal, and the file
+ * must be the report's source again when it ends. The table assertion is conditional
+ * on a normal exit, because if the handler does run (the signal is deferred to the
+ * end of the synchronous run on this Node), the process exits from the handler and
+ * stdout may be cut short.
+ */
+const checkSignalRestore = async (failures) => {
+  const name = "SIGHUP while a mutant is compiled still restores the file";
+  const directory = await mkdtemp(path.join(os.tmpdir(), "uvp-survivor-signal-"));
+  try {
+    await mkdir(path.join(directory, path.dirname(TARGET)), { recursive: true });
+    await writeFile(path.join(directory, TARGET), PRISTINE);
+    await writeFile(path.join(directory, "stub.mjs"), SLOW_STUB);
+    await writeFile(path.join(directory, "seen.jsonl"), "");
+    await writeFile(
+      path.join(directory, "report.json"),
+      JSON.stringify(report([survivor(1, "9")])),
+    );
+
+    const child = spawn(process.execPath, [FILE_UNDER_TEST, "report.json"], {
+      cwd: directory,
+      env: { ...process.env, MUTATION_TYPECHECK: `${process.execPath} stub.mjs` },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    const exited = new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ timedOut: true }), START_BOUND_MS * 3);
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+
+    const deadline = Date.now() + START_BOUND_MS;
+    while (!existsSync(path.join(directory, "ran-2.txt"))) {
+      if (Date.now() >= deadline) {
+        child.kill("SIGKILL");
+        await exited;
+        failures.push(
+          `${name}: the stub never began a second run within ${String(START_BOUND_MS)} ms, ` +
+            "so no mutant was in the tree to signal.\n" +
+            output.trim(),
+        );
+        return;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    }
+    child.kill("SIGHUP");
+    const outcome = await exited;
+    if (outcome.timedOut === true) {
+      child.kill("SIGKILL");
+      failures.push(`${name}: the run did not end within the bound.\n${output.trim()}`);
+      return;
+    }
+
+    const after = await readFile(path.join(directory, TARGET), "utf8");
+    if (after !== PRISTINE) {
+      failures.push(
+        `${name}: ${FILE_UNDER_TEST} left the file at ${JSON.stringify(after)}, not the ` +
+          `source it started from (${JSON.stringify(PRISTINE)}).`,
+      );
+    }
+    if (outcome.signal !== null) {
+      failures.push(
+        `${name}: the run was terminated by ${outcome.signal}, so nothing unwound to restore ` +
+          "the file — the defect this case exists for.",
+      );
+    } else if (outcome.code !== 0 && outcome.code !== 129) {
+      failures.push(
+        `${name}: expected exit 0 (the signal is deferred to the end of the run) or 129 (the ` +
+          `handler's conventional code), got ${String(outcome.code)}.\n${output.trim()}`,
+      );
+    } else if (outcome.code === 0 && !output.includes("| src/example.ts | 1 | 1 | 0 | 0 |")) {
+      failures.push(
+        `${name}: the run exited 0 but did not print the classification table.\n${output.trim()}`,
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+};
+
 const main = async () => {
   checkCaseList();
 
@@ -389,6 +510,8 @@ const main = async () => {
     }
   }
 
+  await checkSignalRestore(failures);
+
   if (failures.length > 0) {
     console.error("The survivor classification no longer separates what it is checked for.\n");
     for (const failure of failures) console.error(`  ${failure}\n`);
@@ -402,8 +525,9 @@ const main = async () => {
       "them are tallied with a survivor naming two counted under both, a mutation is applied to " +
       "the span its report names and the file is restored after it, a location past the last line " +
       "or ending before it starts — or absent — is undetermined rather than applied, a moved file " +
-      "and a report without a source stay unclassified, and a tree that does not typecheck is " +
-      "refused before anything is classified",
+      "and a report without a source stay unclassified, a tree that does not typecheck is " +
+      "refused before anything is classified, and a SIGHUP sent while a mutant is compiled still " +
+      "restores the file",
   );
 };
 
