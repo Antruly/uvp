@@ -1,0 +1,278 @@
+name: Publish to npm
+
+# Publishes the package from a release tag, by hand.
+#
+# **Why not `on: push: tags`.** release-please creates the tag with the job's
+# `GITHUB_TOKEN`, and GitHub does not start workflows from events the
+# `GITHUB_TOKEN` causes — the same rule that keeps the release PR free of check
+# runs. A tag trigger here would therefore never fire, and the failure would be a
+# release that silently stops existing rather than an error anyone reads. The
+# maintainer dispatches this workflow with the tag release-please created.
+#
+# **What it downloads, and what it trusts.** Nothing is built here from an
+# untrusted revision: the checkout is exactly the tag, the version is read from
+# the tagged tree, and the tarball that is uploaded is the tarball whose contents
+# were inspected and whose digest was compared against the registry afterwards.
+# `npm publish` refuses a version that already exists, so a re-dispatch of a
+# successful run fails closed instead of overwriting anything.
+#
+# **What it does not do.** It does not merge anything, create tags, or run the
+# full pre-release gate (`npm run check:pr`), which `docs/releasing.md` keeps as
+# the maintainer's step on the release PR's head. It runs the checks that have to
+# be true of *this tree* — the version agreement, generated documentation, the
+# reproducible archive — and then the install-side checks against the copy npm
+# served, which is the only place the registry's answer is observable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. uvp-agents-0.2.0"
+        required: true
+        type: string
+      dry_run:
+        description: "Pack, inspect, and verify locally without writing to the registry"
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+env:
+  HUSKY: "0"
+
+jobs:
+  publish:
+    name: Publish uvp-agents to npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # `id-token: write` is the whole credential: npm exchanges the OIDC token for
+    # a short-lived publish authorization and generates provenance from it. No
+    # `NODE_AUTH_TOKEN`, no registry token secret, nothing long-lived to rotate.
+    # `contents: read` is all the checkout needs.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # The dispatch input reaches the shell only through the environment, never
+      # by substitution into the script text: a tag is a string an operator
+      # types, and `${{ inputs.tag }}` inside `run:` would make it shell syntax.
+      # The `with: ref:` reference stays a direct expression — it is not a shell.
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the checkout is exactly the tag
+        run: |
+          set -euo pipefail
+          tag="$TAG"
+          commit="$(git rev-parse HEAD)"
+          tagged="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          if [ "$commit" != "$tagged" ]; then
+            echo "HEAD is ${commit}, but tag ${tag} points at ${tagged}."
+            exit 1
+          fi
+          exact="$(git describe --tags --exact-match HEAD)"
+          if [ "$exact" != "$tag" ]; then
+            echo "The checkout is not exactly ${tag}: git describe says ${exact}."
+            exit 1
+          fi
+          echo "checked out ${tag} at ${commit}"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # ./.github/actions/npm-cache owns the npm download cache, and saves it
+          # only from trusted default-branch events. setup-node v5 caches it by
+          # itself whenever package.json declares a packageManager.
+          package-manager-cache: false
+
+      - name: Cache npm package downloads
+        uses: ./.github/actions/npm-cache
+
+      - name: Require an npm that can do trusted publishing
+        run: |
+          set -euo pipefail
+          npm_version="$(npm --version)"
+          node -e '
+            const version = process.argv[1];
+            const [major, minor, patch] = version.split(".").map(Number);
+            const tooOld = major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)));
+            if (tooOld) {
+              console.error(`npm ${version} is older than 11.5.1, the first release that supports trusted publishing.`);
+              process.exit(1);
+            }
+            console.log(`npm ${version} supports trusted publishing.`);
+          ' "$npm_version"
+
+      - run: npm ci
+      - run: npm run compile
+
+      - name: Verify one version is the answer everywhere
+        # package.json, server.json, the release-please manifest, the three SBOM
+        # entries and the tag itself. Three of those are covered by
+        # `docs:check`'s own checks; this pass is what makes the publish decision
+        # a single command over the tagged tree, and it is the only place the tag
+        # is compared with the version.
+        run: node scripts/verify-release-version.mjs --tag "$TAG"
+
+      - name: Validate generated documentation against the contracts
+        run: npm run docs:check
+
+      - name: The tagged tree is unchanged by the build
+        run: |
+          set -euo pipefail
+          # `npm ci` writes node_modules and `npm run compile` writes dist, both
+          # gitignored. Anything else means the tagged tree is not what would be
+          # published, and the tarball would carry a version of a file no commit
+          # contains.
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "The tree is dirty after the build:"
+            echo "$dirty"
+            exit 1
+          fi
+
+      - name: Reproduce the archive from its own contents
+        # Also asserts that every path `files[]` names is actually delivered: an
+        # entry naming a path that no longer exists is ignored by npm in silence.
+        run: npm run verify:pack-reproducible
+
+      - name: Pack the exact archive that would be published
+        id: pack
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+          npm pack --pack-destination .cache --json > .cache/pack.json
+          node -e '
+            const { appendFileSync } = require("node:fs");
+            const [entry] = JSON.parse(require("node:fs").readFileSync(".cache/pack.json", "utf8"));
+            appendFileSync(process.env.GITHUB_OUTPUT, `filename=${entry.filename}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `integrity=${entry.integrity}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `version=${entry.version}\n`);
+            console.log(`${entry.filename} ${entry.integrity}`);
+          '
+
+      - name: Inspect the archive's contents
+        run: |
+          set -euo pipefail
+          tarball=".cache/${{ steps.pack.outputs.filename }}"
+          listing="$(tar -tzf "$tarball")"
+          printf '%s\n' "$listing"
+          # A smoke check on the three entry points that make the package usable,
+          # beyond the `files[]` delivery check `verify:pack-reproducible` runs.
+          for required in package/package.json package/scripts/uvp.mjs package/sbom.cdx.json; do
+            if ! printf '%s\n' "$listing" | grep -qx "$required"; then
+              echo "The archive does not contain ${required}."
+              exit 1
+            fi
+          done
+
+      - name: Publish the inspected tarball
+        if: ${{ inputs.dry_run == false }}
+        # Publishing the tarball rather than the directory means the bytes npm
+        # uploads are the bytes every check above read. `--provenance` is the
+        # public statement of where they came from; `--ignore-scripts` matches the
+        # reproducibility check, which measured the lifecycle as a variable that
+        # changes nothing.
+        run: npm publish ".cache/${{ steps.pack.outputs.filename }}" --provenance --access public --ignore-scripts
+
+      - name: Verify the registry's answer
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.pack.outputs.version }}"
+          # The whole manifest for that version rather than a list of fields: with
+          # several `field` arguments npm prints an object keyed by the field text
+          # (`"dist.integrity"`), and a check that reads `registry.dist.integrity`
+          # would then compare against `undefined` and fail for the wrong reason.
+          npm view "uvp-agents@${version}" --json > .cache/registry.json
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const registry = JSON.parse(readFileSync(".cache/registry.json", "utf8"));
+            const expected = process.argv[1];
+            const actual = { version: registry.version, integrity: registry.dist?.integrity };
+            if (actual.version !== process.argv[2]) {
+              console.error(`The registry reports version ${actual.version}, expected ${process.argv[2]}.`);
+              process.exit(1);
+            }
+            if (actual.integrity !== expected) {
+              console.error(`The registry holds ${actual.integrity}, but this run packed ${expected}.`);
+              process.exit(1);
+            }
+            console.log(`npm serves uvp-agents@${actual.version} with the digest this run packed.`);
+            console.log(`tarball: ${registry.dist?.tarball}`);
+          ' "${{ steps.pack.outputs.integrity }}" "$version"
+
+      - name: Install the published package into an empty prefix
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/prefix
+          # From the registry, not from the local tarball: this is the artifact a
+          # user gets, and "the tarball installs" is not evidence of that.
+          npm install --global --prefix "$PWD/.cache/prefix" \
+            --ignore-scripts \
+            "uvp-agents@${{ steps.pack.outputs.version }}"
+
+      - name: Exercise the CLI from the published copy
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          set -euo pipefail
+          export PATH="$PWD/.cache/prefix/bin:$PATH"
+          expected="uvp-agents ${{ steps.pack.outputs.version }}"
+          reported="$(uvp --version)"
+          if [ "$reported" != "$expected" ]; then
+            echo "uvp --version printed '$reported', expected '$expected'"
+            exit 1
+          fi
+          uvp --help
+          # `uvp doctor` exits 1 on a runner with no libuvcpp — 1 is "the
+          # operation ran and the answer is no" (docs/cli.md); 2 would be a doctor
+          # that could not look at all. The report is read as well, because
+          # "exited 1" and "reported the gap" are different claims.
+          doctor_status=0
+          uvp doctor --json > .cache/doctor.json || doctor_status=$?
+          if [ "$doctor_status" -ne 1 ]; then
+            echo "uvp doctor exited $doctor_status; expected 1 on a runner with no libuvcpp"
+            exit 1
+          fi
+          node -e '
+            const report = JSON.parse(require("node:fs").readFileSync(".cache/doctor.json", "utf8"));
+            if (report.libuvcpp?.found !== false) {
+              console.error(`the doctor reported libuvcpp.found = ${JSON.stringify(report.libuvcpp?.found)}, and this runner has none`);
+              process.exit(1);
+            }
+            console.log("uvp doctor reports the missing libuvcpp rather than failing on it");
+          '
+
+      - name: Exercise the stdio MCP contract from the published copy
+        if: ${{ inputs.dry_run == false }}
+        run: npm run test:packaged-mcp
+        env:
+          UVP_PACKAGED_BIN: ${{ github.workspace }}/.cache/prefix/bin/uvp
+
+      - name: Record what was published
+        run: |
+          set -euo pipefail
+          {
+            echo "### uvp-agents ${{ steps.pack.outputs.version }}"
+            echo ""
+            echo "- tag: \`${TAG}\`"
+            echo "- tarball: \`${{ steps.pack.outputs.filename }}\`"
+            echo "- integrity: \`${{ steps.pack.outputs.integrity }}\`"
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "- mode: **dry run** — packed, inspected, and checked; nothing was uploaded and the registry checks were skipped."
+            else
+              echo "- mode: published; the registry digest and a clean install from the registry were verified above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

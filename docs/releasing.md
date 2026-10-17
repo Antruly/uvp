@@ -4,10 +4,19 @@ Releases are cut by release-please from conventional commits. No one edits a
 version by hand, and no one tags by hand.
 
 The configuration (`release-please-config.json`), the changelog rules, the gate
-on pull request titles, and the workflow that runs release-please
-(`.github/workflows/release-please.yml`, added in #177 for #160) exist. No release has
-been cut yet, so the flow below is written from the configuration and has not
-been observed end to end — see [Pre-release checks](#pre-release-checks).
+on pull request titles, the workflow that runs release-please
+(`.github/workflows/release-please.yml`, added in #177 for #160), and the
+workflow that publishes a tag (`publish.yml`, added for #161) exist. The first
+release was cut on 2026-10-17: release PR #188, opened and updated by
+release-please, carried the maintainer's regeneration commit and merged at
+`74df710`, and the tag `uvp-agents-0.2.0` was created on it. The first publish
+was made by hand on 2026-10-17 and is observed: `uvp-agents@0.2.0` is on the
+official registry, `latest` names it, and `npm view uvp-agents@0.2.0
+dist.integrity` reports
+`sha512-uXh6BqCNlPO4B3U47/0wqgKyLTf7pzHgeHZ756tUtDww+uf7tOLeC28HSDFy1EAq6uMaWxcjhAPD4igYLOCGLA==`.
+The trusted-publisher entry is not attached yet, so `publish.yml` has not been
+dispatched and the workflow half of the path below is still unobserved — see
+[Publishing the tag](#publishing-the-tag).
 
 ## The flow
 
@@ -26,7 +35,9 @@ been observed end to end — see [Pre-release checks](#pre-release-checks).
    access to a pull request branch.
 4. A maintainer reviews that PR like any other — the changelog is the part that
    gets read, because it is what users will see.
-5. Merging the release PR tags the commit and publishes.
+5. Merging the release PR tags the commit. Publishing is a separate, manual
+   dispatch of `publish.yml` with that tag — see
+   [Publishing the tag](#publishing-the-tag).
 
 The tag has no `v` prefix (`include-v-in-tag: false`). The npm package is
 `uvp-agents`; the repository is `uvp`. That difference is intentional and
@@ -54,6 +65,140 @@ both matter for a release:
 
 Neither setting is observable from the source tree, so they are stated here
 rather than asserted by a check.
+
+## Publishing the tag {#publishing-the-tag}
+
+`publish.yml` is dispatched by hand with the tag release-please created:
+
+```bash
+gh workflow run publish.yml -f tag=uvp-agents-<version> -f dry_run=true
+gh run watch
+
+gh workflow run publish.yml -f tag=uvp-agents-<version>
+gh run watch
+```
+
+A tag push cannot trigger it: release-please creates the tag with the job's
+`GITHUB_TOKEN`, and events caused by that token start no workflows — the same
+rule that leaves the release PR without check runs. A `push: tags` trigger would
+never fire, and the failure would look like a release that quietly did not
+happen. The dispatch names the tag explicitly and the run checks that the
+checkout is exactly that tag's commit.
+
+### The credential
+
+The job authenticates with npm **trusted publishing**: it declares
+`id-token: write` and no registry token, and npm exchanges the workflow's OIDC
+token for a publish authorization and attestation. There is no long-lived secret
+to store or rotate. What that requires:
+
+- The workflow file name configured as the trusted publisher must match —
+  `publish.yml`.
+- npm 11.5.1 or newer, and Node 22.14 or newer, on a GitHub-hosted runner, for
+  the publish itself. The workflow asserts the npm version and takes Node from
+  `.nvmrc` rather than assuming either. Attaching the publisher with `npm trust`
+  is a newer client still: npm 11.15.0 or newer.
+- A trusted-publisher entry for `uvp-agents`: on npmjs.com, the package's
+  settings page → Trusted Publishing → GitHub Actions, repository
+  `Antruly/uvp`, workflow `publish.yml`, no environment, **Allow npm publish**
+  checked. The equivalent command is
+
+  ```bash
+  npm trust github uvp-agents --repository Antruly/uvp --file publish.yml --allow-publish
+  ```
+
+  Neither the settings page nor that command is reachable from this repository,
+  so this section states the configuration rather than a check that verifies it.
+
+**The first publish was manual, by decision.** Trusted publishing is configured
+from an existing package's settings page, and npm's `npm trust` documentation
+states the requirement directly: _"The package you're configuring must already
+exist on the npm registry."_ `uvp-agents` had never been published, so the first
+publish could not use trusted publishing. The maintainer authorized the
+direction lead to choose the bootstrap, and the choice recorded on
+[#161](https://github.com/Antruly/uvp/issues/161#issuecomment-6233847724) was:
+
+1. Publish the first version by hand, from the tag `uvp-agents-0.2.0`, to the
+   official registry (`registry.npmjs.org` — not a mirror, and not a local
+   `publishConfig` override), at that tag's commit. **Done:** the registry's
+   `time` field records `0.2.0` at 2026-10-17T13:22:05Z, and `latest` names it.
+   The version list also holds `0.0.0-stage` (13:19:58Z), a staging upload from
+   the same session; `latest` does not point at it.
+2. Attach the trusted publisher to the package afterwards, as configured above.
+   **Outstanding:** `npm trust` wants interactive confirmation and a second
+   factor, so the attachment has not been made. Until it is, a dispatch of
+   `publish.yml` fails at `npm publish` with an authentication error and uploads
+   nothing.
+3. Use `publish.yml` for every later version. **Not yet exercised:** no dispatch
+   has run, so the workflow's publish half is still unobserved.
+
+What the manual publish had to establish, because the workflow could not run for
+it: check out the tag, run the same preflight the workflow runs
+(`node scripts/verify-release-version.mjs --tag <tag>` and `npm run
+verify:pack-reproducible`), and upload the tarball whose digest those checks
+produced. A manual publish carries **no provenance attestation** — provenance is
+generated from the workflow's OIDC token, so 0.2.0 is the one version without
+it. What survives for it is the registry's digest, compared above; whether the
+publisher ran the preflight is not observable from the registry.
+
+**2FA applied to the manual publish.** For an account with two-factor
+authentication enabled, npm's registry answers a publish without a second
+factor with `403 Two-factor authentication or granular access token with bypass
+2fa enabled is required to publish packages.`, and nothing is uploaded — which
+is what the first attempt here received. The publish therefore needs either the
+one-time code at the prompt or a granular access token scoped to `uvp-agents`
+with the `publish` permission and **bypass 2FA** enabled; a browser session on
+its own is not enough. A failed attempt uploads nothing, so it can be retried
+once the credential is in hand — the version is still unclaimed until a publish
+succeeds.
+
+The workflow itself never holds a token: if the trusted publisher is attached,
+it publishes; if not, `npm publish` fails with an authentication error and
+nothing is uploaded. npm requires a newly created trusted publisher
+configuration to complete its first successful publish within two days, after
+which it expires and can no longer be used or edited — so attach it and dispatch
+the next version inside that window. As of 0.2.0 the attachment has not been
+made, so that window has not started.
+
+### What the run establishes
+
+In order, and each step fails closed:
+
+1. `HEAD` is the commit the tag names, and `git describe --tags --exact-match`
+   agrees — a dispatch naming an unknown tag, or a tag pointing somewhere else,
+   stops here.
+2. `npm ci`, `npm run compile`, then
+   `node scripts/verify-release-version.mjs --tag <tag>`: `package.json`,
+   `server.json` (both version fields), `.release-please-manifest.json`, all four
+   version places in `sbom.cdx.json`, and the tag itself name one version.
+3. `npm run docs:check`, so the generated files in the tagged tree are the ones
+   the contracts produce.
+4. The tree is still clean after the build, and `npm run verify:pack-reproducible`
+   reproduces the archive and confirms every `files[]` entry is delivered.
+5. It packs once, prints the listing, and publishes **that tarball** rather than
+   re-packing the directory — the bytes uploaded are the bytes inspected.
+6. `npm view uvp-agents@<version>` reports that version with the same
+   `dist.integrity` the run packed.
+7. It installs `uvp-agents@<version>` from the registry into an empty prefix, and
+   runs `uvp --version`, `uvp --help`, `uvp doctor --json` (exit 1,
+   `libuvcpp.found === false` — a GitHub runner has no libuvcpp, and 1 is the
+   doctor's "checked, not found" status), and `npm run test:packaged-mcp` against
+   that installed copy.
+
+The run summary records the tag, the tarball name, and its digest, which is what
+a consumer compares against `npm view uvp-agents dist.integrity`.
+
+### The dry run, and re-running
+
+`dry_run=true` performs steps 1–5 and skips everything that touches the
+registry. It establishes that the tagged tree packs and passes; it does not
+establish that npm accepts the publish, because nothing was sent. Run it first
+when the tag is new or the workflow changed.
+
+`npm publish` refuses a version that already exists, so re-dispatching a
+successful run fails at the publish step instead of overwriting anything. A
+re-dispatch after a failure partway through the verification steps is safe for
+the same reason, provided the failure was before the upload.
 
 ## Every release bumps the minor
 
@@ -93,10 +238,10 @@ values `extra-files` can write:
 
 | Where                        | Shape                        |
 | ---------------------------- | ---------------------------- |
-| `metadata.tools[0].version`  | `"0.1.0"`                    |
-| `metadata.component.version` | `"0.1.0"`                    |
-| `metadata.component.bom-ref` | `"uvp-agents@0.1.0"`         |
-| `metadata.component.purl`    | `"pkg:npm/uvp-agents@0.1.0"` |
+| `metadata.tools[0].version`  | `"0.2.0"`                    |
+| `metadata.component.version` | `"0.2.0"`                    |
+| `metadata.component.bom-ref` | `"uvp-agents@0.2.0"`         |
+| `metadata.component.purl`    | `"pkg:npm/uvp-agents@0.2.0"` |
 
 A `jsonpath` entry replaces the whole value at its path, so it can update the
 first two and cannot update the last two without destroying them. That is why
@@ -174,11 +319,14 @@ and what it does not.
 
 ## Pre-release checks
 
-These are the pre-release checks. The release workflow does not run them: it
-only opens and updates the release PR. No release has been cut yet, so every
-step here is still a thing a maintainer does by hand, on the release PR's head.
-The intent is a lane that fails closed — nothing publishes if any of this
-fails:
+These are the pre-release checks. The release-please workflow does not run them:
+it only opens and updates the release PR. `publish.yml` runs the subset that
+must be true of the tagged tree, plus the install-side checks against the copy
+npm serves — the two lists are in
+[what the run establishes](#publishing-the-tag) — but it does not run
+`check:pr`, because the tag exists only after the release PR merged. So this
+remains the maintainer's step on the release PR's head, and it is the gate in
+front of the tag. Every step here is still done by hand:
 
 ```bash
 npm ci
@@ -256,6 +404,10 @@ Before merging a release PR:
 - [ ] The [pre-release checks](#pre-release-checks) were run on the release PR's
       head, because the token that opened it does not trigger `pull_request`
       workflows.
+- [ ] The npm publish path is ready: the trusted publisher is attached for
+      `publish.yml`, or — for a version that is the first publish — the manual
+      upload and the attachment are planned as
+      [the credential section](#publishing-the-tag) records.
 - [ ] The release PR's `Human owner:` line is filled in. See the
       [AI contribution policy](https://github.com/Antruly/uvp/blob/main/CONTRIBUTING.md#ai-contribution-policy).
 
@@ -267,6 +419,19 @@ a changelog entry that says what was wrong.
 
 **If the tag exists but nothing was published**, delete the tag and let
 release-please open a fresh release PR. Nothing is broken yet at that point.
+
+**If a publish run failed**, read which step it stopped at. Every step before
+`npm publish` leaves the registry untouched and the run can be repeated after
+the cause is fixed. If it failed at or after the upload, establish what the
+registry holds before doing anything else:
+
+```bash
+npm view uvp-agents versions --json
+npm view uvp-agents@<version> dist.integrity
+```
+
+A version that is listed exists and cannot be replaced; that is the point at
+which the deprecate path below applies, not a re-run.
 
 **If a bad version was published**, deprecate it rather than unpublishing:
 
