@@ -328,6 +328,16 @@ jobs:
             choco install pkgconfiglite --no-progress -y
             $env:Path = "$env:ProgramData\chocolatey\bin;$env:Path"
           }
+          # The session PATH above covers this step only. Every later step rebuilds
+          # PATH from GITHUB_PATH, so the directory the tool lives in has to be
+          # recorded there too. Without this, `pkg-config --version` passes here
+          # and CMake's `find_package(PkgConfig REQUIRED)` fails two steps later
+          # with `missing: PKG_CONFIG_EXECUTABLE` — which is how the first run of
+          # this lane failed.
+          $pkgConfig = (Get-Command pkg-config -ErrorAction Stop).Source
+          Split-Path -Parent $pkgConfig |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "pkg-config: $pkgConfig"
           pkg-config --version
 
           # Both are read at different times: `PKG_CONFIG_PATH` by CMake's
