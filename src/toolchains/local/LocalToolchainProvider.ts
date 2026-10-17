@@ -56,18 +56,17 @@ const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[
 /**
  * The entries of `CMAKE_PREFIX_PATH`, in the spellings a caller may have used.
  *
- * CMake reads the variable as a semicolon-separated list on every host, while a
- * POSIX shell is usually written with the platform's own separator — this
- * repository's installation guide does exactly that:
+ * CMake uses `:` on UNIX and `;` on Windows; both are accepted here because
+ * callers write either. This repository's installation guide uses the POSIX
+ * spelling:
  *
  *     export CMAKE_PREFIX_PATH="$HOME/.local:$CMAKE_PREFIX_PATH"
  *
  * Before [#80](https://github.com/Antruly/uvp/issues/80) the whole value was
  * pushed into the search roots as one directory, so a caller with two prefixes
  * was told no libuvcpp was installed even when one entry held a complete install.
- * Both spellings are accepted off Windows. Windows is split on `;` only: every
- * absolute Windows path starts with a drive letter, and splitting on `:` would
- * turn `C:\prefix` into `C` and `\prefix`.
+ * Windows is split on `;` only: every absolute Windows path starts with a drive
+ * letter, and splitting on `:` would turn `C:\prefix` into `C` and `\prefix`.
  *
  * Empty entries are dropped rather than searched. A trailing separator is how a
  * shell writes "the variable was empty", and an empty string is not a directory

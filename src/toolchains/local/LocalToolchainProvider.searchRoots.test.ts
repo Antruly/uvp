@@ -104,9 +104,9 @@ describe("the prefixes a libuvcpp search reads", () => {
     expect(result.installPrefix).toBe(prefix);
   });
 
-  it("accepts CMake's semicolon list on every host", async () => {
-    // CMake documents `;` as the list separator on every platform. A caller who
-    // writes the variable that way is not making a Windows-only choice.
+  it("accepts a semicolon list here as well as the platform separator", async () => {
+    // CMake uses `;` on Windows and `:` on UNIX. A caller may write either, so
+    // both are accepted here; the platform list is the one the guide uses.
     process.env["CMAKE_PREFIX_PATH"] = [absent, prefix].join(";");
     expect((await found()).installPrefix).toBe(prefix);
   });
