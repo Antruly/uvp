@@ -158,6 +158,63 @@ std::string base64Encode(const char* data, size_t length) {
   return out;
 }
 
+/**
+ * The inverse of `base64Encode`: the exact bytes, or false when the text is not
+ * padded base64.
+ *
+ * The request body crosses the protocol as JSON, which cannot carry a byte that
+ * is not valid UTF-8; decoding here is what makes a binary request body reach
+ * the peer as the bytes the caller supplied. Validation is part of the contract
+ * rather than politeness: a body silently truncated at the first bad character
+ * would be sent as a different request under the same tool call.
+ */
+bool base64Decode(const std::string& text, std::string* bytes) {
+  const auto digit = [](char value) -> int {
+    if (value >= 'A' && value <= 'Z') return value - 'A';
+    if (value >= 'a' && value <= 'z') return value - 'a' + 26;
+    if (value >= '0' && value <= '9') return value - '0' + 52;
+    if (value == '+') return 62;
+    if (value == '/') return 63;
+    return -1;
+  };
+
+  if (text.size() % 4 != 0) return false;
+
+  std::string decoded;
+  decoded.reserve((text.size() / 4) * 3);
+  int buffer = 0;
+  int bits = 0;
+  int padding = 0;
+  bool seen_padding = false;
+  for (const char value : text) {
+    if (value == '=') {
+      seen_padding = true;
+      ++padding;
+      continue;
+    }
+    // Padding is a suffix. A digit after it means this is not base64, not a body
+    // with a stray character.
+    if (seen_padding) return false;
+    const int sextet = digit(value);
+    if (sextet < 0) return false;
+    buffer = (buffer << 6) | sextet;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      decoded.push_back(static_cast<char>((buffer >> bits) & 0xFF));
+    }
+  }
+  if (padding > 2) return false;
+  // How many bits are left over must agree with how the string was padded:
+  // no padding leaves none, "=" leaves two, "==" leaves four.
+  if ((padding == 0 && bits != 0) || (padding == 1 && bits != 2) ||
+      (padding == 2 && bits != 4)) {
+    return false;
+  }
+  *bytes = std::move(decoded);
+  return true;
+}
+
 void emit(const json& value) {
   std::cout << value.dump() << "\n";
   std::cout.flush();

@@ -101,7 +101,13 @@ export class NativeHttp3ProbeRunner extends NativeProbeProcess implements Native
         // second way of saying the same thing that the probe treats differently.
         ...(request.authority === undefined ? {} : { authority: request.authority }),
         headers: request.headers.map((header) => ({ name: header.name, value: header.value })),
+        // Both spellings travel. A probe that knows `body_base64` decodes it and
+        // ignores `body`; one that predates it sends the text form, which is
+        // exactly what it did before this field existed. Sending only the new
+        // field would make an older probe send an empty body with no way to say
+        // it had ignored anything.
         body: request.body,
+        ...(request.bodyBase64 === undefined ? {} : { body_base64: request.bodyBase64 }),
         // Absent means "do not verify". The probe distinguishes absent from empty,
         // and an empty string would be read as a CA file it could not open.
         ...(request.caFile === undefined ? {} : { ca_file: request.caFile }),

@@ -424,6 +424,13 @@ int runHttp3(const json& request) {
   run.options.path = request.value("path", "/");
   run.options.method = request.value("method", "GET");
   run.options.body = request.value("body", "");
+  // The lossless spelling of a body. `body` above is what a caller that predates
+  // this field sends; when both arrive, the bytes win. An invalid value is a
+  // refusal rather than a body cut at the first bad character.
+  const std::string body_base64 = request.value("body_base64", "");
+  if (!body_base64.empty() && !base64Decode(body_base64, &run.options.body)) {
+    return fail(kExitBadRequest, "the request's body_base64 is not valid base64");
+  }
   run.options.ca_file = request.value("ca_file", "");
   run.options.authority = request.value("authority", "");
   run.options.idle_ms = request.value("idle_ms", kDefaultIdleMs);

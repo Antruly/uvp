@@ -134,6 +134,7 @@ const REQUEST = {
   method: "GET",
   headers: [],
   body: "",
+  bodyBase64: undefined,
   caFile: undefined,
   idleTimeoutMs: 5_000,
   totalTimeoutMs: 20_000,
@@ -298,6 +299,24 @@ describe("writing the request the probe reads", () => {
     expect(written["authority"]).toBe("example.test");
     expect(written["ca_file"]).toBe("/etc/ssl/private/ca.pem");
     expect(written["headers"]).toEqual([{ name: "accept", value: "text/plain" }]);
+  });
+
+  it("carries a body's exact bytes alongside the text form", async () => {
+    // The protocol is JSON, which cannot carry a byte that is not valid UTF-8.
+    // `body_base64` is the lossless spelling; `body` stays for a probe that
+    // predates it, and both travel so an older probe keeps receiving text bodies.
+    const { runner, calls } = available(report());
+    await runner.probe({ ...REQUEST, method: "POST", body: "\u0000�", bodyBase64: "AP8=" }, SIGNAL);
+
+    const written = requestOf(calls[1]);
+    expect(written["body_base64"]).toBe("AP8=");
+    expect(written["body"]).toBe("\u0000�");
+  });
+
+  it("omits body_base64 when the request has no body", async () => {
+    const { runner, calls } = available(report());
+    await runner.probe(REQUEST, SIGNAL);
+    expect(requestOf(calls[1])["body_base64"]).toBeUndefined();
   });
 
   it("bounds the report by the body it asked to keep", async () => {

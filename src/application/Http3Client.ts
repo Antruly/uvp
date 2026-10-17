@@ -103,6 +103,10 @@ export class Http3Client {
         method: input.method,
         headers: Object.entries(input.headers).map(([name, value]) => ({ name, value })),
         body: body === undefined ? "" : body.toString("utf8"),
+        // The exact bytes, without a text round-trip. `body` above is a lossy
+        // rendering for a probe that predates this field; this is what the peer
+        // must receive.
+        bodyBase64: body === undefined ? undefined : body.toString("base64"),
         caFile: undefined,
         // One deadline, not two. The probe also has an idle clock, and setting it
         // below the caller's `timeout_ms` would end a run for silence while the
@@ -126,7 +130,7 @@ export class Http3Client {
       throw http3Failure(outcome, input);
     }
 
-    return this.assemble(input, outcome.report, parsed);
+    return this.assemble(input, outcome.report, parsed, body);
   }
 
   /** The tool's output, from a report that arrived and answered. */
@@ -134,6 +138,7 @@ export class Http3Client {
     input: Http3RequestInput,
     report: NativeHttp3Report,
     parsed: URL,
+    requestBody: Buffer | undefined,
   ): HttpRequestOutput {
     if (!report.answered || report.status === undefined) {
       throw noResponseFailure(report, input);
@@ -144,7 +149,7 @@ export class Http3Client {
       method: input.method,
       url: input.url,
       requestHeaders: input.headers,
-      requestBody: input.body === undefined ? undefined : Buffer.from(input.body, "utf8"),
+      requestBody,
       response: exchange,
       durationMs: exchange.timing.totalMs,
       error: undefined,

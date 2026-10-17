@@ -7,6 +7,7 @@ import type {
   NativeHttp3Outcome,
   NativeHttp3Probe,
   NativeHttp3Report,
+  NativeHttp3Request,
 } from "./NativeHttp3Probe.js";
 import { toUvpError, UvpFailure, type UvpError } from "../domain/errors.js";
 
@@ -446,5 +447,35 @@ describe("the request the probe is handed", () => {
     // A string, because that is what the C ABI's buffer convention takes; the
     // encoding was resolved here rather than left for the probe to guess.
     expect(seen[0]?.body).toBe("hi");
+  });
+
+  it("carries a base64 body as the exact bytes, and records those bytes", async () => {
+    // `base64` is the encoding a caller uses for a body that is not text. The
+    // text form cannot carry `ff` — JSON strings are Unicode — so the old path
+    // sent `00 ef bf bd` and recorded the base64 spelling as the request body.
+    const seen: NativeHttp3Request[] = [];
+    const client: NativeHttp3Probe = {
+      availability: async () => ({
+        state: "available",
+        path: "/tmp/uvcpp-probe",
+        libraryVersion: undefined,
+      }),
+      probe: async (request) => {
+        seen.push(request);
+        return { kind: "report", report: answeredReport() };
+      },
+    };
+
+    const bytes = Buffer.from([0x00, 0xff]);
+    const { exchanges } = await send(client, {
+      method: "POST",
+      body: bytes.toString("base64"),
+      body_encoding: "base64",
+    });
+
+    expect(seen[0]?.bodyBase64).toBe(bytes.toString("base64"));
+    // The lossy rendering is still sent, for a probe that predates the field.
+    expect(seen[0]?.body).toBe("\u0000�");
+    expect(exchanges[0]?.requestBody).toEqual(bytes);
   });
 });

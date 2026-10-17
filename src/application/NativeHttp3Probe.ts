@@ -150,7 +150,23 @@ export interface NativeHttp3Request {
   readonly authority: string | undefined;
   readonly method: string;
   readonly headers: readonly NativeHttp3Header[];
+  /**
+   * The body as text, for a probe that predates `bodyBase64`.
+   *
+   * The probe protocol carries JSON strings, and a byte that is not valid UTF-8
+   * cannot survive one. `bodyBase64` is the lossless field, and the probe prefers
+   * it; this one remains so an older probe at `UVP_NATIVE_PROBE` still receives
+   * the text bodies it can carry rather than nothing.
+   */
   readonly body: string;
+  /**
+   * The body as the exact bytes the caller supplied, base64-encoded.
+   *
+   * Absent when there is no body. A probe that understands this field ignores
+   * `body`; the two are the same bytes for a UTF-8 body, and only this one is the
+   * same bytes for every other body.
+   */
+  readonly bodyBase64: string | undefined;
   /** A PEM bundle to verify the peer against. Absent means no verification. */
   readonly caFile: string | undefined;
   /** End the run after this long with nothing happening on the connection. */

@@ -83,6 +83,9 @@ bool isValidUtf8(const char* data, size_t length);
 /** Base64, so a binary payload reads as itself rather than as a byte count. */
 std::string base64Encode(const char* data, size_t length);
 
+/** The inverse: the exact bytes, or false when the text is not padded base64. */
+bool base64Decode(const std::string& text, std::string* bytes);
+
 /** One report, on stdout, flushed: `_Exit`, which may follow, does not flush. */
 void emit(const json& value);
 
