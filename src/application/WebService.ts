@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { cancelledFailure, UvpFailure } from "../domain/errors.js";
+import { cancelledFailure, isCancelledFailure, UvpFailure } from "../domain/errors.js";
 import { newId, sha256 } from "../domain/identity.js";
 import {
   decodeBody,
@@ -601,7 +601,22 @@ export class WebService {
       maxRedirects: input.max_redirects,
       verifyTls: input.verify_tls,
       timeoutMs: input.timeout_ms,
+      // Threaded rather than read only after the exchange: the transport has to
+      // destroy a request already on the wire, or the call runs to completion
+      // after the caller withdrew and the only trace of the withdrawal is the
+      // check below.
+      signal,
     }).catch((cause: unknown) => {
+      // A withdrawal is not a finding about the target. The transport reports it
+      // as a failure — the same channel as a refused connection — so it has to
+      // be recognised before the classification below dresses it as an endpoint
+      // that did not answer.
+      if (isCancelledFailure(cause)) throw cause;
+      if (signal.aborted) {
+        throw cancelledFailure(
+          `The request for ${input.url} was cancelled before a response was read.`,
+        );
+      }
       const message = cause instanceof Error ? cause.message : String(cause);
       // The transport classified the failure where it saw it; matching the
       // message here instead made the two disagree the moment either changed.

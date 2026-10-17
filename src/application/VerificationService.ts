@@ -23,7 +23,7 @@ import type { SessionStore } from "./sessionStore.js";
 import { readWorkspaceManifest } from "./workspaceManifest.js";
 import { selectToolchain } from "./toolchainSelection.js";
 import type { ToolchainKind } from "../domain/toolchain.js";
-import { UvpFailure } from "../domain/errors.js";
+import { cancelledFailure, isCancelledFailure, UvpFailure } from "../domain/errors.js";
 
 /**
  * The verification workflow.
@@ -376,6 +376,15 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
   let failed = 0;
 
   for (const spec of input.requests) {
+    // The withdrawal is checked between requests as well as handled below: the
+    // first check is what stops a second request from being sent at all once the
+    // caller has stopped waiting for the answer to the first.
+    if (context.signal.aborted) {
+      throw cancelledFailure(
+        `The verification pass was cancelled before the request for ${requestLabel(spec)} was ` +
+          "sent, so nothing was observed about it.",
+      );
+    }
     const url = `${base}${spec.path.startsWith("/") ? spec.path : `/${spec.path}`}`;
     const startedAt = Date.now();
 
@@ -411,6 +420,20 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
         context.signal,
       )
       .catch((cause: unknown) => {
+        // A cancellation is the caller's decision, not a fact about the service.
+        // Recording it as an `unverified` entry was the contradiction this guard
+        // ends: the entry's own sentence said the request completed, and the pass
+        // went on to issue the next request after the caller had withdrawn. The
+        // readiness stage above already rethrows a cancellation; this is the same
+        // rule for the request stage, and it is checked first because every other
+        // error below is a finding that belongs in the bundle.
+        if (isCancelledFailure(cause)) throw cause;
+        if (context.signal.aborted) {
+          throw cancelledFailure(
+            `The verification pass was cancelled while the request for ${requestLabel(spec)} was ` +
+              "in flight, so nothing was observed about the service.",
+          );
+        }
         const blockedBy = cause instanceof Error ? cause.message : String(cause);
         const question = `Does ${requestLabel(spec)} behave as asserted?`;
         recordUnknown(recorder, question, "not_attempted", { blockedBy });

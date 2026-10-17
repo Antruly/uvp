@@ -182,6 +182,18 @@ export const cancelledFailure = (message: string): UvpFailure =>
   });
 
 /**
+ * Whether a throw is the caller's withdrawal rather than a finding.
+ *
+ * The layering rule is that a cancellation is an answer to the caller, never a
+ * fact about the subject. A layer that delegates to another has to be able to
+ * tell the two apart before it wraps or records anything, and the code is the
+ * one stable name for it — the message is prose and the class is shared with
+ * every other failure.
+ */
+export const isCancelledFailure = (value: unknown): value is UvpFailure =>
+  value instanceof UvpFailure && value.detail.code === "cancelled";
+
+/**
  * Project any thrown value into the error contract.
  *
  * An unrecognised throw becomes `execution_failure` and keeps its message: we

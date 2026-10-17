@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { performRequest, transportFailureKind } from "./httpClient.js";
 import type { HttpRequestSpec, TransportFailureKind } from "./httpClient.js";
+import { isCancelledFailure } from "../domain/errors.js";
 
 /**
  * The transport, asked what it saw.
@@ -256,6 +257,86 @@ describe("a connection that answered", () => {
  * those decisions was once a regex over an error message, so a timeout on the
  * default configuration came back classified as an unreachable endpoint.
  */
+/** A signal that aborts itself after `delayMs`, so a test does not have to time the interrupt. */
+const abortAfter = (delayMs: number): AbortSignal => {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), delayMs).unref();
+  return controller.signal;
+};
+
+/**
+ * The withdrawal, through the transport.
+ *
+ * A cancellation has to be a rejection in the caller's own vocabulary, and it has
+ * to arrive while the request is still on the wire — not after the service
+ * eventually answers. `timeoutMs` is five seconds in `SPEC`, so a cancellation
+ * that lands promptly is the only thing that can keep these cases short.
+ */
+describe("a request the caller cancels", () => {
+  it("rejects with a cancellation while an HTTP/1.1 request is in flight", async () => {
+    const port = await startSilent();
+    const started = Date.now();
+
+    const failure = await performRequest({
+      ...SPEC,
+      url: url(port),
+      httpVersion: "1.1",
+      signal: abortAfter(50),
+    }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+
+    expect(isCancelledFailure(failure)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("rejects with a cancellation while an HTTP/2 stream is open", async () => {
+    // The h2 session owns the socket, so the withdrawal has to end the session
+    // rather than only this frame's stream: leaving it open would keep the
+    // caller's connection alive after the call had returned.
+    const port = await startH2c(() => {
+      // Never responds.
+    });
+    const started = Date.now();
+
+    const failure = await performRequest({
+      ...SPEC,
+      url: url(port),
+      httpVersion: "2",
+      signal: abortAfter(50),
+    }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+
+    expect(isCancelledFailure(failure)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("dials nothing for a signal that was already aborted", async () => {
+    // A call that arrives cancelled must not open a connection: there is nothing
+    // to cancel if the request was never sent, and a dial would be a request the
+    // caller had already decided not to wait for.
+    const deadEnd = await startCountedDeadEnd();
+    const controller = new AbortController();
+    controller.abort();
+
+    const failure = await performRequest({
+      ...SPEC,
+      url: url(deadEnd.port),
+      httpVersion: "1.1",
+      signal: controller.signal,
+    }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+
+    expect(isCancelledFailure(failure)).toBe(true);
+    expect(deadEnd.connections()).toBe(0);
+  });
+});
+
 describe("the kind of a transport failure", () => {
   it("is `protocol` for a peer that does not speak the version it was asked for", async () => {
     // Not reachable through HTTP/1.1 at all: an h2c server's first bytes are a

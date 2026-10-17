@@ -468,6 +468,30 @@ describe("the web primitives", () => {
   );
 
   it(
+    "treats an interrupt during a request as a cancellation, not as an unreachable endpoint",
+    async () => {
+      // The fixture answers `/slow` after 30 seconds, and this call gives up
+      // after 5: the abort is the only thing that can end it first, so a call
+      // that reports a deadline or an unreachable endpoint is a call that
+      // ignored the caller and answered a question nobody was waiting on.
+      const started = Date.now();
+      const failure = await callAbortingAfter(250, "uvp_http_request", {
+        url: `${fixture.origin}/slow`,
+        method: "GET",
+        timeout_ms: 5_000,
+      }).then(
+        () => undefined,
+        (cause: unknown) => toUvpError(cause),
+      );
+
+      expect(failure, "uvp_http_request answered after its call had been cancelled").toBeDefined();
+      expect(failure?.code).toBe("cancelled");
+      expect(Date.now() - started).toBeLessThan(4_000);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "probes a websocket and records the greeting the far end sent",
     async () => {
       const output = await call("uvp_websocket_probe", {
