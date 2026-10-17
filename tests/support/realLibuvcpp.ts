@@ -325,22 +325,28 @@ export const createWorkspace = async (
 /**
  * Build a generated workspace through uvp. The caller judges the result.
  *
- * On Windows the lane names Ninja and Release. The archive is a release build
- * with the release CRT, and the Visual Studio generator is multi-configuration:
- * `-DCMAKE_BUILD_TYPE` is ignored there, so the default build was Debug linked
- * against a release library — two CRTs in one process, which is not a supported
- * combination. Ninja makes the build type effective and Release matches the
- * archive. This is the lane's route, not a change to the product's default; the
- * default Windows generator is exercised by the source lane and its compiler
- * probe, but not by a C++ build here.
+ * On Windows the lane builds Release against the archive. The archive is a
+ * release build with the release CRT, and a Debug build against it mixes CRTs.
+ * `UVP_WINDOWS_GENERATOR` selects the route: `ninja` names Ninja, and `default`
+ * omits `--generator` so CMake chooses the installed Visual Studio — the
+ * multi-configuration generator the `--config` selector exists for. The default
+ * is Ninja for a local run that does not set the variable.
  */
-export const buildWorkspace = async (workspace: Workspace): Promise<CliOutcome> =>
-  await runCli([
+export const buildWorkspace = async (workspace: Workspace): Promise<CliOutcome> => {
+  const windowsGenerator = process.env["UVP_WINDOWS_GENERATOR"] ?? "ninja";
+  return await runCli([
     "build",
     workspace.root,
-    ...(isWindows ? ["--generator", "ninja", "--build-type", "Release"] : []),
+    ...(isWindows
+      ? [
+          ...(windowsGenerator === "default" ? [] : ["--generator", windowsGenerator]),
+          "--build-type",
+          "Release",
+        ]
+      : []),
     "--json",
   ]);
+};
 
 const sleep = async (ms: number): Promise<void> =>
   await new Promise((resolve) => setTimeout(resolve, ms));
