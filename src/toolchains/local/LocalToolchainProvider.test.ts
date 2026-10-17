@@ -378,9 +378,13 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(assignmentOf(compile, "LC_MESSAGES")).toBe("C");
     // Read the record in its own notation rather than as raw text. On Windows
     // the build directory is single-quoted because it contains backslashes, so an
-    // `endsWith` comparison fails on the quoting rather than on the command; the
-    // last two words are the claim either way.
-    expect(wordsOf(compile).slice(-2)).toEqual(["--build", buildDir]);
+    // `endsWith` comparison fails on the quoting rather than on the command. The
+    // configuration selector is the other half: multi-configuration generators
+    // ignore `CMAKE_BUILD_TYPE` and read `--config`, so the recorded compile line
+    // must carry the caller's build type.
+    const words = wordsOf(compile);
+    expect(words).toContain(buildDir);
+    expect(words.slice(-2)).toEqual(["--config", "Debug"]);
     expect(outcome.succeeded).toBe(true);
   });
 });
@@ -401,7 +405,7 @@ describe("the process runner a local build is given", () => {
     const outcome = await scripted.createClient().build({
       workspacePath,
       buildDir,
-      buildType: "Debug",
+      buildType: "Release",
       clean: false,
       timeoutMs: 60_000,
       configureOnly: false,
@@ -410,7 +414,10 @@ describe("the process runner a local build is given", () => {
 
     expect(seen.map((call) => call.command)).toEqual(["cmake", "cmake"]);
     expect(seen[0]?.args.slice(0, 4)).toEqual(["-S", workspacePath, "-B", buildDir]);
-    expect(seen[1]?.args.slice(0, 2)).toEqual(["--build", buildDir]);
+    // The compile step names the configuration for multi-configuration
+    // generators; this is the assertion that would have caught a Release request
+    // silently building Debug on the default Windows/macOS generator.
+    expect(seen[1]?.args.slice(0, 4)).toEqual(["--build", buildDir, "--config", "Release"]);
     expect(outcome.commands).toHaveLength(2);
     expect(outcome.succeeded).toBe(true);
   });
