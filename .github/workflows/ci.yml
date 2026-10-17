@@ -133,6 +133,11 @@ jobs:
       - name: Verify that the sweep summary still reports what its kills rest on
         if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
         run: npm run verify:mutation-summary
+      # Guarded on `code` alone: the duplication summary and its fixtures are both
+      # under `scripts/`, and no workflow step reads the summary's output.
+      - name: Verify that the duplication summary states only what it read
+        if: needs.changes.outputs.code == 'true'
+        run: npm run verify:static-check-report
       - name: Check formatting when no code changed
         if: needs.changes.outputs.code != 'true'
         run: npm run format:check
