@@ -150,6 +150,12 @@ approval packet, and the author proxy assistant's limits — is defined in
 here, and it does not change the human gate above: the author completes the
 **Author readiness** declarations and is the only approver.
 
+The per-engineer identity, task-taking, hand-back, and upstream rules are in
+[docs/ai-engineer-operations.md](docs/ai-engineer-operations.md); the current
+open work and direction are in [docs/work-plan.md](docs/work-plan.md). Every
+engineer uses its assigned identity (for example `Antruly-dev-1`) and marks every
+comment and PR with it.
+
 <!-- BEGIN:turborepo-agent-rules -->
 
 # This is NOT the Turborepo you know

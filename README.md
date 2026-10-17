@@ -239,15 +239,18 @@ and the same driver-loading path, and are not claimed as observed.
 
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp
-generates. What it does not have yet is reach: the toolchain provider _port_ is
-defined and the `local` provider implements it; the container and remote-SSH
-providers are not written.
+generates. The toolchain provider _port_ has two implementations: `local` and
+`container`. The `remote-ssh` provider is not written; it is blocked on a real
+verification route rather than on appetite.
 
 **Not started.** Release automation: `release-please-config.json` and the
 conventional-commit gate on pull request titles exist, but nothing runs them yet,
 so no version has been cut and the package is installed from a clone or a
-tarball. Also ahead: a Windows lane for `local-msvc`, the last item the roadmap
-tracks. The rest of that list has landed and is checked: every action under
+tarball.
+
+The Windows `local-msvc` lane has landed and runs in CI; its remaining gaps are
+tracked separately (the Windows database refusal case and MSVC link diagnostics).
+The rest of that list has landed and is checked: every action under
 `.github/` is SHA-pinned with the release named beside it
 (`npm run verify:actions`), the tarball packs to the same digest from the tree,
 from an unpacked copy at another path, and after a clean rebuild of `dist/`
@@ -340,9 +343,10 @@ An older libuvcpp fails the check with the version it found named in the message
 <summary>Does uvp work on Windows?</summary>
 
 The generated projects do — the CMake templates branch for MSVC and the CMake
-package route works there. The uvp toolchain provider is currently local and
-POSIX-oriented; a Windows provider is not written yet. The doctor reports this
-rather than pretending otherwise.
+package route works there. The `local` provider is exercised on Windows by the
+`windows-toolchain` CI lane with MSVC. The lane still skips the Windows database
+refusal case (#108), and MSVC link diagnostics are tracked in #142; the doctor
+reports what it can and cannot establish rather than pretending otherwise.
 </details>
 
 ## Documentation
@@ -363,6 +367,8 @@ rather than pretending otherwise.
 - [Releasing](docs/releasing.md) — the release process
 - [AGENTS.md](AGENTS.md) — repository rules for AI agents
 - [AI development workflow](docs/agent-workflow.md) — roles, ownership, review, and the approval gate
+- [AI engineer operations](docs/ai-engineer-operations.md) — identity, task-taking, and hand-back rules
+- [Current development plan](docs/work-plan.md) — current progress, open work, and directions
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution scope and AI governance
 
 ## Disclaimer

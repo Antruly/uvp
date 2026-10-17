@@ -65,6 +65,8 @@ capabilities each gap actually blocks.
 | Add a tool or change a contract               | [Tool design](tool-design.md), [MCP contracts](mcp-contracts.md) |
 | Work on uvp itself                            | [Testing](testing.md), [Releasing](releasing.md)                 |
 | Work with AI agents                           | [AI development workflow](agent-workflow.md)                     |
+| Coordinate AI engineers                       | [AI engineer operations](ai-engineer-operations.md)              |
+| See current work and direction                | [Current development plan](work-plan.md)                         |
 
 ## What uvp is not
 
