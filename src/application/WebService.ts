@@ -805,18 +805,51 @@ export class WebService {
       });
     }
 
+    // The upgrade is an HTTP exchange, and a rejected one is an answer. The probe
+    // already reports its status and headers; recording them is what makes the
+    // record's own header assertions answerable, instead of reporting a header
+    // the handshake carried as absent because the record dropped it.
+    const handshakeExchange: HttpExchange | undefined =
+      result.handshake === undefined
+        ? undefined
+        : {
+            url: input.url,
+            method: "GET",
+            status: result.handshake.status,
+            statusText: "",
+            // A WebSocket upgrade is HTTP/1.1. The probes do not report a
+            // version for the handshake, and this is the one it is.
+            httpVersion: "1.1",
+            requestHttpVersion: "1.1",
+            headers: result.handshake.headers,
+            body: Buffer.alloc(0),
+            bodyBytes: 0,
+            bodyTruncated: false,
+            timing: {
+              dnsMs: undefined,
+              connectMs: undefined,
+              tlsMs: undefined,
+              ttfbMs: result.elapsedMs,
+              totalMs: result.elapsedMs,
+            },
+            tls: undefined,
+            redirects: [],
+          };
+
     const stored = remember(this.options.store, this.now, {
       method: "GET",
       url: input.url,
       requestHeaders: input.headers,
       requestBody: undefined,
-      response: undefined,
+      response: handshakeExchange,
       durationMs: result.elapsedMs,
       error: result.upgraded
         ? undefined
         : (result.transportError ??
           `upgrade rejected with status ${String(result.handshake?.status)}`),
       captureId: undefined,
+      responseHeadersObserved:
+        result.handshake === undefined ? [] : Object.keys(result.handshake.headers),
     });
 
     if (result.cancelled) {
