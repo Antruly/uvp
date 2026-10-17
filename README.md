@@ -358,6 +358,7 @@ rather than pretending otherwise.
 - [Roadmap](docs/roadmap.md) — what is planned and what gates admission
 - [Releasing](docs/releasing.md) — the release process
 - [AGENTS.md](AGENTS.md) — repository rules for AI agents
+- [AI development workflow](docs/agent-workflow.md) — roles, ownership, review, and the approval gate
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution scope and AI governance
 
 ## Disclaimer

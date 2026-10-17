@@ -64,6 +64,7 @@ capabilities each gap actually blocks.
 | Check what a libuvcpp build actually provides | [libuvcpp feature mapping](libuvcpp-features.md)                 |
 | Add a tool or change a contract               | [Tool design](tool-design.md), [MCP contracts](mcp-contracts.md) |
 | Work on uvp itself                            | [Testing](testing.md), [Releasing](releasing.md)                 |
+| Work with AI agents                           | [AI development workflow](agent-workflow.md)                     |
 
 ## What uvp is not
 
