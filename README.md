@@ -248,8 +248,9 @@ conventional-commit gate on pull request titles exist, but nothing runs them yet
 so no version has been cut and the package is installed from a clone or a
 tarball.
 
-The Windows `local-msvc` lane has landed and runs in CI; its remaining gaps are
-tracked separately (the Windows database refusal case and MSVC link diagnostics).
+The Windows `local-msvc` lane has landed and runs in CI. It exercises the
+database refusal case and the MSVC `LNK` link diagnostics already; the two tests
+that drive a real linker still skip there because their fixture is a GNU `ld`.
 The rest of that list has landed and is checked: every action under
 `.github/` is SHA-pinned with the release named beside it
 (`npm run verify:actions`), the tarball packs to the same digest from the tree,
@@ -344,9 +345,10 @@ An older libuvcpp fails the check with the version it found named in the message
 
 The generated projects do — the CMake templates branch for MSVC and the CMake
 package route works there. The `local` provider is exercised on Windows by the
-`windows-toolchain` CI lane with MSVC. The lane still skips the Windows database
-refusal case (#108), and MSVC link diagnostics are tracked in #142; the doctor
-reports what it can and cannot establish rather than pretending otherwise.
+`windows-toolchain` CI lane with MSVC, where the database refusal case runs and
+MSVC `LNK` link failures are parsed; the two tests that drive a real linker still
+skip there because their fixture is a GNU `ld`. The doctor reports what it can
+and cannot establish rather than pretending otherwise.
 </details>
 
 ## Documentation
