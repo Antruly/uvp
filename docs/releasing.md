@@ -256,6 +256,55 @@ pull request branch. The step is the maintainer's, and whether the PR shows the
 red check depends on whether CI ran on it at all — see
 [the token this workflow runs with](#the-token-and-what-it-does-not-trigger).
 
+## Publishing the MCP registry entry
+
+`server.json` is the metadata the [MCP registry](https://registry.modelcontextprotocol.io)
+lists; it is not the package. The entry publishes **after** the npm package
+exists (#161), and only with the maintainer's explicit authorization — the
+registry publish is an external publication.
+
+The registry's CLI is `mcp-publisher` from
+[modelcontextprotocol/registry](https://github.com/modelcontextprotocol/registry)
+(the registry is in preview). From the repository root:
+
+```bash
+mcp-publisher validate      # schema validation; publishes nothing
+mcp-publisher login github  # device flow; the namespace is io.github.Antruly
+mcp-publisher publish
+```
+
+With GitHub authentication the registry checks ownership through the name: the
+server name must start with `io.github.<login>/`, and the npm package's
+`package.json` must carry an `mcpName` equal to it. This repository sets
+`"mcpName": "io.github.Antruly/uvp"`, and the metadata check below refuses a
+`server.json` whose name differs.
+
+Verify what a client will see:
+
+```bash
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.Antruly/uvp"
+```
+
+The acceptance for #162 is that listing plus a fresh client's MCP handshake and
+`uvp_doctor` from the registry-installed path — not the local schema check.
+
+### The version, the description, and the check
+
+`server.json` is in release-please's `extra-files` for both `$.version` and
+`$.packages[0].version`, so the release PR moves the server entry and the npm
+entry together. `npm run metadata:check` (part of `check:ci`) then refuses a file
+where those disagree with `package.json`, where the name differs from
+`package.json#mcpName`, where the npm identifier/runtime/transport/argument shape
+is not the one a client installs, or where the description exceeds the registry
+schema's 100-character cap.
+
+That check does not fetch the registry schema: `mcp-publisher validate` is the
+authoritative schema validation and needs the CLI, which is a network download,
+so it is the maintainer's step at publish time. On 2026-10-17 the schema at
+`https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`
+was fetched and `server.json` validated against it; the first run failed on the
+description's length, which is why the entry now carries the shorter tagline.
+
 ## Changelog sections
 
 Commits are grouped by type. Everything is shown except `chore`:

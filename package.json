@@ -96,7 +96,7 @@
     "artifacts:skills": "node scripts/generate-skill-metadata.mjs",
     "artifacts:error-schema": "node scripts/generate-error-schema.mjs",
     "tool-catalog:check": "node scripts/generate-mcp-tool-catalog.mjs --check",
-    "metadata:check": "node scripts/generate-package-metadata.mjs --check",
+    "metadata:check": "node scripts/generate-package-metadata.mjs --check && node scripts/check-mcp-registry.mjs",
     "licenses:generate": "node scripts/licenses.mjs",
     "licenses:check": "node scripts/licenses.mjs --check",
     "sbom:generate": "node scripts/sbom.mjs",
