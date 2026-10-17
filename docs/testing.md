@@ -256,27 +256,26 @@ The skips are `it.skipIf`/`describe.skipIf` with the reason in the **title**, so
 a pass. Each names its issue, which is where the removal is tracked; the count
 above is the number that should fall as those land.
 
-**All three rows are fixed, the fake-executable one only partly.** The artifacts
-fixture now names every file it means as a build output
-the way this host names one — `EXE` from `src/toolchains/host.ts`, which is the
-product's own answer to that question — so its 4 tests run on Windows and the
-skips that named #19 are gone. The five fake-executable fixtures now install a
-program the host will start through one owner (`tests/support/fakeExecutable.ts`),
-so 43 of the 45 run. The other 2 are a _second_ wall behind the first, and it is
-worth stating plainly because it is not the shell-script problem: the local
-provider chooses `cmake`'s arguments itself, and on Windows the fake is a copy of
-Node, which reads `-S`/`--build` as its own bad options and exits 9 before any of
-the suite's code runs. Two tests are skipped by name for it, filed as
-[#22](https://github.com/Antruly/uvp/issues/22) and **decided on 2026-10-16: no
-product change.** The two are the local provider's own tests, and the way to make
-them run on Windows would be a `run` seam on that provider — the shape
-`ContainerToolchainProvider` already has, where the test scripts the outcomes and
-the provider does not choose the command line — which is a product change made to
-satisfy a test's stand-in rather than a defect the test found. So they stay skipped,
-titled with the reason, and the route is recorded against the `local-msvc` row in
-[roadmap.md](roadmap.md#hardening) for whoever builds a Windows C++ lane, where it
-would be needed for real. What the Windows lane therefore does not get is stated
-above rather than implied.
+**All three rows are fixed, and the fake-executable wall is now crossed by a seam
+rather than a workaround.** The artifacts fixture now names every file it means as
+a build output the way this host names one — `EXE` from
+`src/toolchains/host.ts`, which is the product's own answer to that question — so
+its 4 tests run on Windows and the skips that named #19 are gone. The five
+fake-executable fixtures now install a program the host will start through one
+owner (`tests/support/fakeExecutable.ts`), so 43 of the 45 run. The other 2 are a
+_second_ wall behind the first, and it is worth stating plainly because it is not
+the shell-script problem: the local provider chooses `cmake`'s arguments itself,
+and on Windows the fake is a copy of Node, which reads `-S`/`--build` as its own
+bad options and exits 9 before any of the suite's code runs.
+[#22](https://github.com/Antruly/uvp/issues/22) recorded that and **decided on
+2026-10-16: no product change for this source lane**. [#11](https://github.com/Antruly/uvp/issues/11)
+is the Windows C++ lane where the seam is needed for real, and the provider now
+takes the same `run` slot `ContainerToolchainProvider` has. The two tests inject a
+runner that answers the provider's request on Windows; on every other host the
+real runner still starts a real child, so the seam does not turn the whole file
+into a scripted one. What that does not establish is that a Windows host can start
+`cmake`: the `windows-toolchain` lane is where a real MSVC build observes that,
+and it says in its own name what it does.
 
 The recorded-command row was two problems wearing one issue number. The four
 assertions read the record as raw text, and `(?:^|\s)NAME=(\S+)` hands back
@@ -305,11 +304,11 @@ that is generated into `docs/public/tool-catalog.json`), was considered and
 rejected on the issue: every consumer would still have to render a string for
 `sources[].ref`, and the field's job is provenance, not re-execution.
 
-So 51 of the 53 have landed, leaving 2 skipped in these three groups, both the
-`cmake` pair for #22; the lane's own total is 4, the other two being the
-reserved-port window — a host with no window below the ephemeral range has none
-to reserve from, and says so in the title — and `runCancellation`'s stop marker,
-which is a `TerminateProcess` on Windows and says so in its title too.
+So all 53 have landed: the `cmake` pair now runs on Windows through the injected
+runner, and the source lane's own total is 2 — the reserved-port window, where a
+host with no window below the ephemeral range has none to reserve from and says so
+in the title, and `runCancellation`'s stop marker, which is a `TerminateProcess`
+on Windows and says so in its title too.
 
 The lane also found one defect it could not have run without: `scripts/run-tests.mjs`
 spawned `node_modules/.bin/vitest` directly, which on Windows is not a file that

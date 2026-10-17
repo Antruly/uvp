@@ -154,7 +154,7 @@ const shellQuote = (value: string): string =>
  * host this line is not written for reads it as the description it is. #20
  * records the alternative — the record as data — and why it was not taken.
  */
-const renderCommand = (options: RunProcessOptions): string => {
+export const renderCommand = (options: RunProcessOptions): string => {
   const line = [options.command, ...options.args].map(shellQuote).join(" ");
   const environment = Object.entries(options.env ?? {}).sort(([left], [right]) =>
     left < right ? -1 : 1,

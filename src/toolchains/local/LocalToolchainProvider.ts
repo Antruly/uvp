@@ -20,6 +20,7 @@ import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diag
 import { configHeaderPaths, modulesFromConfigHeader } from "../libuvcppConfig.js";
 import { isWindows, versionOf, whichOnPath } from "../host.js";
 import { runProcess } from "../processRunner.js";
+import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 
 /**
  * What a cancelled inspection, discovery, or build reports.
@@ -203,6 +204,31 @@ const generatorArgs = (generator: BuildRequest["generator"]): readonly string[] 
 };
 
 /**
+ * How a local build starts `cmake`.
+ *
+ * A seam, not a second implementation: the default is `runProcess`, and the
+ * only caller that replaces it is a test that cannot start the process it would
+ * otherwise start. `ContainerToolchainProvider` has the same shape for the same
+ * reason, and this one was left out until a Windows lane needed it for real
+ * ([#11](https://github.com/Antruly/uvp/issues/11)).
+ *
+ * The limit it exists for is measured rather than imagined. The provider chooses
+ * `cmake`'s argv itself, so on Windows the suite's `cmake` stand-in is a copy of
+ * Node, and Node reads `-S`/`--build` as its own bad options before any of the
+ * suite's code runs — `node: bad option: -S`, exit 9, nothing imported. A test
+ * that injects this runner observes the command the provider would run without
+ * pretending a Node copy accepted it. [#22](https://github.com/Antruly/uvp/issues/22)
+ * records the original finding.
+ */
+export type LocalRunSlot = (options: RunProcessOptions) => Promise<ProcessOutcome>;
+
+/** What a local provider may be given besides the host it reads. */
+export interface LocalProviderOptions {
+  /** Replaces the process runner; the default is `runProcess`. */
+  readonly run?: LocalRunSlot;
+}
+
+/**
  * The local toolchain.
  *
  * Synchronous, on this machine, with the caller's own compiler. This is the
@@ -210,6 +236,8 @@ const generatorArgs = (generator: BuildRequest["generator"]): readonly string[] 
  * is the one a user has when they have nothing else.
  */
 export class LocalToolchainProvider implements ToolchainProvider {
+  constructor(private readonly options: LocalProviderOptions = {}) {}
+
   identity(): ToolchainIdentity {
     return { id: "local", platform: `${process.platform}-${process.arch}` };
   }
@@ -294,7 +322,7 @@ export class LocalToolchainProvider implements ToolchainProvider {
   }
 
   createClient(): ToolchainClient {
-    return new LocalToolchainClient(this.identity());
+    return new LocalToolchainClient(this.identity(), this.options.run ?? runProcess);
   }
 }
 
@@ -361,7 +389,10 @@ const findLibuvcpp = async (
 };
 
 class LocalToolchainClient implements ToolchainClient {
-  constructor(readonly identity: ToolchainIdentity) {}
+  constructor(
+    readonly identity: ToolchainIdentity,
+    private readonly run: LocalRunSlot,
+  ) {}
 
   async build(request: BuildRequest): Promise<BuildOutcome> {
     // A caller that named a prefix is taken at its word; otherwise the build
@@ -378,7 +409,7 @@ class LocalToolchainClient implements ToolchainClient {
       (await findLibuvcpp(request.workspacePath, request.signal)).installPrefix;
     const configureStart = Date.now();
     const jobs = request.jobs === undefined ? [] : ["-j", String(request.jobs)];
-    const configure = await runProcess({
+    const configure = await this.run({
       command: "cmake",
       args: [
         "-S",
@@ -424,7 +455,7 @@ class LocalToolchainClient implements ToolchainClient {
     if (request.target !== undefined) buildArgs.push("--target", request.target);
     if (request.clean) buildArgs.push("--clean-first");
 
-    const compile = await runProcess({
+    const compile = await this.run({
       command: "cmake",
       args: buildArgs,
       // No prefix: `cmake --build` searches for nothing, because the configure

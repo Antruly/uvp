@@ -10,6 +10,10 @@ name: CI
 #   - `package-e2e` installs the packed tarball into an empty prefix and speaks
 #     real stdio MCP to it. A published package that cannot start is not caught
 #     by any test that runs from the working tree.
+#   - `windows-toolchain` is `toolchain`'s Windows counterpart. It builds and
+#     runs generated services with MSVC against the libuvcpp release archive,
+#     because every Windows claim the local provider made was source-derived
+#     until a lane ran it.
 
 on:
   push:
@@ -266,6 +270,98 @@ jobs:
       # named `vitest-report-*` into one coverage run, and this lane is not part of
       # that merge — what it establishes is that these tests pass here, which the
       # job's own log shows.
+
+  windows-toolchain:
+    name: Windows MSVC toolchain (release archive)
+    needs: [changes, static]
+    if: needs.changes.outputs.toolchain == 'true'
+    runs-on: windows-latest
+    # The archive is a download rather than a source build, so the cost is the
+    # suite: six generated workspaces, each configured and compiled by MSVC.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Cache npm package downloads
+        id: npm-cache
+        uses: ./.github/actions/npm-cache
+      - run: npm ci
+      - name: Install libuvcpp from the MSVC release archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Pin the version rather than resolving "latest": this lane's claim is
+          # about a release whose asset names and layout were inspected, and a
+          # moving tag would silently change what the claim covers.
+          $version = '1.7.0'
+          $archive = "libuvcpp-$version-msvc-x64.zip"
+          $zip = Join-Path $env:RUNNER_TEMP $archive
+          Invoke-WebRequest -Uri "https://github.com/Antruly/libuvcpp/releases/download/v$version/$archive" -OutFile $zip
+
+          $extract = Join-Path $env:RUNNER_TEMP 'libuvcpp-extract'
+          if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract
+
+          $prefix = Join-Path $env:RUNNER_TEMP 'uvcpp-prefix'
+          if (Test-Path $prefix) { Remove-Item -Recurse -Force $prefix }
+          Move-Item -LiteralPath (Join-Path $extract "libuvcpp-$version-msvc-x64") -Destination $prefix
+
+          # Record what the archive actually provides rather than assuming the
+          # module list. An empty list is a finding, not a clean skip: without a
+          # config header uvp's discovery would report the install as unknown.
+          $header = Join-Path $prefix 'include/uvcpp/uvcpp_config.h'
+          if (-not (Test-Path $header)) { throw "the archive has no include/uvcpp/uvcpp_config.h" }
+          $modules = Select-String -Path $header -Pattern '^#\s*define\s+(UVCPP_[A-Z0-9_]+)\s+1\b' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if ($modules.Count -eq 0) { throw "the archive's config header defines no UVCPP_* module" }
+          $modules | ForEach-Object { Write-Host "module: $_" }
+
+          # This archive ships pkg-config and no CMake package config, which is the
+          # route the generated CMakeLists falls back to. The runner image does not
+          # ship pkg-config, so the lane installs the same one a user would.
+          $pc = Join-Path $prefix 'lib/pkgconfig/uvcpp.pc'
+          if (-not (Test-Path $pc)) { throw "the archive has no lib/pkgconfig/uvcpp.pc" }
+          if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
+            choco install pkgconfiglite --no-progress -y
+            $env:Path = "$env:ProgramData\chocolatey\bin;$env:Path"
+          }
+          pkg-config --version
+
+          # Both are read at different times: `PKG_CONFIG_PATH` by CMake's
+          # configure, and `PATH` by the DLL loader when the built service starts.
+          # The archive's uvcpp.dll imports libssl/libcrypto/vcruntime from bin/.
+          "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "UVCPP_ROOT=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PKG_CONFIG_PATH=$prefix\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Compile uvp
+        run: npm run compile
+      - name: Build and run generated workspaces with MSVC
+        shell: cmd
+        run: |
+          set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+          for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
+          if not defined VSINSTALL (
+            echo ::error title=msvc::vswhere found no Visual Studio installation with the C++ tools
+            exit /b 1
+          )
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          where cl
+          where cmake
+          where pkg-config
+          npm run test:toolchain
+      - name: Upload toolchain diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-toolchain-lane-${{ github.run_attempt }}
+          path: .cache/toolchain/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
   test-shard:
     name: Test shard (${{ matrix.shard }})
@@ -747,6 +843,7 @@ jobs:
       - build
       - test-source
       - windows-source
+      - windows-toolchain
       - test-shard
       - test
       - toolchain
