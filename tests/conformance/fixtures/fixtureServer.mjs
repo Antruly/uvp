@@ -50,16 +50,24 @@ const soapFault = (code, reason) =>
     `<soap:Fault><faultcode>${code}</faultcode><faultstring>${reason}</faultstring></soap:Fault>`,
   );
 
-/** Frame a payload as a single unmasked server-to-client text frame. */
+/** Frame a payload as a single unmasked server-to-client frame. */
 const serverFrame = (payload, opcode = 0x1) => {
   const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "utf8");
-  const header = body.length < 126 ? Buffer.from([0x80 | opcode, body.length]) : null;
-  if (header !== null) return Buffer.concat([header, body]);
-  const extended = Buffer.alloc(4);
-  extended.writeUInt16BE(body.length, 2);
-  extended[0] = 0x80 | opcode;
-  extended[1] = 126;
-  return Buffer.concat([extended, body]);
+  if (body.length < 126) return Buffer.concat([Buffer.from([0x80 | opcode, body.length]), body]);
+  if (body.length < 65_536) {
+    const extended = Buffer.alloc(4);
+    extended[0] = 0x80 | opcode;
+    extended[1] = 126;
+    extended.writeUInt16BE(body.length, 2);
+    return Buffer.concat([extended, body]);
+  }
+  // The 64-bit form, which a payload past the probe's per-frame limit needs: the
+  // limit has to be reachable for the fixture to show what the tool does at it.
+  const wide = Buffer.alloc(10);
+  wide[0] = 0x80 | opcode;
+  wide[1] = 127;
+  wide.writeBigUInt64BE(BigInt(body.length), 2);
+  return Buffer.concat([wide, body]);
 };
 
 /** Decode whatever complete frames are in `buffer`, returning the remainder. */
@@ -412,6 +420,18 @@ server.on("upgrade", (request, socket) => {
   // answerable without sending a frame first, which matters because a frame uvp
   // sent is not evidence that the server spoke.
   socket.write(serverFrame("fixture: greeting"));
+
+  // A text frame the probe may not decode: bytes that are not UTF-8, or a
+  // payload longer than its per-frame limit. The contract says both are reported
+  // as omitted text rather than decoded, and these are the frames that ask.
+  const textFrame = url.searchParams.get("text_frame");
+  if (textFrame === "invalid-utf8") {
+    socket.write(serverFrame(Buffer.from([0x68, 0x69, 0xff, 0xfe])));
+  } else if (textFrame === "oversize") {
+    // 30,000 U+4E2D is 90,000 bytes, past the 64 KiB limit and not a multiple of
+    // the character width, so the limit cuts inside a character.
+    socket.write(serverFrame(Buffer.from("中".repeat(30_000), "utf8")));
+  }
 
   if (closeCode !== null) {
     // The server closes first, with a code and a reason of the caller's choosing.

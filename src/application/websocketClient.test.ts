@@ -2,7 +2,8 @@ import { Buffer } from "node:buffer";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeFrame, parseFrame } from "./websocketClient.js";
+import { encodeFrame, framePayload, parseFrame } from "./websocketClient.js";
+import type { WebSocketFrame, WebSocketOpcode } from "./websocketClient.js";
 
 /**
  * The frame codec is the one part of the probe that talks to a foreign
@@ -116,5 +117,60 @@ describe("parseFrame", () => {
     const parsed = parseFrame(Buffer.from([0x83, 0x00]));
     expect(parsed).toBeDefined();
     expect(parsed?.opcode).toBeUndefined();
+  });
+});
+
+describe("framePayload", () => {
+  const frameOf = (opcode: WebSocketOpcode, payload: Buffer): WebSocketFrame => ({
+    direction: "received",
+    opcode,
+    bytes: payload.byteLength,
+    payload,
+    atMs: 0,
+    protocolError: false,
+  });
+
+  it("carries whole text as text", () => {
+    expect(framePayload(frameOf("text", Buffer.from("héllo")), 64)).toEqual({
+      text: "héllo",
+      truncated: false,
+    });
+  });
+
+  it("does not mark a payload that fits the limit as truncated", () => {
+    const payload = Buffer.from("中".repeat(3), "utf8");
+    expect(framePayload(frameOf("text", payload), payload.byteLength)).toEqual({
+      text: "中中中",
+      truncated: false,
+    });
+  });
+
+  it("omits a text payload the limit cut instead of decoding a partial character", () => {
+    // 30,000 U+4E2D is 90,000 bytes, so a 65,536-byte limit lands inside a
+    // character. Decoding that prefix ends the text in U+FFFD — a character the
+    // peer never sent, and one the native stack does not report.
+    const payload = Buffer.from("中".repeat(30_000), "utf8");
+    const cut = framePayload(frameOf("text", payload), 65_536);
+    expect(cut).toEqual({ textOmitted: "truncated", truncated: true });
+    expect(cut.text).toBeUndefined();
+  });
+
+  it("omits bytes that are not UTF-8 instead of substituting U+FFFD", () => {
+    // `toString("utf8")` turns [68 69 ff fe] into "hi��": two
+    // characters nobody sent, indistinguishable from a peer that sent them.
+    expect(framePayload(frameOf("text", Buffer.from([0x68, 0x69, 0xff, 0xfe])), 64)).toEqual({
+      textOmitted: "invalid-utf8",
+      truncated: false,
+    });
+  });
+
+  it("keeps a binary payload's kept bytes exact and says it cut", () => {
+    // A binary frame is bytes, not text: base64 of the prefix re-encodes to
+    // exactly those bytes, so cutting it invents nothing.
+    const payload = Buffer.from([0x00, 0xff, 0xfe, 0x41]);
+    const kept = framePayload(frameOf("binary", payload), 3);
+    expect(kept.truncated).toBe(true);
+    expect(kept.text).toBeUndefined();
+    expect(Buffer.from(kept.base64 ?? "", "base64").equals(payload.subarray(0, 3))).toBe(true);
   });
 });

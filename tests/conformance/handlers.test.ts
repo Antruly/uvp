@@ -909,6 +909,53 @@ describe("the websocket probe", () => {
   );
 });
 
+describe("the websocket probe's text frames", () => {
+  const frameBearing = (
+    output: Record<string, unknown>,
+    bytes: number,
+  ): { text?: string; text_omitted?: string; truncated: boolean } | undefined =>
+    (
+      output["frames"] as {
+        direction: string;
+        bytes: number;
+        text?: string;
+        text_omitted?: string;
+        truncated: boolean;
+      }[]
+    ).find((frame) => frame.direction === "received" && frame.bytes === bytes);
+
+  it(
+    "reports a text frame it may not decode as omitted, not as text",
+    async () => {
+      // The contract on `text_omitted`: "decoding either would invent bytes the
+      // peer never sent" (`src/contracts/webToolContracts.ts`). The fixture sends
+      // two such frames, and the answer to each is the omission, not a decode.
+      const invalid = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?text_frame=invalid-utf8`,
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", invalid);
+      const invalidFrame = frameBearing(invalid, 4);
+      expect(invalidFrame).toMatchObject({ text_omitted: "invalid-utf8", truncated: false });
+      expect(invalidFrame?.text).toBeUndefined();
+
+      const oversize = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?text_frame=oversize`,
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+      });
+      expectConforms("uvp_websocket_probe", oversize);
+      const oversizeFrame = frameBearing(oversize, 90_000);
+      // The limit cut this payload inside a character; the report says so instead
+      // of ending the text in U+FFFD.
+      expect(oversizeFrame).toMatchObject({ text_omitted: "truncated", truncated: true });
+      expect(oversizeFrame?.text).toBeUndefined();
+    },
+    TIMEOUT,
+  );
+});
+
 /**
  * Reports the real probe wrote, recorded rather than invented.
  *

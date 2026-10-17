@@ -1,7 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { createHash, randomBytes } from "node:crypto";
-import { Buffer } from "node:buffer";
+import { Buffer, isUtf8 } from "node:buffer";
 import type { IncomingMessage, ClientRequest } from "node:http";
 import type { Socket } from "node:net";
 
@@ -550,13 +550,33 @@ export const probeWebSocket = async (
   });
 };
 
-/** Turn a received frame into the text or base64 a tool result carries. */
+/**
+ * Turn a received frame into the text or base64 a tool result carries.
+ *
+ * A binary payload is bytes, so the kept prefix is exact and travels as base64.
+ * A text payload is decoded only when decoding is lossless: a payload this
+ * function cut and one that is not UTF-8 both carry no `text` and say which,
+ * because `toString("utf8")` replaces the bytes it cannot read with U+FFFD — a
+ * character the peer never sent, indistinguishable from one it did. The native
+ * stack applies the same rule (`text_omitted` in
+ * `native/uvcpp-probe/websocket_exchange.cpp`), so the two stacks report one
+ * frame one way.
+ */
 export const framePayload = (
   frame: WebSocketFrame,
   maxBytes: number,
-): { text?: string; base64?: string; truncated: boolean } => {
+): {
+  text?: string;
+  base64?: string;
+  textOmitted?: "truncated" | "invalid-utf8";
+  truncated: boolean;
+} => {
   const truncated = frame.payload.byteLength > maxBytes;
-  const slice = truncated ? frame.payload.subarray(0, maxBytes) : frame.payload;
-  if (frame.opcode === "binary") return { base64: slice.toString("base64"), truncated };
-  return { text: slice.toString("utf8"), truncated };
+  if (frame.opcode === "binary") {
+    const kept = truncated ? frame.payload.subarray(0, maxBytes) : frame.payload;
+    return { base64: kept.toString("base64"), truncated };
+  }
+  if (truncated) return { textOmitted: "truncated", truncated };
+  if (!isUtf8(frame.payload)) return { textOmitted: "invalid-utf8", truncated };
+  return { text: frame.payload.toString("utf8"), truncated };
 };
