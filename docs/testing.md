@@ -1056,6 +1056,70 @@ therefore pin the reader to its own docblock rather than to a caller, and they b
 load-bearing the day one of those consumers spreads a manifest or asks whether a key
 is there. The sweep's other 207 survivors are still unread.
 
+**`assertions.ts`'s 129 have been read, and it is the read where an unreferenced
+function is the whole story.** [#62](https://github.com/Antruly/uvp/issues/62) read
+the **90** readable survivors of that file's 129 — 39 of them the compiler refuses, in
+the class below — and pinned **84** of them with 38 new cases, so the file's own cases
+go from 66 to **104**. The file moves from **66.41% to 94.27%**: **361 killed, 22
+survived, 1 timeout**, 0 errors, in **10 minutes 23 seconds** for the one-file run
+against the group's **485** tests. Two functions hold **53 of the 90** and a test named
+neither. `evaluateJsonPath` is exported, is the module's only statement of what a path
+may be, and is reached by no test and by no module outside the file (`jsonPathValue` is
+its only caller); with `isRecord` beside it, the block `:66`–`:104` carried **54 of the
+file's 129 survivors** — 30 readable, 18 refused, 6 — the largest concentration this
+lane has found in one place. The other is `unevaluatedQuestion` and its `brief` helper
+(**23**): they build the question a check that could not run leaves behind, they are
+called from `VerificationService.ts:469` and `composition/toolHandlers.ts:1036` in
+production, and every part of that question is optional, so all four of their
+conditionals were mutated in both directions and the cap at 80 characters four ways.
+
+**What the read killed is more than the readable survivors, and that is a finding about
+the class below.** Of the 129 survivors the baseline reported, **107** are gone from
+the table: **84 of the 90 readable**, and **23 of the 39 the compiler refuses**. A
+refused mutant is not therefore an unkillable one — the mutation group runs `src/`
+through Vitest, which strips types rather than checking them, so a refused mutant whose
+behaviour a new test exercises is a kill like any other, and this read has 23 of them.
+That narrows what the class means once a file's read is done: it is a set of sites the
+compiler would have stopped, not a set of mutants no assertion can reach.
+
+**The survivor table was reconciled row by row rather than taken as read, and the
+reconciliation is itself a finding of the read.** The first sweep left 23 survivors
+where the accounting above allowed 22 — 16 the classifier refuses and **7** that
+compile, one more than the six the read had accounted for (the four equivalents
+measured below and the two rows [#61](https://github.com/Antruly/uvp/issues/61) is
+for). The seventh is `:77:21`, a `Regex` mutant that drops the `^` from the dot
+branch's pattern in `evaluateJsonPath`, and it is **not** equivalent: over the widened
+lattice **338** of the 121,908 inputs differ. With the anchor gone the engine finds the
+next `.name` anywhere in what remains of the path, so `$.[0].abc` reads the field `abc`
+and `$...a` reads `a` — both paths the pristine walker reports as ones it will not
+walk. That is a third state collapsing into a resolved value, which is the damage
+#61's two rows do as well, so the row is pinned rather than recorded: two rows in the
+refusal table, and the first sweep's 23 survivors are 22.
+
+The **22** that remain are recorded rather than chased. **Four** are equivalent
+mutants, measured by driving the compiled module — mutated and unmutated — through
+**121,908** inputs: 23 exchange records against all 12 assertion kinds × 10
+expectations × 11 targets × 2 negation states, each spec with and without an
+`expected` key, plus 9 documents × 52 paths through `evaluateJsonPath`. The comparison
+is a shape walk that counts a key present with the value `undefined` as a difference,
+because that is the difference an object-literal mutant makes; **no input distinguishes
+any of the four**, while four controls travelling with them were caught on **392**,
+**1532**, **440** and **4680** of those inputs, so the verdict is the comparison's
+finding rather than a comparison that cannot see. A fifth measured site, `:85:11`'s
+`if (close < 0)`, is one of the 16 the compiler refuses, which is why the four above
+are four. The two left for a fix are [#61](https://github.com/Antruly/uvp/issues/61):
+`header_matches` and `body_matches` at `:285:71` and `:315:71` read an expectation that
+is not a string as the empty pattern, so a check that could not run reports
+`satisfied` — measured at **1280** and **7744** of the same 121,908 inputs. Those rows
+are left in the report on purpose, because the test that kills them asserts the
+substitution rather than the behaviour, and #61's fix removes them along with the two
+siblings the compiler already refuses. The comparator is a scratch script under `/tmp`,
+so these numbers are quotable but not re-runnable from the repository — the same gap
+[#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
+**78** survivors are still unread — `bundleDiff.ts` 54, `evidence.ts` 13, `unknown.ts`
+6, `ToolchainProvider.ts` 5 — **66** of them readable once the classification below is
+applied.
+
 **A third of the survivor table is damage the build refuses, which segments the
 queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the
 question the `workspaceManifest.ts` read above surfaced — with `checkers` empty, how

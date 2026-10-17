@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { ASSERTION_KINDS, evaluateAssertions, percentile, requestLabel } from "./assertions.js";
+import {
+  ASSERTION_KINDS,
+  evaluateAssertions,
+  evaluateJsonPath,
+  percentile,
+  requestLabel,
+  unevaluatedQuestion,
+} from "./assertions.js";
 import type { AssertionOutcome, AssertionSpec } from "./assertions.js";
 import type { ExchangeRecord } from "./sessionStore.js";
 
@@ -76,6 +83,103 @@ describe("evaluateAssertions", () => {
   });
 });
 
+/**
+ * The walker itself, rather than the two assertions that call it.
+ *
+ * `evaluateJsonPath` is exported and carries the module's only statement of what
+ * a path may say — `$`, `.field`, `["field"]`, `[index]` — with everything else
+ * reported as unsupported. The assertions over it were the whole of its coverage,
+ * and they only ever asked for `$.ok`, `$.count`, `$.missing`, and `ok`, so the
+ * bracket forms and every rejection were reached by no test at all: a mutation of
+ * the `[` branch, of either bracket regex, or of the `unsupported` it returns
+ * changed what the engine answers and no assertion noticed.
+ */
+describe("evaluateJsonPath", () => {
+  const document = { ok: true, items: [{ id: 7 }], "odd key": 1 };
+
+  it("walks each form the docblock names, and the document itself for a bare $", () => {
+    expect(evaluateJsonPath(document, "$")).toEqual({ found: true, value: document });
+    expect(evaluateJsonPath(document, "$.ok")).toEqual({ found: true, value: true });
+    expect(evaluateJsonPath(document, "$.items[0].id")).toEqual({ found: true, value: 7 });
+    // A key a `.field` cannot spell is what the quoted form is for.
+    expect(evaluateJsonPath(document, '$["odd key"]')).toEqual({ found: true, value: 1 });
+    expect(evaluateJsonPath(document, "$['odd key']")).toEqual({ found: true, value: 1 });
+    expect(evaluateJsonPath([10, 20], "$[1]")).toEqual({ found: true, value: 20 });
+    // An index past the end, and a field that is not there, are walks that
+    // completed: `found` is about the path, not about the value.
+    expect(evaluateJsonPath([10, 20], "$[10]")).toEqual({ found: true, value: undefined });
+    expect(evaluateJsonPath(document, "$.nope")).toEqual({ found: true, value: undefined });
+  });
+
+  it("resolves a path against a document that is not a record to nothing", () => {
+    // The walk is over JSON, so a document that is a string, a number, a boolean,
+    // an array, `null`, or absent is a document the path cannot descend into. It
+    // is not a crash and it is not a value: `Array.isArray` and the record check
+    // are what keep `"text".length` and a dereference of `null` out of the answer.
+    for (const [label, value] of [
+      ["null", null],
+      ["absent", undefined],
+      ["an array", [10, 20]],
+      ["a string", "text"],
+      ["a number", 3],
+      ["a boolean", true],
+    ] as const) {
+      expect(evaluateJsonPath(value, "$.length"), label).toEqual({
+        found: true,
+        value: undefined,
+      });
+    }
+  });
+
+  it.each(["ok", ""])("refuses %j before walking anything", (path) => {
+    // The message names the rule rather than the offending path, because there is
+    // nothing else to say about a path that is not one.
+    expect(evaluateJsonPath(document, path)).toEqual({
+      found: false,
+      value: undefined,
+      unsupported: "path must start with $",
+    });
+  });
+
+  /**
+   * Paths the engine cannot evaluate, each reported as itself.
+   *
+   * The docblock's promise is that these are *reported* rather than quietly
+   * resolving to nothing, so every row asserts the whole triple — `found: false`
+   * is what a caller branches on, and `unsupported` is what tells them which path
+   * to correct. Several rows are the shape a caller writes by mistake: an index
+   * whose `[` is missing, a bracket that is closed by a bracket it did not open,
+   * a quoted key with something either side of the quotes.
+   *
+   * The last two are the dot branch seen from the other side. Its pattern is
+   * anchored at the `.` it has already read, so a dot followed by anything other
+   * than a name ends the walk; without the anchor the engine would find a later
+   * `.name` — the `abc` in `$.[0].abc`, the `a` in `$...a` — and answer with a
+   * field the caller never named, which is a resolved value where the honest
+   * answer is that the path could not be walked.
+   */
+  it.each([
+    ["$..a", "the recursive-descent form this engine does not implement"],
+    ["$a0]", "an index whose opening bracket is missing"],
+    ["$[a]", "a bracket that is neither a quoted key nor a number"],
+    ["$[a1]", "a bracket whose digits do not start it"],
+    ["$[1a]", "a bracket whose digits do not end it"],
+    ['$[x"a"]', "a quoted key with something before its quotes"],
+    ['$["a"x]', "a quoted key with something after its quotes"],
+    ["$[a].b", "a field after a bracket that was refused"],
+    ['$["a"', "a bracket that is never closed"],
+    ["$[0", "an index that is never closed"],
+    ["$.[0].abc", "a dot whose next segment is a bracket rather than a name"],
+    ["$...a", "an empty segment between two dots"],
+  ] as const)("reports %s as a path it will not walk — %s", (path, because) => {
+    expect(evaluateJsonPath(document, path), because).toEqual({
+      found: false,
+      value: undefined,
+      unsupported: path,
+    });
+  });
+});
+
 describe("status_equals", () => {
   it("passes when the recorded status matches the expectation", () => {
     expect(only(exchange({ status: 200 }), { kind: "status_equals", expected: 200 })).toMatchObject(
@@ -126,8 +230,19 @@ describe("status_in", () => {
     const outcome = only(exchange({ status: 500 }), { kind: "status_in", expected: [200, 204] });
     expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe(500);
-    expect(outcome.message).toContain("200");
-    expect(outcome.message).toContain("204");
+    // The set as a caller reads it back. `[200204]` names no member, and the
+    // membership text is the only place a failure says what it was testing.
+    expect(outcome.message).toBe("status 500, expected one of [200, 204]");
+  });
+
+  it("treats an expectation that is not a set as the empty set", () => {
+    // `expected` is `unknown` in the contract, so a scalar is a spec a caller can
+    // send. Reading `200` as the set it is not — or as the set `[200]` it also is
+    // not — would make this the one assertion that answers a question it was
+    // never asked. The empty set matches nothing, which is the failure it is.
+    const outcome = only(exchange({ status: 204 }), { kind: "status_in", expected: 204 });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe("status 204, expected one of []");
   });
 
   it("does not test membership when no status was recorded", () => {
@@ -161,6 +276,19 @@ describe("header assertions", () => {
     });
     expect(outcome.status).toBe("unmet");
     expect(outcome.observed).toBe("text/plain");
+  });
+
+  it("header_equals names the header and the value it found", () => {
+    // A caller reads the message when it did not match, and `header_equals` is
+    // the only assertion whose observed value is not obvious from the name of the
+    // header it names — so both halves are in the text.
+    const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+      kind: "header_equals",
+      target: "content-type",
+      expected: "text/plain",
+    });
+    expect(outcome.status).toBe("satisfied");
+    expect(outcome.message).toBe("header content-type=text/plain");
   });
 
   it("header_equals fails when the header is absent rather than matching nothing", () => {
@@ -209,6 +337,29 @@ describe("header assertions", () => {
     expect(outcome.observed).toBe("text/plain");
   });
 
+  it("header_matches fails on a header the peer left out of the response", () => {
+    // The same two facts as `header_equals`, and the same reading of them: the
+    // name was looked for, the peer did not send it, and that is a failure of
+    // this assertion rather than a pattern nothing matched.
+    const outcome = only(withHeaders({}), {
+      kind: "header_matches",
+      target: "content-type",
+      expected: "^application/json",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.observed).toBeUndefined();
+    expect(outcome.message).toBe("header content-type is absent");
+  });
+
+  it("header_matches names the pattern it compared against", () => {
+    const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+      kind: "header_matches",
+      target: "content-type",
+      expected: "^application/json",
+    });
+    expect(outcome.message).toBe("header content-type=text/plain, expected /^application/json/");
+  });
+
   it("header_matches reports an invalid pattern as unevaluated rather than throwing", () => {
     // A caller-supplied pattern is untrusted input. An exception here would abort
     // the whole assertion run, hiding the other results with it — and a failure
@@ -234,98 +385,130 @@ describe("header assertions", () => {
     expect(outcome.message).toBe("header authorization is absent");
   });
 
-  /**
-   * The third state, and the reason it is not a nicety.
-   *
-   * An exchange recorded over HTTP/3 by the native probe carries only the
-   * response headers the probe asked for by name — the libuvcpp C ABI reads one
-   * header at a time and has no call that lists them. So for those records,
-   * "absent from `responseHeaders`" has two possible causes, and only one of
-   * them is a fact about the service. Reporting the other as an absence is a
-   * finding about a service derived from a gap in the client, which is the
-   * failure `responseHeadersObserved` exists to prevent.
-   */
-  describe("a record whose header set is narrower than the response", () => {
-    /** A record from a client that read exactly these names and no others. */
-    const narrowed = (headers: Record<string, string>, lookedAt: readonly string[]) =>
-      exchange({ responseHeaders: headers, responseHeadersObserved: lookedAt });
-
-    it.each([
-      ["header_equals", { kind: "header_equals", target: "x-request-id", expected: "abc" }],
-      ["header_exists", { kind: "header_exists", target: "x-request-id" }],
-      ["header_matches", { kind: "header_matches", target: "x-request-id", expected: "^a" }],
-    ] as const)("%s names the gap rather than the service", (kind, spec) => {
-      const outcome = only(narrowed({}, ["content-type", "date"]), spec as AssertionSpec);
-      expect(outcome.status, kind).toBe("undetermined");
-      expect(outcome.message, kind).toContain("was not looked at");
-      // Both halves matter: what happened, and which names a caller *can* assert
-      // on — otherwise the next question has no answer in the report.
-      expect(outcome.message).toContain("`content-type`");
-      expect(outcome.message).toContain("`date`");
-      expect(outcome.message).not.toContain("is absent");
+  it("header_exists describes the presence it found, whatever the value was", () => {
+    // The other outcome of the same choice. A message built without reading it
+    // back reports a pass as "is absent" and a failure as "is present", which is
+    // the defect the test above names, one direction over.
+    const outcome = only(withHeaders({ authorization: "Bearer token" }), {
+      kind: "header_exists",
+      target: "Authorization",
     });
+    expect(outcome.status).toBe("satisfied");
+    expect(outcome.observed).toBe("Bearer token");
+    expect(outcome.message).toBe("header authorization is present");
+  });
 
-    it("still reports an absence for a name that was looked at", () => {
-      // The control. If `responseHeadersObserved` were read as "the response had
-      // exactly these headers and no others", a header the peer genuinely left
-      // out would stop being reportable at all.
-      const outcome = only(narrowed({ date: "now" }, ["content-type", "date"]), {
-        kind: "header_exists",
-        target: "content-type",
-      });
-      expect(outcome.message).toBe("header content-type is absent");
+  it("looks up the empty name when a header assertion names no target", () => {
+    // `target` is optional in the contract, so a spec without one is reachable.
+    // What it looks up is then the empty string — a name that is not in the
+    // response — rather than a word the engine invents for the occasion. The
+    // message reads with the gap in it because the name really is empty.
+    const outcome = only(withHeaders({ "content-type": "text/plain" }), {
+      kind: "header_equals",
+      expected: "text/plain",
     });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe("header  is absent");
+  });
+});
 
-    it("evaluates a name that was looked at normally", () => {
-      const outcome = only(narrowed({ "content-type": "text/plain" }, ["content-type"]), {
-        kind: "header_equals",
-        target: "Content-Type",
-        expected: "text/plain",
-      });
-      expect(outcome.status).toBe("satisfied");
-      expect(outcome.observed).toBe("text/plain");
-    });
+/**
+ * The third state applied to headers, and the reason it is not a nicety.
+ *
+ * An exchange recorded over HTTP/3 by the native probe carries only the response
+ * headers the probe asked for by name — the libuvcpp C ABI reads one header at a
+ * time and has no call that lists them. So for those records, "absent from
+ * `responseHeaders`" has two possible causes, and only one of them is a fact about
+ * the service. Reporting the other as an absence is a finding about a service
+ * derived from a gap in the client, which is the failure `responseHeadersObserved`
+ * exists to prevent.
+ *
+ * A describe of its own rather than a group inside the one above, because it is
+ * the behaviour of a different kind of record: the ones above carry a complete
+ * header set.
+ */
+describe("a record whose header set is narrower than the response", () => {
+  /** A record from a client that read exactly these names and no others. */
+  const narrowed = (headers: Record<string, string>, lookedAt: readonly string[]) =>
+    exchange({ responseHeaders: headers, responseHeadersObserved: lookedAt });
 
-    it("distinguishes a name nobody looked at from one the peer left out", () => {
-      // Both come back with `observed: undefined`, and the whole point of the
-      // field is that they are different facts: the first is a gap in the
-      // client, the second is a fact about the response.
-      const unread = only(narrowed({}, ["content-type"]), {
-        kind: "header_exists",
-        target: "x-request-id",
-      });
-      const absent = only(narrowed({}, ["content-type"]), {
-        kind: "header_exists",
-        target: "content-type",
-      });
-      expect([unread.status, absent.status]).toEqual(["undetermined", "unmet"]);
-      expect(unread.message).not.toBe(absent.message);
-    });
+  it.each([
+    ["header_equals", { kind: "header_equals", target: "x-request-id", expected: "abc" }],
+    ["header_exists", { kind: "header_exists", target: "x-request-id" }],
+    ["header_matches", { kind: "header_matches", target: "x-request-id", expected: "^a" }],
+  ] as const)("%s names the gap rather than the service", (kind, spec) => {
+    const outcome = only(narrowed({}, ["content-type", "date"]), spec as AssertionSpec);
+    expect(outcome.status, kind).toBe("undetermined");
+    expect(outcome.message, kind).toContain("was not looked at");
+    // Both halves matter: what happened, and which names a caller *can* assert
+    // on — otherwise the next question has no answer in the report. The names
+    // are a list because that is what they are; run together they name nothing.
+    expect(outcome.message).toContain(
+      "read only `content-type`, `date`, and a name outside that list",
+    );
+    expect(outcome.message).not.toContain("is absent");
+  });
 
-    it("does not negate a name nobody looked at into a pass", () => {
-      // `!header:…` against a name outside the client's list used to pass: the
-      // check never ran, `passed` was false, and negation turned that false into
-      // a true — the strongest claim in the vocabulary resting on nothing.
-      const outcome = only(narrowed({}, ["content-type"]), {
-        kind: "header_exists",
-        target: "x-request-id",
-        negate: true,
-      });
-      expect(outcome.status).toBe("undetermined");
-      expect(outcome.message.startsWith("negated: ")).toBe(true);
+  it("still reports an absence for a name that was looked at", () => {
+    // The control. If `responseHeadersObserved` were read as "the response had
+    // exactly these headers and no others", a header the peer genuinely left
+    // out would stop being reportable at all.
+    const outcome = only(narrowed({ date: "now" }, ["content-type", "date"]), {
+      kind: "header_exists",
+      target: "content-type",
     });
+    expect(outcome.message).toBe("header content-type is absent");
+  });
 
-    it("treats an absent list as the whole response, which is what the other paths read", () => {
-      // `undefined` means "all of them", so the HTTP/1.1 and HTTP/2 paths — which
-      // hand Node's parser a complete header set — keep the two-state behaviour
-      // they had before this field existed.
-      const outcome = only(exchange({ responseHeaders: { date: "now" } }), {
-        kind: "header_exists",
-        target: "content-type",
-      });
-      expect(outcome.status).toBe("unmet");
-      expect(outcome.message).toBe("header content-type is absent");
+  it("evaluates a name that was looked at normally", () => {
+    const outcome = only(narrowed({ "content-type": "text/plain" }, ["content-type"]), {
+      kind: "header_equals",
+      target: "Content-Type",
+      expected: "text/plain",
     });
+    expect(outcome.status).toBe("satisfied");
+    expect(outcome.observed).toBe("text/plain");
+  });
+
+  it("distinguishes a name nobody looked at from one the peer left out", () => {
+    // Both come back with `observed: undefined`, and the whole point of the
+    // field is that they are different facts: the first is a gap in the
+    // client, the second is a fact about the response.
+    const unread = only(narrowed({}, ["content-type"]), {
+      kind: "header_exists",
+      target: "x-request-id",
+    });
+    const absent = only(narrowed({}, ["content-type"]), {
+      kind: "header_exists",
+      target: "content-type",
+    });
+    expect([unread.status, absent.status]).toEqual(["undetermined", "unmet"]);
+    expect(unread.message).not.toBe(absent.message);
+  });
+
+  it("does not negate a name nobody looked at into a pass", () => {
+    // `!header:…` against a name outside the client's list used to pass: the
+    // check never ran, `passed` was false, and negation turned that false into
+    // a true — the strongest claim in the vocabulary resting on nothing.
+    const outcome = only(narrowed({}, ["content-type"]), {
+      kind: "header_exists",
+      target: "x-request-id",
+      negate: true,
+    });
+    expect(outcome.status).toBe("undetermined");
+    expect(outcome.message.startsWith("negated: ")).toBe(true);
+  });
+
+  it("treats an absent list as the whole response, which is what the other paths read", () => {
+    // `undefined` means "all of them", so the HTTP/1.1 and HTTP/2 paths — which
+    // hand Node's parser a complete header set — keep the two-state behaviour
+    // they had before this field existed.
+    const outcome = only(exchange({ responseHeaders: { date: "now" } }), {
+      kind: "header_exists",
+      target: "content-type",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe("header content-type is absent");
   });
 });
 
@@ -379,6 +562,43 @@ describe("body assertions", () => {
     const outcome = only(withBody("anything"), { kind: "body_matches", expected: "[" });
     expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("invalid regular expression");
+  });
+
+  it("compiles a caller's pattern in unicode mode", () => {
+    // The module compiles every caller pattern with the `u` flag, and a Unicode
+    // property escape is the difference that shows: without it `\p{Lu}` is a `p`,
+    // a literal `{Lu}`, and a quantifier that is not one, so a body of capitals
+    // stops matching the pattern that names capitals.
+    expect(only(withBody("HELLO"), { kind: "body_matches", expected: "^\\p{Lu}+$" }).status).toBe(
+      "satisfied",
+    );
+  });
+
+  it("keeps a bounded excerpt of the body rather than the whole of it", () => {
+    // A response body is the one thing in a record with no bound of its own, and
+    // an assertion's observed value travels into a report. `body_bytes_under`
+    // measures the size; nothing measures the excerpt, so this pins it.
+    const outcome = only(withBody("x".repeat(600)), { kind: "body_contains", expected: "x" });
+    expect(outcome.status).toBe("satisfied");
+    expect(String(outcome.observed)).toHaveLength(512);
+    expect(outcome.message).toBe('body length 600, expected to contain "x"');
+  });
+
+  it("keeps the same bounded excerpt for a match, and names the length it read", () => {
+    const body = `service ${"x".repeat(600)}`;
+    const outcome = only(withBody(body), { kind: "body_matches", expected: "^service" });
+    expect(outcome.status).toBe("satisfied");
+    expect(String(outcome.observed)).toHaveLength(512);
+    expect(outcome.message).toBe("body length 608, expected to match /^service/");
+  });
+
+  it("keeps the bounded excerpt when the pattern does not compile", () => {
+    // The unevaluated branch hands the observed value to the caller like every
+    // other, and it is the branch a long body is most likely to reach: the
+    // pattern is checked before the body is.
+    const outcome = only(withBody("x".repeat(600)), { kind: "body_matches", expected: "[" });
+    expect(outcome.status).toBe("undetermined");
+    expect(String(outcome.observed)).toHaveLength(512);
   });
 });
 
@@ -479,6 +699,86 @@ describe("JSON path assertions", () => {
     expect(outcome.status).toBe("undetermined");
     expect(outcome.message).toContain("unsupported JSONPath");
   });
+
+  it("reads the whole document when the assertion names no path", () => {
+    // `target` is optional in the contract, and the default is `$` — the document
+    // the body parsed to — rather than an empty path, which the walker would have
+    // to refuse. An assertion about the body as a whole is a real question.
+    const outcome = only(withJson({ ok: true }), { kind: "body_json_path_exists" });
+    expect(outcome.status).toBe("satisfied");
+    expect(outcome.observed).toEqual({ ok: true });
+  });
+
+  it("names the value it resolved for a path that is there", () => {
+    const outcome = only(withJson({ ok: true }), {
+      kind: "body_json_path_exists",
+      target: "$.ok",
+    });
+    expect(outcome.message).toBe("$.ok = true");
+  });
+
+  it("says a path is absent rather than reporting the value undefined", () => {
+    // `JSON.stringify(undefined)` is not a string, so a message built from the
+    // value reads `$.missing = undefined` — a value the body might have held,
+    // where the fact is that the key is not there.
+    const outcome = only(withJson({ ok: true }), {
+      kind: "body_json_path_exists",
+      target: "$.missing",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.observed).toBeUndefined();
+    expect(outcome.message).toBe("$.missing is absent");
+  });
+
+  it("compares a number the body spells as a string against a numeric expectation", () => {
+    // The loose comparison the docblock of `looseEquals` names: `"3"` satisfies
+    // `3`, because a service that sends a count as a string sent the count. The
+    // guard that carries it is about the *observed* side being a number; read the
+    // other way round it makes this the assertion that never matches.
+    const outcome = only(withJson({ count: "3" }), {
+      kind: "body_json_path_equals",
+      target: "$.count",
+      expected: 3,
+    });
+    expect(outcome.status).toBe("satisfied");
+    expect(outcome.observed).toBe("3");
+  });
+
+  it("does not read a JSON null as the string that spells it", () => {
+    // Loose between a number and its spelling, and nothing else: `null` is a
+    // value the body held, `"null"` is a string, and a service that stopped
+    // sending the key must not satisfy an assertion on the string.
+    const outcome = only(withJson({ ok: null }), {
+      kind: "body_json_path_equals",
+      target: "$.ok",
+      expected: "null",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe('$.ok = null, expected "null"');
+  });
+
+  it("does not read an absent path as the string that spells it", () => {
+    const outcome = only(withJson({ ok: true }), {
+      kind: "body_json_path_equals",
+      target: "$.nope",
+      expected: "undefined",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe('$.nope is absent, expected "undefined"');
+  });
+
+  it("says an assertion with no expectation is one whose expectation is absent", () => {
+    // `expected` is optional in the contract, so this is a spec a caller can
+    // send, and the message has the same rule as the path beside it: `undefined`
+    // is not a JSON word, and `expected undefined` reads as a value the caller
+    // wrote rather than as nothing written at all.
+    const outcome = only(withJson({ ok: true }), {
+      kind: "body_json_path_equals",
+      target: "$.ok",
+    });
+    expect(outcome.status).toBe("unmet");
+    expect(outcome.message).toBe("$.ok = true, expected absent");
+  });
 });
 
 describe("measurement assertions", () => {
@@ -533,14 +833,22 @@ describe("measurement assertions", () => {
   });
 
   it("latency_under_ms fails at or above the limit, naming the observed latency", () => {
-    const outcome = only(exchange({ durationMs: 120 }), {
+    const above = only(exchange({ durationMs: 120 }), {
       kind: "latency_under_ms",
       expected: 100,
     });
-    expect(outcome.status).toBe("unmet");
-    expect(outcome.observed).toBe(120);
-    expect(outcome.message).toContain("120");
-    expect(outcome.message).toContain("100");
+    expect(above.status).toBe("unmet");
+    expect(above.observed).toBe(120);
+    expect(above.message).toBe("latency 120 ms, limit 100");
+    // The limit itself, which `body_bytes_under` is already held to: "under
+    // 100 ms" is not satisfied by 100 ms, and a limit read as inclusive is a
+    // budget a caller cannot state.
+    const at = only(exchange({ durationMs: 100 }), {
+      kind: "latency_under_ms",
+      expected: 100,
+    });
+    expect(at.status).toBe("unmet");
+    expect(at.message).toBe("latency 100 ms, limit 100");
   });
 });
 
@@ -677,6 +985,67 @@ describe("status", () => {
       { kind: "body_bytes_under", expected: 10 },
     ]);
     expect(outcomes.map((outcome) => outcome.status)).toEqual(["satisfied", "undetermined"]);
+  });
+});
+
+/**
+ * The question a check that could not run leaves behind.
+ *
+ * This is the line a reader of a verification bundle sees first, and it is built
+ * out of the caller's own assertion — so it is only as good as the three parts it
+ * is assembled from, and the parts are optional. What it must never be is a
+ * sentence that names the check twice or not at all.
+ */
+describe("unevaluatedQuestion", () => {
+  it("names the kind, the target, the expectation, and the exchange it was asked of", () => {
+    expect(
+      unevaluatedQuestion({ kind: "header_exists", target: "x-request-id" }, "for GET /items/1"),
+    ).toBe("Does `header_exists` on `x-request-id` hold for GET /items/1?");
+  });
+
+  it("leaves out the parts the assertion did not carry", () => {
+    // `target` and `expected` are optional, and an absent one is not a part of
+    // the question: "on `undefined`" names a target nobody asked for.
+    expect(unevaluatedQuestion({ kind: "status_equals" }, "for GET /items/1")).toBe(
+      "Does `status_equals` hold for GET /items/1?",
+    );
+    expect(unevaluatedQuestion({ kind: "body_json_path_exists", target: "$.ok" }, "for it")).toBe(
+      "Does `body_json_path_exists` on `$.ok` hold for it?",
+    );
+  });
+
+  it("renders the expectation as JSON, which is what the caller wrote", () => {
+    expect(
+      unevaluatedQuestion(
+        { kind: "body_json_path_equals", target: "$.ok", expected: { ok: true } },
+        "for POST /items",
+      ),
+    ).toBe('Does `body_json_path_equals` on `$.ok` ({"ok":true}) hold for POST /items?');
+  });
+
+  it("caps an expectation that would not fit in a question", () => {
+    // A document is a legal expectation and a question is a line. The number is
+    // in the message either way, and the ellipsis says the rest was left out.
+    const written = JSON.stringify("x".repeat(200));
+    const question = unevaluatedQuestion(
+      { kind: "body_contains", expected: "x".repeat(200) },
+      "for GET /items",
+    );
+    expect(question).toBe(`Does \`body_contains\` (${written.slice(0, 80)}…) hold for GET /items?`);
+    // The cap as a reader of the document sees it, rather than as the slice that
+    // implements it: no run of it longer than the cap reaches the question.
+    expect(question).not.toContain("x".repeat(81));
+  });
+
+  it("does not cap an expectation of exactly the cap", () => {
+    // `JSON.stringify` of a 78-character string is 80 characters with its
+    // quotes, and 80 is a question that fits. The boundary is the difference
+    // between "shorter than the cap" and "within it".
+    const capped = JSON.stringify("x".repeat(78));
+    expect(capped).toHaveLength(80);
+    expect(
+      unevaluatedQuestion({ kind: "body_contains", expected: "x".repeat(78) }, "for GET /items"),
+    ).toBe(`Does \`body_contains\` (${capped}) hold for GET /items?`);
   });
 });
 
