@@ -21,7 +21,7 @@ import type { ToolContract } from "../../src/contracts/toolContractTypes.js";
 import { sha256 } from "../../src/domain/identity.js";
 import { toUvpError } from "../../src/domain/errors.js";
 import { NativeProbeRunner } from "../../src/toolchains/native/NativeProbeRunner.js";
-import { freePort } from "../support/ports.js";
+import { freePort, portAnswers } from "../support/ports.js";
 import { removeTree } from "../support/temporaryTree.js";
 import {
   createFakeToolchain,
@@ -167,6 +167,47 @@ const expectConforms = (name: string, output: Record<string, unknown>): void => 
     expect(typeof entry["digest"], `${name} evidence digest`).toBe("string");
     expect((entry["digest"] as string).length).toBeGreaterThan(0);
   }
+};
+
+/**
+ * Run `uvp_run` with `ready`, retrying only when the reserved port was taken.
+ *
+ * The readiness case's premise is "nothing listens on this port". `freePort`
+ * remembers what **this process** handed out, not what the job did, so another
+ * worker can bind the number between its probe and uvp's attempt — the case
+ * then reads `ready: true`, which is a correct observation of a badly chosen
+ * port rather than a defect ([#175](https://github.com/Antruly/uvp/issues/175)).
+ *
+ * The retry is gated on evidence: a port is re-reserved only when a probe shows
+ * something answering **right now**. `ready: true` with nothing behind it is
+ * the bug this case exists to catch and is returned for the assertions to fail
+ * on; an undetermined probe is not evidence of anything and is treated the same
+ * way. Three attempts is the bound; when every one is taken, the failure says
+ * the premise never held instead of asserting a `uvp_run` defect.
+ */
+const runUntilNothingListens = async (
+  workspace: string,
+  args: readonly string[],
+): Promise<Record<string, unknown>> => {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const port = await freePort();
+    const run = await call("uvp_run", {
+      path: workspace,
+      args,
+      ready: { port, path: "/healthz", timeout_ms: 600 },
+    });
+    expectConforms("uvp_run", run);
+    if (run["ready"] !== true) return run;
+    const answers = await portAnswers(port);
+    if (answers !== true) return run;
+    if (attempt === attempts) {
+      throw new Error(
+        `the reserved port ${String(port)} answered on all ${String(attempts)} attempts, so this case never observed a port with nothing behind it`,
+      );
+    }
+  }
+  throw new Error("the retry loop did not return on its last attempt");
 };
 
 /** The error code a handler's throw projects to at the adapter boundary. */
@@ -405,15 +446,9 @@ describe("launch and stop", () => {
   it(
     "reports `ready: false` instead of waiting forever when nothing listens",
     async () => {
-      const port = await freePort();
       const svc = await writeFakeBinary(harness.workspace, "svc", { module: REFUSES_TO_BIND });
 
-      const run = await call("uvp_run", {
-        path: harness.workspace,
-        args: svc.args,
-        ready: { port, path: "/healthz", timeout_ms: 600 },
-      });
-      expectConforms("uvp_run", run);
+      const run = await runUntilNothingListens(harness.workspace, svc.args);
       expect(run["ready"]).toBe(false);
       // A process that died is not still running, and saying otherwise would leave
       // a caller probing an endpoint nothing is behind.

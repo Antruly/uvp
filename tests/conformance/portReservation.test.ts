@@ -1,6 +1,8 @@
+import { createServer } from "node:net";
+
 import { describe, expect, it } from "vitest";
 
-import { freePort, reservationWindowIsAvailable } from "../support/ports.js";
+import { freePort, portAnswers, reservationWindowIsAvailable } from "../support/ports.js";
 
 /**
  * The reservation's one promise: a number it has handed out is spent.
@@ -57,4 +59,32 @@ describe("the port reservation", () => {
       expect(new Set(drawn).size).toBe(DRAWS);
     },
   );
+});
+
+/**
+ * The probe a caller uses to check its own premise.
+ *
+ * `portAnswers` has three outcomes, and the conformance readiness case relies on
+ * the distinction between two of them: `true` means the caller's "nothing
+ * listens here" premise was broken and it may take another number, while `false`
+ * means the kernel refused and the observation stands. The third outcome —
+ * `undefined`, a connect that neither completes nor is refused — cannot be
+ * produced on demand here; it is reported as undetermined rather than exercised.
+ */
+describe("the port answer probe", () => {
+  it("says true for a listener it can reach", async () => {
+    const port = await freePort();
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+    try {
+      expect(await portAnswers(port)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("says false for a port with nothing behind it", async () => {
+    const port = await freePort();
+    expect(await portAnswers(port)).toBe(false);
+  });
 });
