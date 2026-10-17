@@ -731,12 +731,15 @@ export const captureReadContract = defineTool({
  * Two decisions are visible in the schema and worth stating here, because a
  * caller reading `matched: 3` is relying on both:
  *
- * - **A method that writes is not sent.** Only `GET`, `HEAD`, and `OPTIONS` are
- *   replayed; a recorded `POST` is counted, named in `skipped_methods`, and left
- *   alone, because replaying it would write a second time and nothing here knows
- *   whether the endpoint is idempotent. That is also why `mutatesTarget` is
- *   false: it is not a hope about the target, it is the absence of any request
- *   that could change it.
+ * - **A method that writes is not sent, and an incomplete request is not sent
+ *   either.** Only `GET`, `HEAD`, and `OPTIONS` are replayed; a recorded `POST`
+ *   is counted, named in `skipped_methods`, and left alone, because replaying it
+ *   would write a second time and nothing here knows whether the endpoint is
+ *   idempotent. A `GET` whose recorded request body the capture's limit cut
+ *   short is skipped and named for the other reason: what was stored is a
+ *   prefix, so sending it would be a request the captured client never made.
+ *   That is also why `mutatesTarget` is false: it is not a hope about the
+ *   target, it is the absence of any request that could change it.
  * - **A comparison with no ground is not a pass.** `outcome: "unknown"` means
  *   nothing was comparable at all, and `compared` says per exchange which fields
  *   were actually put side by side — so a status-only match is legible rather

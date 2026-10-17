@@ -349,6 +349,10 @@ describe("what a replay refuses to send", () => {
 
         expect(output["replayed"]).toBe(0);
         expect(output["skipped"]).toBe(1);
+        // The field means "methods that were not sent", not "methods that
+        // write": this GET is in it because its recorded body is a prefix, and
+        // the summary keeps it so the count and the list stay one statement.
+        expect(output["skipped_methods"]).toEqual(["GET"]);
         // Nothing was compared, so the run is not evidence about the service at
         // all — the same verdict an empty or unreachable window gets.
         expect(output["outcome"]).toBe("unknown");

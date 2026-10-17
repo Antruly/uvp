@@ -348,7 +348,8 @@ const replayLimitations = (
   if (skipped.length > 0) {
     limitations.push(
       `${String(skipped.length)} recorded exchange(s) were not sent at all (${[...new Set(skipped.map((entry) => entry.method.toUpperCase()))].sort().join(", ")}), ` +
-        "because replaying a method that writes would write a second time",
+        "because replaying a method that writes would write a second time, or because the recorded " +
+        "request body is a prefix; each skipped exchange names its own reason",
     );
   }
   const notComparable = exchanges.filter((entry) => entry.outcome === "not_comparable").length;

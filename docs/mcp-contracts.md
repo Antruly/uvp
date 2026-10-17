@@ -194,7 +194,11 @@ name, so a capture taken against one build can be replayed against the next. It
 is the one web tool that does not probe the subject: it probes the record, and
 the target answers for it. Only `GET`, `HEAD`, and `OPTIONS` are sent —
 re-issuing a recorded `POST` would turn a regression suite into a second write,
-so those exchanges are `skipped` with the method named in `skipped_methods`.
+so those exchanges are `skipped` with the method named in `skipped_methods`. A
+request whose recorded body the session's limit cut short is skipped the same
+way and for a different reason: what was stored is a prefix, so sending it would
+be a request the captured client never made. Each skipped exchange carries its
+own `reason`.
 Each exchange is `matched`, `differs`, `skipped`, or `not_comparable`, and the
 run's `outcome` is `verified` only when every replayed exchange was compared and
 matched: `partial` means fewer facts were compared than the record holds, and

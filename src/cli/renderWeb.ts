@@ -433,7 +433,9 @@ export const renderCaptureReplay = (output: Record<string, unknown>): string[] =
     lines.push(
       "",
       `${String(skipped)} exchange(s) were not sent at all (${skippedMethods.join(", ")}): replaying a ` +
-        "method that writes would write a second time. Use `uvp http` to put that request deliberately.",
+        "method that writes would write a second time, and a recorded request body the capture cut " +
+        "short is not a whole request. Each one names its reason above; use `uvp http` to put that " +
+        "request deliberately.",
     );
   }
   const withheld = num(output["withheld_by_limit"]) ?? 0;
