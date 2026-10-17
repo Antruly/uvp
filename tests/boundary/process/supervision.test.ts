@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -193,9 +194,49 @@ describe("the output tail", () => {
     );
     await service.whenStarted();
     await eventually(() => service.stdoutTail().length >= 1_000, "the tail to fill");
-    // The claim is boundedness, not a byte count: the tail keeps the newest output
-    // and drops the oldest, which is what a startup error printed last needs.
-    expect(service.stdoutTail().length).toBeLessThanOrEqual(1_000);
+    // The claim is boundedness by bytes: the tail keeps the newest output and
+    // drops the oldest, which is what a startup error printed last needs, and the
+    // option names a byte budget rather than a code-unit count.
+    expect(Buffer.byteLength(service.stdoutTail(), "utf8")).toBeLessThanOrEqual(1_000);
+    await service.stop(3_000, true);
+  });
+
+  it("keeps multi-byte output whole when a chunk boundary falls inside a character", async () => {
+    // 70,000 three-byte characters: the child's pipe delivers them in chunks whose
+    // boundaries fall inside characters, and a per-chunk decode turns each one into
+    // replacement characters. The cap is a byte count too — a code-unit cap
+    // retained 196,608 bytes for this 65,536-byte budget.
+    const service = launch(
+      `process.stdout.write("\\u4e2d".repeat(70000)); setInterval(() => {}, 1000);`,
+      { maxTailBytes: 65_536 },
+    );
+    await service.whenStarted();
+    await eventually(
+      () => Buffer.byteLength(service.stdoutTail(), "utf8") >= 65_000,
+      "the tail to fill",
+    );
+    const tail = service.stdoutTail();
+    expect(tail).not.toContain("�");
+    expect(Buffer.byteLength(tail, "utf8")).toBeLessThanOrEqual(65_536);
+    await service.stop(3_000, true);
+  });
+
+  it("does not begin the tail on an orphaned surrogate", async () => {
+    // A 4-byte character and a cap that lands inside one: the trim may start at any
+    // byte, but not in the middle of a character.
+    const service = launch(
+      `process.stdout.write("\\u{1f600}".repeat(1000)); setInterval(() => {}, 1000);`,
+      { maxTailBytes: 1_001 },
+    );
+    await service.whenStarted();
+    await eventually(
+      () => Buffer.byteLength(service.stdoutTail(), "utf8") >= 1_000,
+      "the tail to fill",
+    );
+    const tail = service.stdoutTail();
+    expect(tail).not.toContain("�");
+    const first = tail.charCodeAt(0);
+    expect(first >= 0xdc00 && first <= 0xdfff).toBe(false);
     await service.stop(3_000, true);
   });
 });

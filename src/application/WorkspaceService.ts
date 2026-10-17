@@ -10,6 +10,7 @@ import type {
   ToolchainClient,
 } from "./ToolchainProvider.js";
 import { newId, sha256 } from "../domain/identity.js";
+import { tailText } from "../domain/text.js";
 import type { SupervisedRun } from "./sessionStore.js";
 import { SessionStore } from "./sessionStore.js";
 import { renderTemplate, templateFeatureProblem, type TemplateId } from "./templates.js";
@@ -397,8 +398,8 @@ export class WorkspaceService {
     // Snapshot before releasing: `release()` detaches the pipes, so a tail read
     // afterwards would return whatever happened to be buffered and never grow —
     // a startup error printed a millisecond later would vanish from the report.
-    const stdoutTail = process_.stdoutTail().slice(-4_096);
-    const stderrTail = process_.stderrTail().slice(-4_096);
+    const stdoutTail = tailText(process_.stdoutTail(), 4_096);
+    const stderrTail = tailText(process_.stderrTail(), 4_096);
     const stillRunning = process_.isRunning();
     const detached = input.detach && stillRunning;
     if (detached) process_.release();

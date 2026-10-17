@@ -327,7 +327,7 @@ const refusedLaunch = (options: StartSupervisedOptions, cause: unknown): Supervi
  * that decides this is the implementation in use.
  */
 export const startSupervised: ProcessSupervisor = (options) => {
-  const maxTail = options.maxTailBytes ?? DEFAULT_TAIL_BYTES;
+  const maxTail = Math.max(0, Math.floor(options.maxTailBytes ?? DEFAULT_TAIL_BYTES));
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(options.command, [...options.args], {
@@ -342,10 +342,59 @@ export const startSupervised: ProcessSupervisor = (options) => {
     return refusedLaunch(options, cause);
   }
 
-  const tails = { stdout: "", stderr: "" };
+  /**
+   * The newest output, held as bytes until someone asks for text.
+   *
+   * A pipe chunk boundary is a byte offset, not a character boundary, and the cap
+   * is named in bytes. Keeping a decoded string would get both wrong: decoding
+   * each chunk on its own turns a character that straddles a chunk into
+   * replacement characters, and `string.length` counts UTF-16 code units, so a
+   * 65,536-byte cap retained three times that for three-byte text. The tail is
+   * therefore a list of buffers trimmed by byte count and decoded once on read.
+   */
+  const tails: Record<"stdout" | "stderr", { chunks: Buffer[]; bytes: number }> = {
+    stdout: { chunks: [], bytes: 0 },
+    stderr: { chunks: [], bytes: 0 },
+  };
   const append = (which: "stdout" | "stderr", chunk: Buffer): void => {
-    const combined = tails[which] + chunk.toString("utf8");
-    tails[which] = combined.length > maxTail ? combined.slice(combined.length - maxTail) : combined;
+    const tail = tails[which];
+    tail.chunks.push(chunk);
+    tail.bytes += chunk.byteLength;
+    while (tail.bytes > maxTail) {
+      const oldest = tail.chunks[0];
+      if (oldest === undefined) break;
+      const excess = tail.bytes - maxTail;
+      if (oldest.byteLength <= excess) {
+        tail.chunks.shift();
+        tail.bytes -= oldest.byteLength;
+      } else {
+        // Keep the rest of this chunk: the cap can land inside a character, and
+        // the decoder skips the partial one on read rather than dropping the
+        // whole chunk and losing output that belongs in the tail.
+        tail.chunks[0] = oldest.subarray(excess);
+        tail.bytes -= excess;
+      }
+    }
+  };
+  /**
+   * The tail as text, starting at a character boundary.
+   *
+   * A leading byte with the `10` prefix is a UTF-8 continuation, which means the
+   * byte cap landed inside a character; skip those bytes to the next start byte.
+   * Only the start can be partial: the end of the tail is the newest data, so
+   * every character the child wrote is complete there.
+   */
+  const tailTextOf = (which: "stdout" | "stderr"): string => {
+    const tail = tails[which];
+    if (tail.bytes === 0) return "";
+    const buffer = Buffer.concat(tail.chunks, tail.bytes);
+    let start = 0;
+    while (start < buffer.length) {
+      const byte = buffer[start];
+      if (byte === undefined || (byte & 0xc0) !== 0x80) break;
+      start += 1;
+    }
+    return buffer.subarray(start).toString("utf8");
   };
   child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
   child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
@@ -406,8 +455,8 @@ export const startSupervised: ProcessSupervisor = (options) => {
       lifecycle.exited === undefined &&
       child.exitCode === null,
     exitInfo: () => lifecycle.exited,
-    stdoutTail: () => tails.stdout,
-    stderrTail: () => tails.stderr,
+    stdoutTail: () => tailTextOf("stdout"),
+    stderrTail: () => tailTextOf("stderr"),
     stop: async (graceMs, force) => {
       // A process that never started has nothing to signal, and `killed: true` for
       // it would be the same false claim as reporting it as running.
