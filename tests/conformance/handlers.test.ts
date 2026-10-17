@@ -1015,9 +1015,6 @@ describe("the websocket probe's refused frames", () => {
       expect(output["transport_error"]).toMatch(/Refused a frame declaring 9437184 bytes/u);
       expect(output["closed_cleanly"]).toBe(false);
 
-      // The refused frame is in the log. Nothing of its payload was buffered,
-      // so the entry carries the declaration through the transport error rather
-      // than as bytes or text that were never received.
       const frames = output["frames"] as {
         direction: string;
         opcode: string;
@@ -1027,7 +1024,11 @@ describe("the websocket probe's refused frames", () => {
       const refused = frames.find(
         (frame) => frame.direction === "received" && frame.opcode === "text" && frame.bytes === 0,
       );
-      expect(refused?.text ?? "").toBe("");
+      // The refused frame is in the log. Asserting its presence is the half of
+      // the issue this change fixes: `refused?.text ?? ""` would also hold when
+      // `find` returned nothing, which is precisely the "silently dropped" state
+      // the issue reports.
+      expect(refused).toMatchObject({ direction: "received", opcode: "text", bytes: 0, text: "" });
     },
     TIMEOUT,
   );
