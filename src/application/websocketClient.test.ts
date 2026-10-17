@@ -2,8 +2,15 @@ import { Buffer } from "node:buffer";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeFrame, framePayload, parseFrame } from "./websocketClient.js";
+import { MAX_FRAME_BYTES, encodeFrame, framePayload, parseFrame } from "./websocketClient.js";
 import type { WebSocketFrame, WebSocketOpcode } from "./websocketClient.js";
+
+/** The frame a parse found, failing loudly when it found something else. */
+const parsedFrame = (buffer: Buffer) => {
+  const parsed = parseFrame(buffer);
+  if (parsed.kind !== "frame") throw new Error(`expected a frame, got ${parsed.kind}`);
+  return parsed;
+};
 
 /**
  * The frame codec is the one part of the probe that talks to a foreign
@@ -32,14 +39,13 @@ describe("encodeFrame", () => {
     const payload = Buffer.alloc(length, 0x41);
     const frame = encodeFrame("text", payload);
 
-    const parsed = parseFrame(frame);
-    expect(parsed).toBeDefined();
-    expect(parsed?.opcode).toBe("text");
-    expect(parsed?.fin).toBe(true);
-    expect(parsed?.payload.toString("utf8")).toBe(payload.toString("utf8"));
+    const parsed = parsedFrame(frame);
+    expect(parsed.opcode).toBe("text");
+    expect(parsed.fin).toBe(true);
+    expect(parsed.payload.toString("utf8")).toBe(payload.toString("utf8"));
     // Parsing must consume the whole frame: a trailing byte means the encoder
     // wrote something the layout does not account for.
-    expect(parsed?.consumed).toBe(frame.byteLength);
+    expect(parsed.consumed).toBe(frame.byteLength);
   });
 
   it.each(lengths)("lays out the header as the RFC requires for %s", (_label, length) => {
@@ -78,7 +84,7 @@ describe("encodeFrame", () => {
     const first = encodeFrame("text", Buffer.from("same"));
     const second = encodeFrame("text", Buffer.from("same"));
     expect(first.equals(second)).toBe(false);
-    expect(parseFrame(second)?.payload.toString("utf8")).toBe("same");
+    expect(parsedFrame(second).payload.toString("utf8")).toBe("same");
   });
 
   it("encodes an empty payload as a bare header with no body", () => {
@@ -86,11 +92,11 @@ describe("encodeFrame", () => {
     const frame = encodeFrame("close", Buffer.alloc(0));
     expect(frame.byteLength).toBe(6);
     expect(parseFrame(frame)).toMatchObject({ opcode: "close", payload: expect.anything() });
-    expect(parseFrame(frame)?.payload.byteLength).toBe(0);
+    expect(parsedFrame(frame).payload.byteLength).toBe(0);
   });
 
   it.each(["ping", "pong", "close"] as const)("carries the opcode for %s", (opcode) => {
-    expect(parseFrame(encodeFrame(opcode, Buffer.from("x")))?.opcode).toBe(opcode);
+    expect(parsedFrame(encodeFrame(opcode, Buffer.from("x"))).opcode).toBe(opcode);
   });
 });
 
@@ -98,7 +104,9 @@ describe("parseFrame", () => {
   it("waits for a whole frame rather than reading a partial one", () => {
     const frame = encodeFrame("text", Buffer.from("hello"));
     for (let cut = 0; cut < frame.byteLength; cut += 1) {
-      expect(parseFrame(frame.subarray(0, cut)), `truncated to ${String(cut)}`).toBeUndefined();
+      expect(parseFrame(frame.subarray(0, cut)), `truncated to ${String(cut)}`).toEqual({
+        kind: "incomplete",
+      });
     }
   });
 
@@ -106,7 +114,7 @@ describe("parseFrame", () => {
     // Servers do not mask, so the unmasked path is the one real traffic takes
     // even though the encoder never produces it.
     const unframed = Buffer.concat([Buffer.from([0x81, 0x02]), Buffer.from("hi")]);
-    expect(parseFrame(unframed)?.payload.toString("utf8")).toBe("hi");
+    expect(parsedFrame(unframed).payload.toString("utf8")).toBe("hi");
   });
 
   it("reports a reserved opcode as a violation, not as a short read", () => {
@@ -114,9 +122,53 @@ describe("parseFrame", () => {
     // which is how the caller tells "this is not a message" apart from "there
     // are not enough bytes yet". Returning `undefined` here would make a
     // malformed frame look like a truncated one and stall the read.
-    const parsed = parseFrame(Buffer.from([0x83, 0x00]));
-    expect(parsed).toBeDefined();
-    expect(parsed?.opcode).toBeUndefined();
+    const parsed = parsedFrame(Buffer.from([0x83, 0x00]));
+    expect(parsed.opcode).toBeUndefined();
+  });
+
+  /** A 10-byte server header declaring `declared` bytes of text, with no body. */
+  const declaration = (declared: bigint): Buffer => {
+    const header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(declared, 2);
+    return header;
+  };
+
+  it("refuses a declaration above the buffer limit, naming the declared length", () => {
+    // A refusal is not a short read: the peer has already said how long the
+    // frame is, and it is longer than this client will hold. Returning
+    // "incomplete" here makes the caller wait for bytes that are never coming
+    // and drops the frame from the log.
+    expect(parseFrame(declaration(MAX_FRAME_BYTES + 1n))).toEqual({
+      kind: "refused",
+      opcode: "text",
+      declaredBytes: MAX_FRAME_BYTES + 1n,
+    });
+  });
+
+  it("waits for a frame that declares exactly the limit", () => {
+    // The boundary is inclusive: a frame the client is willing to hold is a
+    // short read until its payload arrives, not a refusal.
+    expect(parseFrame(declaration(MAX_FRAME_BYTES))).toEqual({ kind: "incomplete" });
+  });
+
+  it("keeps the declared length exact when it exceeds what a number can hold", () => {
+    // The length field is sixty-four bits. A refusal that converted it to a
+    // JavaScript number would report a rounded length for the frame it refused.
+    const huge = (1n << 63n) - 1n;
+    expect(parseFrame(declaration(huge))).toMatchObject({
+      kind: "refused",
+      declaredBytes: 9_223_372_036_854_775_807n,
+    });
+  });
+
+  it("waits for the sixty-four-bit length field itself before refusing anything", () => {
+    // Nine of the ten header bytes: the declaration is not all here, so this
+    // parse cannot yet say the frame is over the limit.
+    expect(parseFrame(declaration(MAX_FRAME_BYTES + 1n).subarray(0, 9))).toEqual({
+      kind: "incomplete",
+    });
   });
 });
 

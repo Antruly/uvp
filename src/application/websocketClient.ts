@@ -170,16 +170,46 @@ interface ParsedFrame {
   readonly consumed: number;
 }
 
+/** The largest frame payload this client will buffer. */
+export const MAX_FRAME_BYTES = 8n * 1024n * 1024n;
+
 /**
- * Parse one frame from the front of `buffer`, or report that more bytes are
- * needed.
+ * What one parse of the front of the read buffer found.
  *
- * The `undefined` opcode is a protocol violation rather than a short read: a
- * reserved opcode has no meaning, and continuing to read frames after one would
- * be reading noise and calling it messages.
+ * Three outcomes, not two, because "not enough bytes yet" and "this client will
+ * not hold that frame" call for opposite behavior: the first waits for more, the
+ * second must be reported and end the read. Collapsing them into `undefined`
+ * makes a refused frame look like a short read, and the caller waits for bytes
+ * the peer has already finished describing.
  */
-export const parseFrame = (buffer: Buffer): ParsedFrame | undefined => {
-  if (buffer.byteLength < 2) return undefined;
+export type FrameParse =
+  | ({ readonly kind: "frame" } & ParsedFrame)
+  | { readonly kind: "incomplete" }
+  | {
+      readonly kind: "refused";
+      readonly opcode: WebSocketOpcode | undefined;
+      /**
+       * The length the peer declared, kept as a bigint: the sixty-four-bit field
+       * can exceed what a JavaScript number represents exactly, and a refusal
+       * that rounded the number would misreport the frame it refused.
+       */
+      readonly declaredBytes: bigint;
+    };
+
+/**
+ * Parse one frame from the front of `buffer`.
+ *
+ * The `undefined` opcode on a parsed frame is a protocol violation rather than a
+ * short read: a reserved opcode has no meaning, and continuing to read frames
+ * after one would be reading noise and calling it messages.
+ *
+ * A declared length above `MAX_FRAME_BYTES` is a refusal, not a short read: the
+ * peer has stated exactly how long the frame is, and it is longer than this
+ * client will buffer. The check happens before any allocation, so a hostile
+ * length field cannot drive one.
+ */
+export const parseFrame = (buffer: Buffer): FrameParse => {
+  if (buffer.byteLength < 2) return { kind: "incomplete" };
   const first = buffer[0] ?? 0;
   const second = buffer[1] ?? 0;
   const fin = (first & 0x80) !== 0;
@@ -188,25 +218,23 @@ export const parseFrame = (buffer: Buffer): ParsedFrame | undefined => {
   let length = second & 0x7f;
   let offset = 2;
   if (length === 126) {
-    if (buffer.byteLength < offset + 2) return undefined;
+    if (buffer.byteLength < offset + 2) return { kind: "incomplete" };
     length = buffer.readUInt16BE(offset);
     offset += 2;
   } else if (length === 127) {
-    if (buffer.byteLength < offset + 8) return undefined;
+    if (buffer.byteLength < offset + 8) return { kind: "incomplete" };
     const wide = buffer.readBigUInt64BE(offset);
-    // A payload this large cannot be buffered anyway; refusing it here keeps the
-    // allocation below from being driven by a hostile length field.
-    if (wide > 8n * 1024n * 1024n) return undefined;
+    if (wide > MAX_FRAME_BYTES) return { kind: "refused", opcode, declaredBytes: wide };
     length = Number(wide);
     offset += 8;
   }
   let maskKey: Buffer | undefined;
   if (masked) {
-    if (buffer.byteLength < offset + 4) return undefined;
+    if (buffer.byteLength < offset + 4) return { kind: "incomplete" };
     maskKey = buffer.subarray(offset, offset + 4);
     offset += 4;
   }
-  if (buffer.byteLength < offset + length) return undefined;
+  if (buffer.byteLength < offset + length) return { kind: "incomplete" };
   const raw = buffer.subarray(offset, offset + length);
   const payload = Buffer.alloc(length);
   if (maskKey === undefined) {
@@ -216,7 +244,7 @@ export const parseFrame = (buffer: Buffer): ParsedFrame | undefined => {
       payload[index] = (raw[index] ?? 0) ^ (maskKey[index % 4] ?? 0);
     }
   }
-  return { fin, opcode, payload, consumed: offset + length };
+  return { kind: "frame", fin, opcode, payload, consumed: offset + length };
 };
 
 const closeCodeOf = (payload: Buffer): number | undefined =>
@@ -441,7 +469,30 @@ export const probeWebSocket = async (
       const readFrames = (): void => {
         for (;;) {
           const parsed = parseFrame(buffer);
-          if (parsed === undefined) break;
+          if (parsed.kind === "incomplete") break;
+          if (parsed.kind === "refused") {
+            // A refused frame is a finding, not a stall. Waiting for the payload
+            // would never complete — the peer stated its length and the client
+            // has decided not to hold it — and the frame would disappear from
+            // the log without a word, which is a silent bound on the evidence.
+            // It is reported the way a reserved opcode is: a protocol-error
+            // frame the caller can see, a transport error naming why, and the
+            // probe ended.
+            push({
+              direction: "received",
+              opcode: parsed.opcode ?? "continuation",
+              // Nothing of the payload was buffered; the declared length is in
+              // the message rather than presented as bytes that were read.
+              bytes: 0,
+              payload: Buffer.alloc(0),
+              protocolError: true,
+            });
+            transportError =
+              `Refused a frame declaring ${String(parsed.declaredBytes)} bytes: ` +
+              `the probe buffers at most ${String(MAX_FRAME_BYTES)} bytes per frame.`;
+            finish();
+            return;
+          }
           buffer = buffer.subarray(parsed.consumed);
           if (parsed.opcode === undefined) {
             push({
