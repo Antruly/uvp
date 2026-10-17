@@ -50,7 +50,7 @@ can walk away from uvp and keep the project.
   `cmake --install`ed or unpacked from a release archive
 
 On Windows, the archive route needs a real `pkg-config.exe` and a Release build;
-[installation.md](docs/installation.md#route-2--unpack-a-prebuilt-release-archive)
+[installation.md](docs/installation.md#windows-msvc)
 has the exact steps.
 
 Run the doctor first. It reports what is present, what is missing, and which
