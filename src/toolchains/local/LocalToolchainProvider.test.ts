@@ -10,7 +10,7 @@ import { isWindows } from "../host.js";
 import { renderCommand } from "../processRunner.js";
 import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
-import { assignmentOf } from "../../../tests/support/recordedCommand.js";
+import { assignmentOf, wordsOf } from "../../../tests/support/recordedCommand.js";
 import { removeTree } from "../../../tests/support/temporaryTree.js";
 import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
 
@@ -325,7 +325,11 @@ describe("the libuvcpp a build points CMake at", () => {
     const compile = outcome.commands[1] ?? "";
     expect(assignmentOf(compile, "CMAKE_PREFIX_PATH")).toBeUndefined();
     expect(assignmentOf(compile, "LC_MESSAGES")).toBe("C");
-    expect(compile.endsWith(`cmake --build ${buildDir}`)).toBe(true);
+    // Read the record in its own notation rather than as raw text. On Windows
+    // the build directory is single-quoted because it contains backslashes, so an
+    // `endsWith` comparison fails on the quoting rather than on the command; the
+    // last two words are the claim either way.
+    expect(wordsOf(compile).slice(-2)).toEqual(["--build", buildDir]);
     expect(outcome.succeeded).toBe(true);
   });
 });
