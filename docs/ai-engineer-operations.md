@@ -39,10 +39,10 @@ must end with the identity marker:
 
 The marker is not optional. A comment without it has no accountable author and
 may be ignored by the maintainer. The same identity must appear in the commit
-trailer:
+trailer, alongside the tool name:
 
 ```text
-Assisted-by: Antruly-dev-1
+Assisted-by: Claude Code (Antruly-dev-1)
 ```
 
 If an agent does not know its identity, it must not claim a task or post a
@@ -212,8 +212,8 @@ I am releasing the claim so another engineer or the maintainer can take it.
 ## Comments, pull requests, and labels
 
 - The identity marker goes at the end of every comment and PR body.
-- The `Assisted-by: Antruly-dev-<n>` trailer goes on every commit produced with
-  the engineer's work.
+- The `Assisted-by: <tool-name> (Antruly-dev-<n>)` trailer goes on every commit
+  produced with the engineer's work.
 - The `ai-assisted` label belongs on a PR with substantial AI involvement. The
   proxy assistant or the maintainer applies labels; an engineer asks rather than
   editing another owner's metadata.

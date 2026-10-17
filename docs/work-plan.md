@@ -64,19 +64,20 @@ largest remaining gap is not a feature: **release automation and publishing**.
 
 ## Open work at this snapshot
 
-| Area                      | Issue        | PR   | Status              | Next                            |
-| ------------------------- | ------------ | ---- | ------------------- | ------------------------------- |
-| Windows/MSVC generator    | #154         | #155 | PR clean, draft     | Review; ready/approve; merge    |
-| Windows/MSVC diagnostics  | #142         | #143 | PR dirty (conflict) | Rebase, re-run checks, review   |
-| Verification cancellation | #122         | #130 | PR dirty (conflict) | Rebase, re-run checks, review   |
-| Workspace name validation | #87          | #91  | PR dirty (conflict) | Rebase, re-run checks, review   |
-| WebSocket duplicate       | #94 (closed) | #112 | PR dirty, duplicate | Maintainer decision: close #112 |
-| Mutation attribution      | #41          | —    | Upstream blocked    | Watch Stryker #6210/#6214       |
+| Area                      | Issue        | PR   | Status              | Next                                       |
+| ------------------------- | ------------ | ---- | ------------------- | ------------------------------------------ |
+| Windows/MSVC generator    | #154         | #155 | PR clean, draft     | Review; ready/approve; merge               |
+| Windows/MSVC diagnostics  | #142         | #143 | PR dirty (conflict) | Rebase, re-run checks, review              |
+| Verification cancellation | #122         | #130 | PR dirty (conflict) | Rebase, re-run checks, review              |
+| Workspace name validation | #87          | #91  | PR dirty (conflict) | Rebase, re-run checks, review              |
+| WebSocket duplicate       | #94 (closed) | #112 | PR dirty, duplicate | Proposed: close #112; no decision recorded |
+| Mutation attribution      | #41          | —    | Upstream blocked    | Watch Stryker #6210/#6214                  |
 
 The three dirty PRs tied to open issues (#91, #130, #143) need a rebase before
 they can be reviewed again. Rebase the owner's branch, re-run the checks that
-cover the change, and keep the PR body current. #112 is a duplicate and should be
-closed rather than rebased. Do not open a competing PR for the same issue.
+cover the change, and keep the PR body current. **Proposed:** #112 is a duplicate
+and should be closed rather than rebased; no maintainer decision is recorded yet.
+Do not open a competing PR for the same issue.
 
 ## Next work not yet tracked
 

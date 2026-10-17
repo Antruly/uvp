@@ -125,8 +125,13 @@ need to annotate code you have read, understood, and can defend.
 **Commit trailers.** When a commit was produced with an agent, add:
 
 ```
-Assisted-by: <tool-name>
+Assisted-by: <tool-name> (<ai-identity>)
 ```
+
+The identity is the engineer's assigned identity, for example
+`Assisted-by: Claude Code (Antruly-dev-1)`. An agent without an assigned identity
+may name its role, for example `Assisted-by: Claude Code (direction-lead)`. The
+tool name alone remains acceptable when no identity applies.
 
 **Enhanced verification.** Changes to generated code, the toolchain layer, or
 the evidence model need more than a passing test suite — see
