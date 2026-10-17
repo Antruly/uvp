@@ -201,6 +201,20 @@ add_executable(${input.name}
   src/main.cpp
 )
 
+# The manifest names the executable, and uvp resolves it as build/<name>.
+# Multi-configuration generators (Visual Studio, Xcode) would otherwise append a
+# per-configuration directory and put it in build/Debug/<name>, so the project
+# would build and then not be startable by the tool that generated it. The base
+# property covers single-configuration generators; the per-configuration
+# properties override its configuration subdirectory on multi-config ones.
+set_target_properties(${input.name} PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "\${CMAKE_BINARY_DIR}")
+foreach(uvp_config \${CMAKE_CONFIGURATION_TYPES})
+  string(TOUPPER "\${uvp_config}" uvp_config_upper)
+  set_target_properties(${input.name} PROPERTIES
+    "RUNTIME_OUTPUT_DIRECTORY_\${uvp_config_upper}" "\${CMAKE_BINARY_DIR}")
+endforeach()
+
 target_link_libraries(${input.name} PRIVATE \${UVP_UVCPP_TARGET})
 
 if (MSVC)
