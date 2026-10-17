@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { cancelledFailure, UvpFailure } from "../domain/errors.js";
+import { cancelledFailure, isCancelledFailure, UvpFailure } from "../domain/errors.js";
 import { newId, sha256 } from "../domain/identity.js";
 import {
   decodeBody,
@@ -592,17 +592,24 @@ export class WebService {
         : Buffer.from(input.body, input.body_encoding === "base64" ? "base64" : "utf8");
 
     const started = Date.now();
-    const exchange = await performRequest({
-      url: input.url,
-      method: input.method,
-      headers: input.headers,
-      body: requestBody,
-      httpVersion: input.http_version,
-      followRedirects: input.follow_redirects,
-      maxRedirects: input.max_redirects,
-      verifyTls: input.verify_tls,
-      timeoutMs: input.timeout_ms,
-    }).catch((cause: unknown) => {
+    const exchange = await performRequest(
+      {
+        url: input.url,
+        method: input.method,
+        headers: input.headers,
+        body: requestBody,
+        httpVersion: input.http_version,
+        followRedirects: input.follow_redirects,
+        maxRedirects: input.max_redirects,
+        verifyTls: input.verify_tls,
+        timeoutMs: input.timeout_ms,
+      },
+      signal,
+    ).catch((cause: unknown) => {
+      // A withdrawal is not a finding about the target. The transport hands it
+      // back as the typed cancellation precisely so this catch does not have to
+      // read the signal or a message to tell it apart from a transport failure.
+      if (isCancelledFailure(cause)) throw cause;
       const message = cause instanceof Error ? cause.message : String(cause);
       // The transport classified the failure where it saw it; matching the
       // message here instead made the two disagree the moment either changed.

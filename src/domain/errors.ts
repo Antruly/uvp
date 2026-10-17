@@ -182,6 +182,18 @@ export const cancelledFailure = (message: string): UvpFailure =>
   });
 
 /**
+ * Whether a throw is the caller's own withdrawal, as opposed to a finding.
+ *
+ * A layer that catches errors to classify them — a transport translating Node
+ * errors into the error contract, a workflow deciding whether an exchange was
+ * observed — must not classify a cancellation as anything about the subject.
+ * A named predicate says that intent once; testing for the type alone would also
+ * be true for a validation failure or a missing workspace, which are findings.
+ */
+export const isCancelledFailure = (value: unknown): value is UvpFailure =>
+  isUvpFailure(value) && value.detail.code === "cancelled";
+
+/**
  * Project any thrown value into the error contract.
  *
  * An unrecognised throw becomes `execution_failure` and keeps its message: we

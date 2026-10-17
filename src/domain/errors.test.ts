@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import {
   UvpFailure,
+  cancelledFailure,
+  isCancelledFailure,
   type UvpErrorCode,
   isUvpFailure,
   parseUvpError,
@@ -203,6 +205,20 @@ describe("UvpFailure", () => {
     ).toBe(true);
     expect(isUvpFailure(new Error("m"))).toBe(false);
     expect(isUvpFailure(undefined)).toBe(false);
+  });
+
+  it("tells the caller's withdrawal apart from every other typed failure", () => {
+    // Layers that classify errors must not turn a cancellation into a finding.
+    // The type alone is not enough: an invalid request or a missing workspace is
+    // also a `UvpFailure`, and rethrowing either as a withdrawal would hide it.
+    expect(isCancelledFailure(cancelledFailure("the pass was stopped"))).toBe(true);
+    expect(
+      isCancelledFailure(
+        new UvpFailure({ code: "timeout", message: "m", remediation: { action: "a" } }),
+      ),
+    ).toBe(false);
+    expect(isCancelledFailure(new Error("m"))).toBe(false);
+    expect(isCancelledFailure(undefined)).toBe(false);
   });
 });
 

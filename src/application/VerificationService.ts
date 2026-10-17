@@ -23,7 +23,7 @@ import type { SessionStore } from "./sessionStore.js";
 import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
 import { selectToolchain } from "./toolchainSelection.js";
 import type { ToolchainKind } from "../domain/toolchain.js";
-import { UvpFailure } from "../domain/errors.js";
+import { cancelledFailure, UvpFailure } from "../domain/errors.js";
 
 /**
  * The verification workflow.
@@ -382,7 +382,28 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
   let evaluated = 0;
   let failed = 0;
 
+  /**
+   * End a pass the caller withdrew.
+   *
+   * A withdrawal is not a finding about the service, so it produces no bundle
+   * and no unknown. The service this call started is still this call's to
+   * release, so it is stopped before the rejection when the caller did not ask
+   * to keep it — the same ownership rule the readiness failure follows.
+   */
+  const cancelledMidPass = async (message: string): Promise<never> => {
+    if (!input.keep_running) await stopQuietly(context, recorder, runResult.runId);
+    throw cancelledFailure(message);
+  };
+
   for (const spec of input.requests) {
+    // Checked between requests as well as inside one: a caller who withdrew
+    // after the previous exchange must not have another request put to the
+    // service on their behalf.
+    if (context.signal.aborted) {
+      await cancelledMidPass(
+        "The verification pass was cancelled before the next request was sent.",
+      );
+    }
     const url = `${base}${spec.path.startsWith("/") ? spec.path : `/${spec.path}`}`;
     const startedAt = Date.now();
 
@@ -417,7 +438,16 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
         recorder,
         context.signal,
       )
-      .catch((cause: unknown) => {
+      .catch(async (cause: unknown) => {
+        // The caller withdrew while this request was in flight. It is not a
+        // failed request and there is no bundle to return: rethrow it as the
+        // cancellation it is, and stop the service first if this pass owns it.
+        if (context.signal.aborted) {
+          await cancelledMidPass(
+            "The verification pass was cancelled while a request was in flight; no claim is made " +
+              "about the service.",
+          );
+        }
         const blockedBy = cause instanceof Error ? cause.message : String(cause);
         const question = `Does ${requestLabel(spec)} behave as asserted?`;
         recordUnknown(recorder, question, "not_attempted", { blockedBy });

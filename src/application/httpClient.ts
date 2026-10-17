@@ -4,6 +4,8 @@ import { connect as http2Connect } from "node:http2";
 import type { ClientHttp2Session } from "node:http2";
 import { Buffer } from "node:buffer";
 
+import { cancelledFailure, isCancelledFailure } from "../domain/errors.js";
+
 /**
  * A low-level HTTP client that reports what actually happened.
  *
@@ -365,7 +367,11 @@ interface SingleShotResult {
   readonly tls: TlsInfo | undefined;
 }
 
-const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult> =>
+const performHttp1 = (
+  spec: HttpRequestSpec,
+  url: URL,
+  signal: AbortSignal | undefined,
+): Promise<SingleShotResult> =>
   new Promise((resolve, reject) => {
     const started = Date.now();
     const secure = url.protocol === "https:";
@@ -387,6 +393,21 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     let tlsAt: number | undefined;
     let firstByteAt: number | undefined;
     let settled = false;
+    let onAbort: (() => void) | undefined;
+
+    // A caller that withdrew before the request was sent gets no socket opened
+    // on their behalf. `requestFn` has not been called yet, so there is nothing
+    // to destroy; the rejection is the whole answer.
+    if (signal?.aborted === true) {
+      settled = true;
+      reject(cancelledFailure("The request was cancelled before it was sent."));
+      return;
+    }
+
+    /** Stop observing the signal once this attempt has settled either way. */
+    const cleanup = (): void => {
+      if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+    };
 
     // One deadline for the attempt, not an inactivity timer. A service that
     // trickles a byte every few seconds resets an inactivity timer forever, so
@@ -403,6 +424,15 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      cleanup();
+      // A withdrawal is not a transport finding. It reaches here because
+      // `req.destroy(cancelledFailure(...))` re-emits the typed failure, and
+      // classifying it as `unreachable` would turn "the caller stopped" into
+      // "the service could not be reached".
+      if (isCancelledFailure(error)) {
+        reject(error);
+        return;
+      }
       if (error instanceof TransportFailure) {
         reject(error);
         return;
@@ -443,6 +473,7 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        cleanup();
         resolve({
           status: res.statusCode ?? 0,
           statusText: res.statusMessage ?? "",
@@ -482,6 +513,14 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       });
     });
     req.on("error", fail);
+    if (signal !== undefined) {
+      onAbort = () => {
+        // `destroy` carries the typed cancellation into `fail`, which rejects it
+        // as itself rather than classifying it as a transport failure.
+        req.destroy(cancelledFailure("The request was cancelled while it was in flight."));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
     if (spec.body !== undefined) req.write(spec.body);
     req.end();
   });
@@ -536,7 +575,11 @@ const http2Headers = (
   return forwarded;
 };
 
-const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult> =>
+const performHttp2 = (
+  spec: HttpRequestSpec,
+  url: URL,
+  signal: AbortSignal | undefined,
+): Promise<SingleShotResult> =>
   new Promise((resolve, reject) => {
     const started = Date.now();
     const secure = url.protocol === "https:";
@@ -544,14 +587,35 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     // Only meaningful over TLS, and only set when it is: passing it for a
     // cleartext h2c session would suggest a check that does not happen.
     const connectOptions = secure ? { rejectUnauthorized: spec.verifyTls } : {};
-    const client: ClientHttp2Session = http2Connect(authority, connectOptions);
     let settled = false;
+    let onAbort: (() => void) | undefined;
+
+    // Nothing has been dialled yet, so a withdrawn call opens no session.
+    if (signal?.aborted === true) {
+      settled = true;
+      reject(cancelledFailure("The request was cancelled before it was sent."));
+      return;
+    }
+
+    /** Stop observing the signal once this attempt has settled either way. */
+    const cleanup = (): void => {
+      if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+    };
+
+    const client: ClientHttp2Session = http2Connect(authority, connectOptions);
 
     const fail = (error: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      cleanup();
       client.close();
+      // A withdrawal is not a transport finding; `ERR_HTTP2_STREAM_CANCEL` from
+      // the destroy below would otherwise be reported as an unreachable peer.
+      if (isCancelledFailure(error)) {
+        reject(error);
+        return;
+      }
       if (error instanceof TransportFailure) {
         reject(error);
         return;
@@ -583,6 +647,19 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
       ":path": `${url.pathname}${url.search}`,
       ...http2Headers(spec.headers, spec.body),
     });
+
+    if (signal !== undefined) {
+      onAbort = () => {
+        // Reject first, so the stream's own `ERR_HTTP2_STREAM_CANCEL` from the
+        // destroy arrives after the settlement and is ignored. `destroy` is what
+        // makes the withdrawal real: a graceful `close` would let the stream
+        // finish and the peer answer a request whose caller has gone.
+        fail(cancelledFailure("The request was cancelled while it was in flight."));
+        stream.destroy();
+        client.destroy();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
 
     let firstByteAt: number | undefined;
     let status = 0;
@@ -629,6 +706,7 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
         return;
       }
       settled = true;
+      cleanup();
       // Read before `close()`, which is the only ordering that keeps the socket
       // attached. An h2 session does not null it the way a response does, but it
       // does drop it on close, and a session with no socket is reported as an
@@ -668,7 +746,10 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
  * protocol attempt draws on the same budget, so `timeoutMs` bounds how long the
  * call can take rather than how long each socket may sit idle.
  */
-export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchange> => {
+export const performRequest = async (
+  spec: HttpRequestSpec,
+  signal?: AbortSignal,
+): Promise<HttpExchange> => {
   const redirects: { status: number; location: string }[] = [];
   let currentUrl = new URL(spec.url);
   // The request as it stands on this hop. A redirect can rewrite the method and
@@ -681,16 +762,25 @@ export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchang
     new TransportFailure("timeout", `Request timed out after ${String(spec.timeoutMs)} ms`);
 
   for (let hop = 0; ; hop += 1) {
+    // A withdrawal is checked between hops as well as inside one: a redirect that
+    // arrived just as the caller left must not be followed.
+    if (signal?.aborted === true) {
+      throw cancelledFailure("The request was cancelled before the next hop was sent.");
+    }
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw expired();
     const attempt: HttpRequestSpec = { ...currentSpec, timeoutMs: remaining };
     const send = async (): Promise<SingleShotResult> => {
       // `auto` starts on HTTP/1.1 and falls back to HTTP/2 in the catch below.
-      if (attempt.httpVersion === "2") return performHttp2(attempt, currentUrl);
-      return performHttp1(attempt, currentUrl);
+      if (attempt.httpVersion === "2") return performHttp2(attempt, currentUrl, signal);
+      return performHttp1(attempt, currentUrl, signal);
     };
 
     const result = await send().catch(async (error: unknown) => {
+      // A cancellation is not evidence for another protocol attempt, and the
+      // caller has already withdrawn; rethrow before the fallback rule reads it
+      // as a protocol mismatch.
+      if (isCancelledFailure(error) || signal?.aborted === true) throw error;
       // HTTP/2 is a fallback for a *protocol* mismatch, not a general retry.
       // Only a peer that answered something this client could not parse is
       // evidence for it; anything else — a deadline, a refused connection, a
@@ -705,7 +795,7 @@ export const performRequest = async (spec: HttpRequestSpec): Promise<HttpExchang
       }
       const left = deadline - Date.now();
       if (left <= 0) throw expired();
-      return performHttp2({ ...attempt, timeoutMs: left }, currentUrl);
+      return performHttp2({ ...attempt, timeoutMs: left }, currentUrl, signal);
     });
 
     const location = result.headers["location"];
