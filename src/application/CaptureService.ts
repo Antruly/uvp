@@ -133,6 +133,35 @@ const capped = (
     ? { body, truncated: false }
     : { body: body.subarray(0, maxBytes), truncated: true };
 
+/**
+ * The failure a capture proxy reports when it cannot listen.
+ *
+ * `EADDRINUSE` is the one bind failure with an obvious retry: another process may
+ * free the port, so it stays `service_unavailable`, which is retryable. Every
+ * other bind failure — `EACCES`, `EADDRNOTAVAIL`, `EAFNOSUPPORT` — is a permission
+ * or configuration fact a retry does not change, so it is `capture_listen_failed`,
+ * category `execution_failure` and not retryable. The remedy is the caller's, not
+ * a loop's. [#49](https://github.com/Antruly/uvp/issues/49) split the code from the
+ * session lookup, whose own failure is `capture_not_found`.
+ *
+ * This function is the bind half's only site, and it is exported so the mapping
+ * can be tested without binding a socket.
+ */
+export const captureListenFailure = (error: NodeJS.ErrnoException, port: number): UvpFailure => {
+  if (error.code === "EADDRINUSE") {
+    return new UvpFailure({
+      code: "service_unavailable",
+      message: `Port ${String(port)} is already in use.`,
+      remediation: { action: "Choose a free listen_port." },
+    });
+  }
+  return new UvpFailure({
+    code: "capture_listen_failed",
+    message: `The capture proxy could not listen: ${error.message}`,
+    remediation: { action: "Check that this process may open a listening socket." },
+  });
+};
+
 export class CaptureService {
   constructor(
     private readonly store: SessionStore,
@@ -194,21 +223,7 @@ export class CaptureService {
 
     await new Promise<void>((resolve, reject) => {
       server.once("error", (error: NodeJS.ErrnoException) => {
-        reject(
-          new UvpFailure({
-            code: error.code === "EADDRINUSE" ? "service_unavailable" : "capture_unavailable",
-            message:
-              error.code === "EADDRINUSE"
-                ? `Port ${String(input.listen_port)} is already in use.`
-                : `The capture proxy could not listen: ${error.message}`,
-            remediation: {
-              action:
-                error.code === "EADDRINUSE"
-                  ? "Choose a free listen_port."
-                  : "Check that this process may open a listening socket.",
-            },
-          }),
-        );
+        reject(captureListenFailure(error, input.listen_port));
       });
       server.listen(input.listen_port, "127.0.0.1", () => {
         resolve();
@@ -285,7 +300,7 @@ export class CaptureService {
       captureId === undefined ? this.store.latestCapture() : this.store.capture(captureId);
     if (session !== undefined) return session;
     throw new UvpFailure({
-      code: "capture_unavailable",
+      code: "capture_not_found",
       message:
         captureId === undefined
           ? "No capture session has been started in this session."
