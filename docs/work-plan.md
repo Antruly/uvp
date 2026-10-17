@@ -1,6 +1,6 @@
 # Current development plan
 
-**Snapshot:** 2026-10-17T11:17Z. This is a snapshot, not a live dashboard. The
+**Snapshot:** 2026-10-17T14:29Z. This is a snapshot, not a live dashboard. The
 direction lead updates it per batch with the maintainer's approval; counts and
 open items will drift between snapshots.
 
@@ -15,7 +15,7 @@ Follow [the AI development workflow](agent-workflow.md) and
 
 ## Where we are
 
-- **78 merged PRs**, **76 closed issues**; **10 open issues**, **2 open PRs** at
+- **87 merged PRs**, **83 closed issues**; **7 open issues**, **5 open PRs** at
   this snapshot.
 - **Roadmap:** 50 of 54 marked items are done. The four open rows are
   `remote-ssh/` (blocked on verification), two CI observations/flakes, and the
@@ -37,38 +37,39 @@ Follow [the AI development workflow](agent-workflow.md) and
   Windows MSVC toolchain lane, container conformance, SBOM, and reproducible
   packing.
 
-The core product is therefore **feature-complete for the current scope**. The
-largest remaining gap is not a feature: **release automation and publishing**.
+The core product is therefore **feature-complete for the current scope**.
+**`uvp-agents@0.2.0` is published on npm**; the next release PR, #194 for
+`0.3.0`, is already open.
+
+For the 0.2.0 release, #188's CI was green at `b973f27`; the regenerated derived
+files were already in that commit, so the `docs:generate` step was done before
+the merge.
 
 ## Current direction
 
-1. **Release automation and the first public release.** This is the critical
-   path. The package is not yet published, so `npx uvp-agents setup` is not real
-   until the release pipeline exists.
-   - **#160** release-please workflow — claimed by Antruly-dev-1; PR #177 is the
-     in-progress draft.
-   - **#161** npm publish — implementation may start now; merge/publish only after
-     #160 lands.
-   - **#162** MCP registry publish — validation/dry-run may start now; publish
-     only after #161.
-   - **#163** clean-environment setup acceptance — harness/tests may start now;
-     the real `npx` run only after #161.
-   - **#178** first-release support matrix — independent, open and unclaimed
-     after the earlier claim was released; can start now.
-   - **#179** first-release notes and upgrade guidance — independent, can start
-     now; finalize before the release PR merges.
-2. **Windows/MSVC polish.** MSVC link diagnostics (#142 / PR #143) and the
-   Windows database refusal path (#108) have landed. The remaining tracked item
-   is the external Chocolatey/pkgconfiglite failure on the Windows MSVC lane
-   (#166); the maintainer decides whether to wait, rerun, pin, or mark it a named
-   gap.
-3. **Remaining reliability fix.** Workspace-name validation (#87 / PR #91): the
-   review's blocking reserved-name finding was fixed at `dc91b78`; CI is green
-   and the PR is a draft awaiting re-review. It is not a new claim.
-4. **Documentation and status accuracy.** #178 (support matrix) and #179
-   (release notes) are the parallel documentation lane.
+1. **Release.** `uvp-agents@0.2.0` is live; #188 merged, the tag and GitHub
+   release exist, and #161 is closed. #191 (MCP registry prep) and #192 (npm
+   publish prep) are merged. #194 is the open `0.3.0` release PR with no checks;
+   the owner must decide whether to cut it, run `npm run docs:generate` on the
+   release branch, run the pre-release checks, and record the approval. Trusted
+   publishing for `publish.yml` is **not configured yet**; `0.2.0` was the manual
+   bootstrap without a provenance attestation.
+   - **#162** MCP registry publish — authorized by the maintainer; #191 has
+     landed, so the remaining gate is the `mcp-publisher` GitHub authorization.
+   - **#163** clean-environment setup acceptance — claimed by Antruly-dev-1; PR
+     #195 is open.
+   - **#179** first-release notes and upgrade guidance — claimed by
+     Antruly-dev-2; PR #196 is open.
+2. **Windows/MSVC.** The remaining tracked item is the external
+   Chocolatey/pkgconfiglite failure on the Windows MSVC lane (#166); the
+   maintainer decides whether to wait, rerun, pin, or mark it a named gap.
+3. **Remaining reliability.** #184's blocking finding (an abandoned request was
+   not destroyed) was addressed at `5be6fbb`; it awaits re-review and approval.
+   #185 is merged.
+4. **Documentation and status accuracy.** #178 merged; #179 is now PR #196.
 5. **Agent onboarding acceptance.** #163 is the clean-environment proof of
-   `setup` → MCP configuration → `uvp_doctor` → generate → build → run → verify.
+   `setup` → MCP configuration → `uvp_doctor` → generate → build → run → verify;
+   PR #195 is open.
 6. **Upstream watch.** #41 is blocked on Stryker's upstream vitest-runner
    (#6210/#6214). A libuvcpp defect belongs in the libuvcpp repository, not in a
    local patch.
@@ -76,55 +77,59 @@ largest remaining gap is not a feature: **release automation and publishing**.
 ## Claimable first-stage tasks
 
 Claim by commenting with your identity, as described in
-[AI engineer operations](ai-engineer-operations.md#task-taking-mode). The
-dependency is on **merge/publish/execute**, not on starting the preparation.
+[AI engineer operations](ai-engineer-operations.md#task-taking-mode). At this
+snapshot all first-stage tasks are claimed; the remaining work is review,
+approval, and the owner's release actions.
 
-| Task                                     | Issue | Can start              | Execute after            | Status                                   |
-| ---------------------------------------- | ----- | ---------------------- | ------------------------ | ---------------------------------------- |
-| Release-please workflow                  | #160  | Now                    | —                        | **Claimed by Antruly-dev-1**; PR #177    |
-| npm publish                              | #161  | Now                    | #160 and the release tag | Open, unclaimed                          |
-| MCP registry publish                     | #162  | Now (validate/dry-run) | #161                     | Open, unclaimed                          |
-| Clean-environment setup acceptance       | #163  | Now (harness/tests)    | #161                     | Open, unclaimed                          |
-| First-release support matrix             | #178  | Now                    | —                        | Open, unclaimed (earlier claim released) |
-| First-release notes and upgrade guidance | #179  | Now                    | #161 for final content   | Open, unclaimed                          |
+| Task                                     | Issue | Current state                                                           |
+| ---------------------------------------- | ----- | ----------------------------------------------------------------------- |
+| MCP registry publish                     | #162  | **Claimed by Antruly-dev-3**; #191 merged; publish waits on GitHub auth |
+| Clean-environment setup acceptance       | #163  | **Claimed by Antruly-dev-1**; PR #195                                   |
+| First-release notes and upgrade guidance | #179  | **Claimed by Antruly-dev-2**; PR #196                                   |
 
-One active task per engineer. The claim comment is the ownership record until the
-tracker assignment exists. Do not merge, publish, or run the final acceptance
-before the dependency has landed. Antruly-dev-1 briefly claimed #178, released it
-at 11:25:10Z to keep one active task, and no branch or PR was opened for it.
+#161 is closed; #188 is merged; #194 is the next release PR, not a claimable
+task. One active task per engineer. The claim comment is the ownership record
+until the tracker assignment exists.
 
 ## Suggested parallel lanes
 
 These are recommendations for self-claiming, not assignments:
 
-| Engineer      | Now                          | Next                                               |
-| ------------- | ---------------------------- | -------------------------------------------------- |
-| Antruly-dev-1 | #160 (in progress)           | #161 npm publish                                   |
-| Antruly-dev-2 | #178 support matrix          | #179 release notes                                 |
-| Antruly-dev-3 | #91 re-review/merge (author) | #162 registry validation/dry-run → #163 after #161 |
+| Engineer      | Now                                      | Next                       |
+| ------------- | ---------------------------------------- | -------------------------- |
+| Antruly-dev-1 | #163 setup acceptance (PR #195)          | Review/approval            |
+| Antruly-dev-2 | #179 release notes (PR #196)             | Review/approval            |
+| Antruly-dev-3 | #162 MCP registry publish (auth pending) | Verify listing + handshake |
 
 The lanes are independent until the execute gate. An engineer who finishes early
-may claim the next task in the table; one active task per engineer still applies.
+may claim an eligible task from a new issue; one active task per engineer still
+applies.
 
 ## Open work at this snapshot
 
-| Area                      | Issue | PR  | Status                      | Next                                     |
-| ------------------------- | ----- | --- | --------------------------- | ---------------------------------------- |
-| Workspace name validation | #87   | #91 | PR clean, draft (`dc91b78`) | Awaiting re-review; no new claim         |
-| Windows MSVC CI           | #166  | —   | External Chocolatey failure | Maintainer decision: wait/rerun/pin/skip |
-| Mutation attribution      | #41   | —   | Upstream blocked            | Watch Stryker #6210/#6214                |
+| Area                    | Issue | PR   | Status                                         | Next                                                 |
+| ----------------------- | ----- | ---- | ---------------------------------------------- | ---------------------------------------------------- |
+| Next release (0.3.0)    | —     | #194 | Release PR, no checks, `autorelease: pending`  | Owner pre-merge checklist; decide whether to cut     |
+| Work plan refresh       | #189  | #190 | Draft; review corrections applied              | Re-review; owner readiness/approval                  |
+| Workspace handshake fix | #182  | #184 | Draft; blocking finding addressed at `5be6fbb` | Re-review and approval                               |
+| Setup acceptance        | #163  | #195 | Draft, clean                                   | Review/approval                                      |
+| Release notes           | #179  | #196 | Draft, CI running                              | Review/approval                                      |
+| MCP registry publish    | #162  | —    | Authorized; #191 merged; auth pending          | Complete `mcp-publisher login github`; publish 0.2.0 |
+| Windows MSVC CI         | #166  | —    | External Chocolatey failure                    | Maintainer decision: wait/rerun/pin/skip             |
+| Mutation attribution    | #41   | —    | Upstream blocked                               | Watch Stryker #6210/#6214                            |
 
-#122/#130 and #142/#143 are merged/closed. Do not open a competing PR for an
-issue that already has one.
+#87/#91, #122/#130, #142/#143, #154/#155, #160/#177, #178/#193, #185, #188,
+#191, and #192 are merged/closed. Do not open a competing PR for an issue that
+already has one.
 
 ## Next work not yet tracked
 
 These are candidate areas. Open an issue (or a design discussion, where the
 contribution scope requires one) if you intend to own one:
 
-- README/status/FAQ updates beyond #178/#179;
+- README/status/FAQ updates beyond #179/#196;
 - a Windows VS-version coverage check after #154/#155;
-- workspace/verification reliability fixes beyond the current open issues;
+- reliability fixes beyond #184;
 - a decision and fix for #166 if the maintainer chooses to repair the CI route
   rather than wait;
 - richer application templates only if the maintainer decides the scope (auth,
@@ -135,14 +140,14 @@ contribution scope requires one) if you intend to own one:
 You may propose or claim work in these directions. Follow the contribution scope
 and the identity/task-taking rules.
 
-| Direction                     | What is useful                                                 | Why                                                     |
-| ----------------------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
-| Release engineering           | #160–#163: release-please, npm, MCP registry, setup acceptance | Unblocks the stated goal: an AI can install and use uvp |
-| Release documentation         | #178 support matrix, #179 release notes                        | Makes the release claims match the observed lanes       |
-| Windows/MSVC                  | #166 decision; VS-version coverage check                       | Makes the Windows claims observed rather than inferred  |
-| Runtime/workspace reliability | review/finish #91; add regressions                             | Closes the remaining correctness gap                    |
-| Agent onboarding              | #163: setup → doctor → create → build → run → verify           | Proves the MCP path end to end                          |
-| Upstream tracking             | Stryker #41; libuvcpp issues in the libuvcpp repo              | Keeps uvp's own scope clean                             |
+| Direction                     | What is useful                                            | Why                                                        |
+| ----------------------------- | --------------------------------------------------------- | ---------------------------------------------------------- |
+| Release engineering           | trusted publisher, #194, #162                             | Turns the published package into a repeatable release path |
+| Release documentation         | #179/#196; README/status follow-ups                       | Makes the release claims match the observed lanes          |
+| Windows/MSVC                  | #166 decision; VS-version coverage check                  | Makes the Windows claims observed rather than inferred     |
+| Runtime/workspace reliability | re-review/approve #184; add regressions                   | Closes the remaining correctness gaps                      |
+| Agent onboarding              | #163/#195: setup → doctor → create → build → run → verify | Proves the MCP path end to end                             |
+| Upstream tracking             | Stryker #41; libuvcpp issues in the libuvcpp repo         | Keeps uvp's own scope clean                                |
 
 If you need help, leave the task unclaimed in the plan/issue so another engineer
 can pick it up. If you cannot solve it, hand it back with evidence; do not leave
@@ -162,21 +167,24 @@ start them as part of a bug fix or a first release:
 
 ## Release readiness
 
-A first public release should mean: the npm package is published, the MCP
-registry entry resolves, `npx uvp-agents setup` works in a clean environment, and
-the documented support matrix matches the lanes that actually ran.
+`uvp-agents@0.2.0` is published; the registry's shasum and integrity match the
+verified tarball, and a clean install reports `uvp-agents 0.2.0`. The first
+publish was the manual bootstrap, so `0.2.0` has no provenance attestation.
 
-The current estimate is **about one to two weeks of focused work** for a first
-public release. The critical path is #160 → #161 → #162/#163, with #178/#179 in
-parallel and #91 awaiting re-review after the author's `dc91b78` fix. The release pipeline has never been
-run, so this estimate is derived rather than observed.
+#194 is the open `0.3.0` release PR. Before merging it the owner must decide
+whether to cut `0.3.0`, run `npm run docs:generate` on the release branch (the
+same Option B step as #188), run the pre-release checks, and record the approval.
+Trusted publishing for `publish.yml` must be configured before the next release
+is published through the workflow. #162 (MCP registry) is authorized and its prep
+has merged; the remaining gate is the GitHub device authorization. #163 (setup
+acceptance) is PR #195; #179 (release notes) is PR #196.
 
 ## How to claim
 
 1. Read [AI engineer operations](ai-engineer-operations.md) and confirm your
    identity in `dev-identity.md`.
-2. Pick an eligible task. For #160–#163, respect the execute gate: prep may start
-   now; merge/publish/acceptance waits for the dependency.
+2. Pick an eligible task. At this snapshot the first-stage tasks are claimed; a
+   new issue is needed for additional work.
 3. Post the claim comment with your identity marker.
 4. Update your local identity file and start work.
 5. Hand back with evidence if you cannot finish; do not leave a silent stall.
