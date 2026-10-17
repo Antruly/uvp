@@ -1444,6 +1444,21 @@ report 936 false positives. What this does not establish is that a real report
 still has the shape its fixtures have — that is what the kill basis line in the
 weekly job's own summary is for, and the two are read together.
 
+**Duplication summary.** `npm run verify:static-check-report` runs
+`scripts/ci/static-check-report.mjs` over fixture reports and configs, and fails
+when the summary states something it did not read. The two inputs that used to be
+defaults dressed as observations are the cases: the threshold lives in
+`.jscpd.json` and not in jscpd's report, so the same report is read twice under
+two configs and has to print a different threshold and exit differently; and a
+report with no readable totals is refused rather than printed as `0.00%`, because
+a zero in place of an answer reads as a clean run. A report that names clones but
+lists an empty table is refused for the same reason: "No duplicates above the
+threshold" would contradict the count printed above it. One case omits
+`--config`, so the script's own default (`.jscpd.json` at the repository root)
+is the config it reads. A report kind the script
+does not know is a usage error even when `--path` names a file, rather than an empty
+summary with exit 0.
+
 **Pack reproducibility.** `npm run verify:pack-reproducible` packs three more
 times — twice more from the tree, once from the first tarball's own contents
 unpacked at a different absolute path — and fails if the bytes differ. It is the
