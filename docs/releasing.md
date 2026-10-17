@@ -200,6 +200,74 @@ successful run fails at the publish step instead of overwriting anything. A
 re-dispatch after a failure partway through the verification steps is safe for
 the same reason, provided the failure was before the upload.
 
+## Publishing the GitHub Packages mirror {#github-packages-mirror}
+
+GitHub Packages only stores scoped npm packages, and its package names and
+scopes must be lowercase. The canonical package is `uvp-agents` on
+registry.npmjs.org; `publish-github-packages.yml` derives the scoped mirror
+`@antruly/uvp-agents` from the same tag and uploads it to
+`https://npm.pkg.github.com`. The repository owner is `Antruly`, and the scope is
+lowercase because the registry rejects anything else.
+
+The mirror is a distribution convenience, not a second identity:
+
+- `server.json`, the MCP registry entry, `uvp --version`, and `uvp mcp setup`
+  keep the canonical `uvp-agents` name. The MCP registry still points at the
+  auth-free npmjs install.
+- `scripts/prepare-github-packages.mjs` rewrites `package.json#name`,
+  `package.json#publishConfig.registry`, the lockfile's root name, and
+  `sbom.cdx.json`. `src/generatedPackageMetadata.ts` and `dist` are left alone,
+  so a CLI installed from GitHub Packages reports `uvp-agents <version>`. The
+  workflow records that in its summary rather than hiding it.
+- The publish does not pass `--provenance`. npmjs generates and stores that
+  attestation; this repository has no observation that GitHub Packages accepts
+  it, so the mirror carries no provenance claim.
+
+Dispatch it by hand with the tag release-please created, after the npmjs publish
+or independently of it:
+
+```bash
+gh workflow run publish-github-packages.yml -f tag=uvp-agents-<version> -f dry_run=true
+gh run watch
+
+gh workflow run publish-github-packages.yml -f tag=uvp-agents-<version>
+gh run watch
+```
+
+The workflow checks the checkout is the tag, runs the canonical version and
+pack-reproducibility preflight, derives the mirror, runs the pack-reproducibility
+check again on the derived tree, packs once, and inspects the tarball's own
+manifest and SBOM before it uploads that tarball. After the upload it compares
+the registry's `dist.integrity` with the digest it packed and installs the
+package from GitHub Packages into an empty prefix before exercising the CLI and
+the stdio MCP contract.
+
+**The credential** is the workflow's `GITHUB_TOKEN` with `packages: write`; no
+PAT and no npm trusted-publisher entry are involved, because trusted publishing
+is npmjs's mechanism. A manual publish from a workstation needs a classic
+personal access token with `write:packages` instead.
+
+**What the run does not establish.** The first publish of a package on GitHub
+Packages is private, and installing from GitHub Packages requires an
+authenticated token even after the package is made public. The workflow cannot
+change visibility; the maintainer sets it in the package's settings. A successful
+run therefore proves the registry accepts and serves this artifact to an
+authenticated consumer, not that it is publicly installable.
+
+Consumers install the mirror with a scoped `.npmrc` and a token:
+
+```ini
+@antruly:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+```bash
+npm install --global @antruly/uvp-agents
+```
+
+The npmjs install remains the one that needs no token and is what the rest of
+this documentation uses.
+
 ## Every release bumps the minor
 
 ```json
@@ -351,6 +419,7 @@ saying so.
 | Artifact           | Where                                                        |
 | ------------------ | ------------------------------------------------------------ |
 | npm package        | `uvp-agents`                                                 |
+| GitHub Packages    | `@antruly/uvp-agents` (derived mirror; not canonical)        |
 | MCP registry entry | `io.github.Antruly/uvp`                                      |
 | Tool catalog       | `docs/public/tool-catalog.json`, also shipped in the package |
 | Bill of materials  | `sbom.cdx.json`, also shipped in the package                 |

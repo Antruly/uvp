@@ -46,6 +46,30 @@ npm install --save-dev uvp-agents
 npx uvp doctor
 ```
 
+### From GitHub Packages (mirror)
+
+A separate dispatch publishes the same release to GitHub Packages as
+`@antruly/uvp-agents`. GitHub Packages requires an authenticated token to
+install, even when the package is public, so this route is for environments that
+already consume from it. npmjs remains the install above that needs no token.
+
+```ini
+# ~/.npmrc
+@antruly:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+```bash
+export NODE_AUTH_TOKEN=<classic PAT with read:packages>
+npm install --global @antruly/uvp-agents
+uvp --version
+```
+
+The mirror is a distribution of the canonical package: `uvp --version` reports
+`uvp-agents <version>`, and `uvp mcp setup` recommends the npmjs install. See
+[publishing the GitHub Packages mirror](releasing.md#github-packages-mirror) for
+what the publish does and does not establish.
+
 ## libuvcpp
 
 uvp does not vendor libuvcpp, download it, or build it for you. It finds one you
