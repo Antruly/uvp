@@ -733,10 +733,17 @@ export const captureReplayCommand: CommandSpec = {
     ...optional("timeout_ms", asNumber(parsed, "timeout")),
     ...optional("verify_tls", asBoolean(parsed, "tls")),
   }),
-  verdict: (output) =>
-    str(output["outcome"]) === "unknown"
-      ? EXIT_WRONG
-      : (num(output["differed"]) ?? 0) > 0
-        ? EXIT_NO
-        : undefined,
+  verdict: (output) => {
+    if (str(output["outcome"]) === "unknown") return EXIT_WRONG;
+    // A difference is a finding about the target, and it outranks a comparison
+    // that never ran: `partial` with one `differs` buries the finding under a
+    // coverage note if this is read the other way round.
+    if ((num(output["differed"]) ?? 0) > 0) return EXIT_NO;
+    // `not_comparable` is a replayed exchange whose call did not complete, so the
+    // question was never put. `partial` is also produced by `skipped` (writing
+    // methods are not replayed, by construction) and by a recorded body the
+    // capture cut; those are documented omissions, not unanswered questions.
+    if ((num(output["not_comparable"]) ?? 0) > 0) return EXIT_WRONG;
+    return undefined;
+  },
 };
