@@ -151,15 +151,23 @@ The archive ships `lib/pkgconfig/uvcpp.pc` and no CMake config, and CMake's
 `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`, the `pkg-config` on
 `PATH` is a script — the Windows runner has Strawberry Perl's
 `pkg-config.bat`, which is exactly that case. Install an executable one, for
-example with `choco install pkgconfiglite`, then reopen the shell:
+example with `choco install pkgconfiglite`. The installer adds its shim to the
+machine `PATH`, which a shell opened before the install does not see. Open a new
+shell and re-apply the three session settings from above — they were `$env:`
+values and do not survive the reopen — then verify:
 
 ```powershell
+$prefix = "$HOME\libuvcpp\libuvcpp-1.7.0-msvc-x64"
+$env:UVCPP_ROOT = $prefix
+$env:PKG_CONFIG_PATH = "$prefix\lib\pkgconfig"
+$env:Path = "$prefix\bin;$env:Path"
 pkg-config --modversion uvcpp     # should print 1.7.0
 ```
 
 Build generated workspaces in Release against this archive. It is a Release
 build with the release CRT; a Debug build against it mixes the two CRTs on
-Windows. Name Ninja explicitly — it is the route the Windows lane verifies:
+Windows. Name Ninja explicitly — it is one of the two routes the Windows lane
+verifies (the other is the default Visual Studio generator):
 
 ```powershell
 uvp init .\svc --name svc --template hello-http --port 8090
