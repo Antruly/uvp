@@ -61,8 +61,18 @@ const CYCLE = `export function read() {
 }
 `;
 
+const NEGATIVE_ZERO = `export function read() {
+  return { value: -0 };
+}
+`;
+
 /** The fixture modules, by the path a config names. */
-const MODULES = { "main/reader.mjs": READER, "main/sum.mjs": SUM, "main/cycle.mjs": CYCLE };
+const MODULES = {
+  "main/reader.mjs": READER,
+  "main/sum.mjs": SUM,
+  "main/cycle.mjs": CYCLE,
+  "main/nzero.mjs": NEGATIVE_ZERO,
+};
 
 const INPUTS = [
   { label: "name only", files: { "data.json": '{"name":"svc"}' } },
@@ -272,6 +282,47 @@ const CASES = [
     ],
   },
   {
+    name: "a file named ..foo is inside the input's directory and is accepted",
+    config: config({
+      inputs: [
+        {
+          label: "one",
+          files: { "..foo": "inside", "data.json": '{"name":"svc"}' },
+        },
+      ],
+      mutants: [EQUIVALENT, CONTROL],
+    }),
+    status: 0,
+    includes: ["| eq | indistinguishable over these inputs | 0 |"],
+    covers: [
+      "a leading `..` in a file name is not by itself an escape: `relative()` returns `..foo` " +
+        "for a path inside the root, so only the parent directory and a `..` segment are refused",
+    ],
+  },
+  {
+    name: "negative zero is named rather than printed as zero",
+    config: {
+      module: "main/nzero.mjs",
+      export: "read",
+      call: "arguments",
+      inputs: "argument-inputs.json",
+      mutants: [
+        {
+          id: "positive",
+          what: "the sign of zero dropped",
+          from: "value: -0",
+          to: "value: 0",
+        },
+      ],
+    },
+    status: 1,
+    includes: ["returned.value: -0 vs 0"],
+    covers: [
+      "`-0` and `0` differ under `Object.is`; the message names the negative zero, which " +
+        "`JSON.stringify` would print as an indistinguishable `0 vs 0`",
+    ],
+  },
+  {
     name: "an input file that escapes its directory is refused",
     config: config({
       inputs: [
@@ -384,6 +435,7 @@ const READINGS = [
   "both resolve to",
   "the comparison failed",
   "is outside the input's directory",
+  "returned.value: -0 vs 0",
   '"exitCode": 0',
   "| undefined-first (control) | distinguishable on 1 | 1 |",
   '"module" names no file at',
@@ -421,6 +473,7 @@ const fixture = async (index, testCase) => {
   await writeFile(path.join(directory, "main", "reader.mjs"), READER);
   await writeFile(path.join(directory, "main", "sum.mjs"), SUM);
   await writeFile(path.join(directory, "main", "cycle.mjs"), CYCLE);
+  await writeFile(path.join(directory, "main", "nzero.mjs"), NEGATIVE_ZERO);
   await writeFile(path.join(directory, "inputs.json"), JSON.stringify(INPUTS));
   await writeFile(path.join(directory, "argument-inputs.json"), JSON.stringify(ARGUMENT_INPUTS));
   await writeFile(path.join(directory, "config.json"), JSON.stringify(testCase.config));

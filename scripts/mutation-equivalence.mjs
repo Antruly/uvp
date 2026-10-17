@@ -103,7 +103,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Exit codes, in one place because the golden asserts them by name. */
@@ -140,6 +140,9 @@ const stable = (value) => {
   return value;
 };
 
+/** A primitive as text, naming `-0` because `JSON.stringify(-0)` is `"0"`. */
+const show = (value) => (Object.is(value, -0) ? "-0" : JSON.stringify(value));
+
 /** Every place two stable shapes differ, each named by its path. */
 const differences = (left, right, path = "") => {
   if (Object.is(left, right)) {
@@ -152,7 +155,7 @@ const differences = (left, right, path = "") => {
     return [`${path}: ${String(left)} vs ${String(right)}`];
   }
   if (typeof left !== "object") {
-    return [`${path}: ${JSON.stringify(left)} vs ${JSON.stringify(right)}`];
+    return [`${path}: ${show(left)} vs ${show(right)}`];
   }
   const found = [];
   for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
@@ -294,7 +297,9 @@ const checkPathsDistinct = (modulePath, mutants) => {
 const inputFilePathOf = (root, name) => {
   const target = resolve(root, name);
   const inside = relative(root, target);
-  if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+  // `..foo` resolves inside the root and is a legitimate file name; only the
+  // parent directory itself and a `..` path segment escape it.
+  if (inside === "" || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
     fail(`input file ${JSON.stringify(name)} is outside the input's directory`);
   }
   return target;
@@ -515,6 +520,10 @@ const main = async () => {
   process.once("SIGTERM", () => {
     removeWritten();
     process.exit(143);
+  });
+  process.once("SIGHUP", () => {
+    removeWritten();
+    process.exit(129);
   });
 
   const { original, loaded } = await loadAll(modulePath, source, mutants).catch((cause) => {
