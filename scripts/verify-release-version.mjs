@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { parseArgs } from "node:util";
 
-import { repositoryPath } from "./lib/generated-file.mjs";
+import { REPO_ROOT } from "./lib/paths.mjs";
 
 /**
  * Fail when the files that carry the release version disagree, or when the tag
@@ -26,6 +27,10 @@ import { repositoryPath } from "./lib/generated-file.mjs";
  * publish time — the tag itself. This script exists for those, and it re-states
  * the covered ones on the same pass so that a publish is decided by one command
  * whose whole input is the tagged tree.
+ *
+ * `--root <dir>` is the same bootstrap override `prepare-github-packages.mjs`
+ * takes: a tag created before this script was merged is checked by a staged copy
+ * pointed back at the tagged tree. Without it the tree is this file's checkout.
  *
  * Exit status: 0 when everything agrees; 1 when something disagrees (the message
  * names the file and both values); 2 when a file could not be read or parsed, so
@@ -189,13 +194,13 @@ const selfCheck = () => {
   }
 };
 
-const readJson = async (relative) => {
+const readJson = async (root, relative) => {
   let text;
   try {
-    text = await readFile(repositoryPath(relative), "utf8");
+    text = await readFile(path.join(root, relative), "utf8");
   } catch (error) {
     console.error(
-      `verify-release-version: could not read ${relative} (${error.code ?? error.message}).`,
+      `verify-release-version: could not read ${relative} under ${root} (${error.code ?? error.message}).`,
     );
     console.error(
       "Nothing was published and nothing was compared; this is not a verdict about the version.",
@@ -205,16 +210,18 @@ const readJson = async (relative) => {
   try {
     return JSON.parse(text);
   } catch (error) {
-    console.error(`verify-release-version: could not parse ${relative} (${error.message}).`);
+    console.error(
+      `verify-release-version: could not parse ${relative} under ${root} (${error.message}).`,
+    );
     process.exit(2);
   }
 };
 
-const readSources = async () => {
-  const packageJson = await readJson("package.json");
-  const serverJson = await readJson("server.json");
-  const manifest = await readJson(".release-please-manifest.json");
-  const sbom = await readJson("sbom.cdx.json");
+const readSources = async (root) => {
+  const packageJson = await readJson(root, "package.json");
+  const serverJson = await readJson(root, "server.json");
+  const manifest = await readJson(root, ".release-please-manifest.json");
+  const sbom = await readJson(root, "sbom.cdx.json");
 
   const version = packageJson.version;
   const sources = [
@@ -243,21 +250,25 @@ const main = async () => {
   const { values } = parseArgs({
     options: {
       tag: { type: "string" },
+      root: { type: "string" },
       help: { type: "boolean", default: false },
     },
     allowPositionals: false,
   });
 
   if (values.help) {
-    console.log(`Usage: node scripts/verify-release-version.mjs [--tag <tag>]
+    console.log(`Usage: node scripts/verify-release-version.mjs [--tag <tag>] [--root <dir>]
 
 Checks the version in package.json, server.json, .release-please-manifest.json and
-sbom.cdx.json. With --tag, also checks that the tag names that version.
+sbom.cdx.json. With --tag, also checks that the tag names that version. With
+--root, reads that tree instead of this file's checkout.
 Exit 0 when they agree, 1 when they disagree, 2 when a file could not be read.`);
     return;
   }
 
-  const { name, version, sources } = await readSources();
+  const root = path.resolve(values.root ?? REPO_ROOT);
+
+  const { name, version, sources } = await readSources(root);
   const { failures } = evaluateReleaseVersion({ name, version, sources, tag: values.tag });
 
   if (failures.length > 0) {

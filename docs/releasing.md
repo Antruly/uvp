@@ -256,13 +256,15 @@ authenticated consumer, not that it is publicly installable.
 
 ### Bootstrap a tag that predates the helpers {#github-packages-bootstrap}
 
-The workflow runs `scripts/prepare-github-packages.mjs` from the tag checkout. A
-tag created before that helper existed cannot carry it, and a tag is immutable.
-`uvp-agents-0.2.0` (`74df710`) is such a tag: the helper merged after the tag was
-cut.
+The workflow runs `scripts/prepare-github-packages.mjs` and
+`scripts/verify-release-version.mjs` from the tag checkout. A tag created before
+those helpers existed cannot carry them, and a tag is immutable.
+`uvp-agents-0.2.0` (`74df710`) is such a tag: both merged after the tag was cut.
 
 For that case only, dispatch with `helpers_ref` set to a full 40-hex commit on
-`main` that contains the helper:
+`main` that contains the helpers — including the version check's `--root`. A ref
+from before that support is rejected, naming the ref, before anything is
+derived:
 
 ```bash
 gh workflow run publish-github-packages.yml \
@@ -272,14 +274,15 @@ gh workflow run publish-github-packages.yml \
 ```
 
 The workflow verifies that the commit is on `origin/main` and contains
-`scripts/prepare-github-packages.mjs`, `scripts/lib/npmPurl.mjs`, and
-`scripts/lib/paths.mjs`, stages those files outside the checkout, and runs them
-with `--root` pointing at the tag checkout. The tag tree stays exactly the tag,
-and the helper is not in `files[]`, so the tarball's code is still the tag's. The
-run summary records the helper commit and labels the run a bootstrap.
+`scripts/prepare-github-packages.mjs`, `scripts/verify-release-version.mjs`,
+`scripts/lib/npmPurl.mjs`, and `scripts/lib/paths.mjs`, stages those files
+outside the checkout, and runs them with `--root` pointing at the tag checkout —
+the derivation and the version check alike. The tag tree stays exactly the tag,
+and the helpers are not in `files[]`, so the tarball's code is still the tag's.
+The run summary records the helper commit and labels the run a bootstrap.
 
-This is a one-time exception for tags that predate the helper. Every later tag
-contains it; leave `helpers_ref` empty.
+This is a one-time exception for tags that predate the helpers. Every later tag
+contains them; leave `helpers_ref` empty.
 
 Consumers install the mirror with a scoped `.npmrc` and a token:
 
