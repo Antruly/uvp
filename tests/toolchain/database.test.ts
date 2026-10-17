@@ -1,10 +1,9 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
 import { EXIT_NO, EXIT_OK } from "../../src/cli/exitCodes.js";
-import { isWindows } from "../../src/toolchains/host.js";
 import {
   buildWorkspace,
   cleanup,
@@ -230,29 +229,45 @@ describeDatabase(
       expect(await portIsFree(PORT)).toBe(true);
     });
 
-    it.skipIf(isWindows)(
-      isWindows
-        ? "refuses a connection string it cannot open, before it listens — skipped: on Windows the SQLite backend starts listening with this path instead of refusing; see #108"
-        : "refuses a connection string it cannot open, before it listens",
-      async () => {
-        // The failure worth having a test for: a service that opened its database
-        // lazily would come up green, answer `/healthz`, and 500 on the first
-        // request that needs data — reporting a deployment mistake as a bug in
-        // the request. `init` opens the first connection at startup, so this is
-        // an exit and a reason instead of a listener.
-        const outcome = await runToExit(await generated(), {
-          env: { UVP_DATABASE_URL: "sqlite:///no/such/directory/lane.db" },
-        });
-        expect(outcome.code).toBe(EXIT_NO);
-        // The status name is the module's, and the URL is echoed back so the
-        // operator can see which connection string was tried: a service that
-        // reported only "database unavailable" would leave them looking at the
-        // wrong variable.
-        expect(outcome.output).toContain("open_failed");
-        expect(outcome.output).toContain("sqlite:///no/such/directory/lane.db");
-        expect(await portIsFree(PORT)).toBe(true);
-      },
-    );
+    it("refuses a connection string it cannot open, before it listens", async () => {
+      // The failure worth having a test for: a service that opened its database
+      // lazily would come up green, answer `/healthz`, and 500 on the first
+      // request that needs data — reporting a deployment mistake as a bug in
+      // the request. `init` opens the first connection at startup, so this is
+      // an exit and a reason instead of a listener.
+      //
+      // The path is blocked by a regular file, not by a directory that does not
+      // exist. libuvcpp's SQLite driver creates the parent chain before opening
+      // (`make_parent_dirs`, `src/db/uvcpp_db_sqlite.cpp`), so a missing
+      // directory is unopenable only when the host happens to forbid creating
+      // it: `/no/such/directory` is EACCES for the POSIX runner, but on Windows
+      // it resolves to a path on the current drive that the administrator
+      // account can create, and the service rightly serves. That made the old
+      // fixture an assertion about the runner's permissions; the lane could only
+      // keep it by skipping it there, which left the refusal behavior
+      // unobserved on Windows.
+      //
+      // A file where a directory is needed is the same refusal everywhere: the
+      // driver accepts EEXIST/ERROR_ALREADY_EXISTS as "the chain is there"
+      // without checking that the component is a directory (recorded on #108),
+      // and `sqlite3_open_v2` then answers CANTOPEN. The backend's own reason is
+      // what reaches the operator; this fixture was run on Linux, and the
+      // Windows lane is where the second half is observed.
+      const workspace = await generated();
+      writeFileSync(join(workspace.root, "blocker"), "not a directory\n");
+      const database = "sqlite://./blocker/lane.db";
+      const outcome = await runToExit(workspace, {
+        env: { UVP_DATABASE_URL: database },
+      });
+      expect(outcome.code).toBe(EXIT_NO);
+      // The status name is the module's, and the URL is echoed back so the
+      // operator can see which connection string was tried: a service that
+      // reported only "database unavailable" would leave them looking at the
+      // wrong variable.
+      expect(outcome.output).toContain("open_failed");
+      expect(outcome.output).toContain(database);
+      expect(await portIsFree(PORT)).toBe(true);
+    });
 
     it("opens a file in the working directory when no connection string names one", async () => {
       // The documented default, and the reason a freshly generated workspace

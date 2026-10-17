@@ -357,8 +357,9 @@ Windows claims in the local provider and the generated code are observed;
 lane/stand-in defects (quoted record text, the pkg-config PATH, the `.bat`/`.exe`
 mix-up, and the `svc`/`svc.exe` name) and the multi-configuration output
 directory. The native probe is not built there; the two link-diagnostic tests skip
-with the reason the roadmap records; and the DB refusal case skips by name with
-its observation on [#108](https://github.com/Antruly/uvp/issues/108).
+with the reason the roadmap records; and the DB refusal case runs there since
+[#108](https://github.com/Antruly/uvp/issues/108), on a path blocked by a file
+rather than by the host's permissions.
 
 ## Built tests
 
@@ -578,8 +579,19 @@ POST /items/7        -> 500 {"error":"not stored","status":"exec_failed"}
 GET  /items          -> 200 {"table":"","columns":["id","value"],"rows":[{"id":"7","value":"hello-db"}]}
 
 --- the same binary, a connection string it cannot open ---
-cannot open sqlite:///no/such/directory/svc.db: open_failed: …      (exit 1)
+cannot open sqlite://./blocker/svc.db: open_failed: …              (exit 1)
 ```
+
+The connection string is blocked by a regular file named `blocker` in the
+workspace root, not by a missing directory. libuvcpp's SQLite driver creates a
+path's parent chain before opening it (`make_parent_dirs`), so a missing
+directory is unopenable only where the host forbids creating it: `/no/…` is
+EACCES on the POSIX runner but a creatable path on the Windows one, which is
+why this case used to skip there ([#108](https://github.com/Antruly/uvp/issues/108)).
+A file where a directory is needed is refused on both — the driver accepts
+`EEXIST` as "the chain exists" and `sqlite3_open_v2` answers `CANTOPEN` — so the
+case runs on both lanes; it was observed on the POSIX runner here, and the
+Windows lane is where the other half is measured.
 
 Four things behind that transcript are decisions rather than consequences:
 
