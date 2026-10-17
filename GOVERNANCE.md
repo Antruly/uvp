@@ -78,9 +78,22 @@ claims patch-level compatibility is making a promise it cannot keep.
 ## AI agents in this process
 
 Agents may propose changes to their operator, draft code, and run verification.
-They do not open pull requests, write pull request descriptions, comment on
-issues, or attest to human review. A human owner is always the party of record.
-See [CONTRIBUTING.md#ai-contribution-policy](CONTRIBUTING.md#ai-contribution-policy).
+With the operator's standing authorization, an agent may also open one branch per
+tracked issue and one pull request against `main`, write the pull request
+description, comment on the issue or pull request, answer review comments, and
+merge that pull request once the human owner has explicitly approved it. The human
+owner remains the party of record.
+
+An agent never approves a change, never attests to human review, never completes
+the **Author readiness** declarations, and never closes a pull request it did not
+merge. Those stay the owner's. A green CI run is evidence, not approval. Without
+the operator's authorization, an agent writes no branch and no pull request and
+proposes the change to its operator instead. Nothing is pushed to `main` directly,
+by an agent or by a person.
+
+This is the same rule as
+[CONTRIBUTING.md#ai-contribution-policy](CONTRIBUTING.md#ai-contribution-policy).
+The two documents must not diverge.
 
 ## Changing this document
 
