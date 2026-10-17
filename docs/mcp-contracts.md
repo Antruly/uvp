@@ -36,7 +36,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_run_stop`         | runtime   |     |     |     |  ●   |  ●  |           |
 | `uvp_verify`           | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
 | `uvp_bundle_diff`      | workflow  |  ●  |     |     |      |     |           |
-| `uvp_http_request`     | web       |     |     |  ●  |      |     |     ●     |
+| `uvp_http_request`     | web       |     |     |  ●  |  ●   |     |     ●     |
 | `uvp_websocket_probe`  | web       |     |     |  ●  |  ●   |     |     ●     |
 | `uvp_soap_call`        | web       |     |     |  ●  |      |     |     ●     |
 | `uvp_load_test`        | web       |     |     |  ●  |      |  ●  |           |
@@ -51,6 +51,8 @@ access at all: it signals a process this session started and nothing else.
 `stack: "libuvcpp"` starts anything: the effect set is a closed set of booleans
 and cannot say "sometimes", and a caller deciding whether to confirm is better
 served by a yes it may not use than by a no that is not always true.
+`uvp_http_request` is the same case: `http_version: "3"` runs `uvcpp-probe` as a
+process, while the HTTP/1.1 and HTTP/2 spellings start nothing.
 
 ### Toolchain
 
@@ -123,7 +125,10 @@ arrived in comes back as `http_version` in the result, spelled as the wire spell
 it (`"1.1"`, `"2.0"`). `auto` negotiates and falls back; a pinned version the peer
 does not answer in is `unsupported_target` rather than `endpoint_unreachable`,
 because the service replied and the caller should not be sent to check whether it
-is listening. `3` is refused: uvp has no HTTP/3 client.
+is listening. `3` runs the native probe (`uvcpp-probe`) and is refused when this
+uvp was built without it, when the URL is `http://` (QUIC has no cleartext
+mode), when `verify_tls` is set, and when redirects are requested; each refusal
+names its reason rather than answering over another transport.
 
 Over TLS the result carries what the connection's certificate was, under `tls`:
 protocol, cipher, subject, issuer, validity window, and `verification` — one of

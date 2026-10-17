@@ -57,6 +57,63 @@ for (const file of DOC_PAGES_WITH_TOOLS) {
 }
 
 /**
+ * The effects table is a promise about what a tool can do, and a reader is told
+ * to consult it before granting one. `effects` is the source of truth, so every
+ * cell is compared to its contract rather than trusted: a tool that under-declares
+ * a process spawn or a write is exactly the drift this page exists to prevent.
+ *
+ * The `untrusted` column is `returnsTargetContent`, the contract's statement that
+ * a result carries the target's own content; it is not an effect because it
+ * changes how a caller reads the answer rather than what the call does.
+ */
+const MCP_CONTRACTS_PAGE = "docs/mcp-contracts.md";
+const EFFECT_COLUMNS = [
+  { field: "readsFilesystem", column: 3 },
+  { field: "writesFilesystem", column: 4 },
+  { field: "network", column: 5 },
+  { field: "spawnsProcess", column: 6 },
+  { field: "mutatesTarget", column: 7 },
+  { field: "returnsTargetContent", column: 8 },
+];
+const contractsByName = new Map(TOOL_CONTRACTS.map((contract) => [contract.name, contract]));
+const declared = (contract, field) =>
+  field === "returnsTargetContent" ? contract.returnsTargetContent : contract.effects[field];
+const tableRows = (await read(MCP_CONTRACTS_PAGE))
+  .split("\n")
+  .filter((line) => line.startsWith("| `uvp_"));
+
+for (const line of tableRows) {
+  const cells = line.split("|").map((cell) => cell.trim());
+  const name = (cells[1] ?? "").replaceAll("`", "");
+  const contract = contractsByName.get(name);
+  if (contract === undefined) {
+    failures.push(
+      `${MCP_CONTRACTS_PAGE}: the effects table names ${JSON.stringify(name)}, which is not a tool contract.`,
+    );
+    continue;
+  }
+  for (const { field, column } of EFFECT_COLUMNS) {
+    const shown = cells[column] === "●";
+    const expected = declared(contract, field) === true;
+    if (shown !== expected) {
+      failures.push(
+        `${MCP_CONTRACTS_PAGE}: ${name}'s ${field} cell is ${shown ? "marked" : "blank"}, ` +
+          `and the contract says ${String(expected)}.`,
+      );
+    }
+  }
+}
+
+const tabulated = new Set(
+  tableRows.map((line) => (line.split("|")[1] ?? "").trim().replaceAll("`", "")),
+);
+for (const name of toolNames) {
+  if (!tabulated.has(name)) {
+    failures.push(`${MCP_CONTRACTS_PAGE}: ${name} has no row in the effects table.`);
+  }
+}
+
+/**
  * Identifiers are not translated.
  *
  * The Chinese README is a translation of the English one, and what survives
