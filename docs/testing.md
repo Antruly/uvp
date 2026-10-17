@@ -1448,8 +1448,12 @@ defaults dressed as observations are the cases: the threshold lives in
 `.jscpd.json` and not in jscpd's report, so the same report is read twice under
 two configs and has to print a different threshold and exit differently; and a
 report with no readable totals is refused rather than printed as `0.00%`, because
-a zero in place of an answer reads as a clean run. A report kind the script does
-not know is a usage error even when `--path` names a file, rather than an empty
+a zero in place of an answer reads as a clean run. A report that names clones but
+lists an empty table is refused for the same reason: "No duplicates above the
+threshold" would contradict the count printed above it. One case omits
+`--config`, so the script's own default (`.jscpd.json` at the repository root)
+is the config it reads. A report kind the script
+does not know is a usage error even when `--path` names a file, rather than an empty
 summary with exit 0.
 
 **Pack reproducibility.** `npm run verify:pack-reproducible` packs three more

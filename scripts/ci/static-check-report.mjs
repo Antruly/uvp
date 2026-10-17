@@ -112,15 +112,21 @@ if (values.report === "jscpd") {
   lines.push(`${clones} clone(s) across ${statistics.sources} file(s).`, "");
 
   // A count without a list is not "no duplicates": the totals say there are some,
-  // so "No duplicates above the threshold" would contradict the line above it.
-  if (!Array.isArray(report.duplicates) && clones > 0) {
+  // so "No duplicates above the threshold" would contradict the line above it. An
+  // empty table is that same contradiction in its other shape — jscpd writes the
+  // entries its totals counted, so a report naming 85 clones and listing none is
+  // not a run whose table describes its own totals. The lengths are deliberately
+  // not compared: a report may list fewer entries than it counted and still be a
+  // report this summary can place.
+  const listed = Array.isArray(report.duplicates) ? report.duplicates : undefined;
+  if (clones > 0 && (listed?.length ?? 0) === 0) {
     console.error(
-      `The ${values.report} report at ${file} names ${clones} clone(s) but carries no duplicates list.`,
+      `The ${values.report} report at ${file} names ${clones} clone(s) but lists none of them.`,
     );
     console.error("A count this script cannot place is not a clean result.");
     process.exit(1);
   }
-  const duplicates = (Array.isArray(report.duplicates) ? report.duplicates : []).slice(0, 20);
+  const duplicates = (listed ?? []).slice(0, 20);
   if (duplicates.length > 0) {
     lines.push("| Lines | First | Second |", "| --- | --- | --- |");
     for (const duplicate of duplicates) {

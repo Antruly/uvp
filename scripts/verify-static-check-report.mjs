@@ -25,7 +25,11 @@ import { REPO_ROOT } from "./lib/paths.mjs";
  * So these cases are the readings the summary can produce, each against a
  * fixture whose answer is known by construction. The threshold cases use the same
  * report twice with two configs: only a summary that reads the config can print a
- * different number and exit differently for the same input.
+ * different number and exit differently for the same input. A third case omits
+ * `--config`, read from the repository root, so the script's default config is
+ * the one it has to find. A report that names clones and lists an empty table is
+ * refused alongside one that carries no table at all: both would otherwise print
+ * "No duplicates above the threshold" under a count that says there are some.
  *
  * What this does not establish: it is a producer golden, not the CI job. It pins
  * the script's reading of a report, not jscpd's production of one — a real report
@@ -65,12 +69,23 @@ const duplicate = (lines, first, second) => ({
 
 const report = (overrides) => ({ duplicates: [], statistics: { total: TOTALS }, ...overrides });
 
+/**
+ * The one report the two threshold cases read.
+ *
+ * The pair's claim is "only a summary that reads the config can print a
+ * different number and exit differently for the same input", so the input has to
+ * be literally the same report. The duplicate table does not affect the
+ * threshold assertion; sharing the object is what keeps the claim true if a
+ * later edit changes one of the two.
+ */
+const AT_2_22_PERCENT = report({
+  duplicates: [duplicate(9, "src/application/a.ts", "src/application/b.ts")],
+});
+
 const CASES = [
   {
     name: "a report at 2.22% under the configured 3.5% threshold",
-    report: report({
-      duplicates: [duplicate(9, "src/application/a.ts", "src/application/b.ts")],
-    }),
+    report: AT_2_22_PERCENT,
     config: { threshold: 3.5 },
     status: 0,
     stdout: {
@@ -84,13 +99,22 @@ const CASES = [
   },
   {
     name: "the same report under a 2% threshold, which the run exceeded",
-    report: report(),
+    report: AT_2_22_PERCENT,
     config: { threshold: 2 },
     status: 1,
     stdout: {
       includes: ["## Duplication: 2.22% (threshold 2%)"],
       excludes: ["threshold 3.5"],
     },
+  },
+  {
+    name: "the repository's own config when no --config is passed",
+    report: AT_2_22_PERCENT,
+    // `config` is absent on purpose: `--config` is not passed, so the script
+    // reads `DEFAULT_CONFIG`, `.jscpd.json` at the repository root. The case
+    // runs from there exactly as `npm run` would.
+    status: 0,
+    stdout: { includes: ["## Duplication: 2.22% (threshold 3.5%)"] },
   },
   {
     name: "a report with no totals at all",
@@ -129,7 +153,15 @@ const CASES = [
     report: report({ duplicates: undefined }),
     config: { threshold: 3.5 },
     status: 1,
-    stderr: { includes: ["names 85 clone(s) but carries no duplicates list"] },
+    stderr: { includes: ["names 85 clone(s) but lists none of them"] },
+    stdout: { excludes: ["No duplicates above the threshold", "0.00%"] },
+  },
+  {
+    name: "a report that names clones but lists an empty table",
+    report: report(),
+    config: { threshold: 3.5 },
+    status: 1,
+    stderr: { includes: ["names 85 clone(s) but lists none of them"] },
     stdout: { excludes: ["No duplicates above the threshold", "0.00%"] },
   },
   {
@@ -160,15 +192,22 @@ const CASES = [
 const run = async (directory, one) => {
   const reportPath = path.join(directory, "report.json");
   const configPath = path.join(directory, "config.json");
-  await writeFile(configPath, JSON.stringify(one.config), "utf8");
+  const args = [SUMMARY, "--report", one.reportKind ?? "jscpd", "--path", reportPath];
+  // A case without a `config` omits `--config` on purpose, so the script's own
+  // `DEFAULT_CONFIG` is the one read. Every case runs from the repository root,
+  // which is where that default resolves.
+  if (one.config !== undefined) {
+    await writeFile(configPath, JSON.stringify(one.config), "utf8");
+    args.push("--config", configPath);
+  }
   if (one.missingReport !== true) {
     await writeFile(reportPath, JSON.stringify(one.report), "utf8");
   }
-  const result = spawnSync(
-    process.execPath,
-    [SUMMARY, "--report", one.reportKind ?? "jscpd", "--path", reportPath, "--config", configPath],
-    { encoding: "utf8", env: { ...process.env, GITHUB_STEP_SUMMARY: "" } },
-  );
+  const result = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    cwd: REPO_ROOT,
+    env: { ...process.env, GITHUB_STEP_SUMMARY: "" },
+  });
   return {
     status: result.status,
     stdout: result.stdout ?? "",
