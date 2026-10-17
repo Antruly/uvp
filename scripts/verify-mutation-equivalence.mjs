@@ -199,6 +199,26 @@ const CASES = [
     ],
   },
   {
+    name: "a refusal after a mutant was written removes what it wrote",
+    config: config({
+      mutants: [
+        {
+          id: "written-first",
+          what: "an applicable mutation the refusal comes after",
+          from: "? parsed.count : 0",
+          to: "? parsed.count : 2",
+        },
+        { id: "twice", from: "parsed", to: "parsed" },
+      ],
+    }),
+    status: 2,
+    includes: ['mutant twice: its "from" text occurs 4 time(s) in the module, not once'],
+    covers: [
+      "a refusal after an earlier mutant was written still leaves no .mutant file beside the " +
+        "module, because `fail` exits without unwinding a `finally`",
+    ],
+  },
+  {
     name: "the machine-readable report carries the verdicts and the exit code",
     config: config({ mutants: [EQUIVALENT, CONTROL] }),
     json: true,

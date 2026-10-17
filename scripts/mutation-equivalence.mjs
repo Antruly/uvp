@@ -29,7 +29,9 @@
  * enumerable data: a `Date`, a `Map` or a class instance is compared by its
  * enumerable keys, which is all a result made of plain records needs and is not
  * enough for a target that returns such a value — that target needs a comparator of
- * its own rather than this one bent to it.
+ * its own rather than this one bent to it. The same holds for a result that literally
+ * equals the `{ "$undefined": true }` sentinel: the walk cannot tell that object from
+ * `undefined`, which is the sentinel's cost and is named rather than left to be found.
  *
  * ## Controls are part of the verdict
  *
@@ -76,7 +78,8 @@
  *   this file exists to see.
  * - Each mutant's `from` must occur exactly once in the module. Mutants are written
  *   beside the module — so relative imports resolve to the same files the original
- *   imports — and removed when the run ends, by `finally` and by signal.
+ *   imports — and removed when the run ends, by `finally`, by a refusal, and by
+ *   signal.
  *
  * Exit codes: **0** every non-control mutant is indistinguishable over these inputs,
  * every control is distinguishable, and the run demonstrated its sight — a run with
@@ -97,6 +100,23 @@ import { pathToFileURL } from "node:url";
 
 /** Exit codes, in one place because the golden asserts them by name. */
 const EXIT = { equivalent: 0, distinguishable: 1, untrustworthy: 2 };
+
+/**
+ * Every mutant file this run wrote beside the module.
+ *
+ * Module scope, because a refusal is one of the ways a run ends: `fail` exits
+ * without unwinding, so a `finally` cannot remove what an earlier mutant wrote and
+ * a config refused midway would otherwise leave `.mutant-*` files in the tree.
+ */
+const written = [];
+
+/** Removes every mutant file this run wrote, and forgets them. */
+const removeWritten = () => {
+  for (const path of written) {
+    rmSync(path, { force: true });
+  }
+  written.length = 0;
+};
 
 /** A shape-preserving deep copy: a key present with `undefined` stays present. */
 const stable = (value) => {
@@ -141,6 +161,7 @@ const differences = (left, right, path = "") => {
 };
 
 const fail = (message) => {
+  removeWritten();
   process.stderr.write(`mutation-equivalence: ${message}\n`);
   process.exit(EXIT.untrustworthy);
 };
@@ -289,16 +310,8 @@ const callOf = (config) => {
   fail(`"call" must be "directory" or "arguments"`);
 };
 
-/** Removes every mutant file this run wrote, and forgets them. */
-const removeWritten = (written) => {
-  for (const path of written) {
-    rmSync(path, { force: true });
-  }
-  written.length = 0;
-};
-
 /** The modules the comparison needs: the original, then one per mutant. */
-const loadAll = async (modulePath, source, mutants, written) => {
+const loadAll = async (modulePath, source, mutants) => {
   const original = await import(pathToFileURL(modulePath).href);
   const loaded = new Map();
   for (const mutant of mutants) {
@@ -454,32 +467,26 @@ const main = async () => {
   const mutants = mutantsOf(config);
 
   const source = await readFile(modulePath, "utf8");
-  const written = [];
   process.once("SIGINT", () => {
-    removeWritten(written);
+    removeWritten();
     process.exit(130);
   });
   process.once("SIGTERM", () => {
-    removeWritten(written);
+    removeWritten();
     process.exit(143);
   });
 
-  const { original, loaded } = await loadAll(modulePath, source, mutants, written).catch(
-    (cause) => {
-      removeWritten(written);
-      fail(`importing a module failed: ${String(cause?.message ?? cause)}`);
-    },
-  );
+  const { original, loaded } = await loadAll(modulePath, source, mutants).catch((cause) => {
+    fail(`importing a module failed: ${String(cause?.message ?? cause)}`);
+  });
   const originalExport = original[config.export];
   if (typeof originalExport !== "function") {
-    removeWritten(written);
     fail(`the module exports no function named ${JSON.stringify(config.export)}`);
   }
   const seen = new Map();
   for (const mutant of mutants) {
     const exported = loaded.get(mutant.id)[config.export];
     if (typeof exported !== "function") {
-      removeWritten(written);
       fail(`mutant ${mutant.id} exports no function named ${JSON.stringify(config.export)}`);
     }
     seen.set(mutant.id, { exported, differences: 0, first: null });
@@ -488,7 +495,7 @@ const main = async () => {
   try {
     await compareAll(originalExport, { seen, inputs, mutants, call });
   } finally {
-    removeWritten(written);
+    removeWritten();
   }
 
   const verdicts = verdictsOf(mutants, seen, inputs.length);
