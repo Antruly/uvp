@@ -409,6 +409,10 @@ export interface Service {
  * sampling the tail at one instant. Returns the matched output, or `undefined`
  * when the bound expired; callers report the tail either way, so a service that
  * never wrote the line still fails with its own output beside the assertion.
+ *
+ * The pattern is tested as given, on a tail that can still grow: a `g` or `y`
+ * pattern carries `lastIndex` between polls, so it is reset before every test
+ * rather than letting every other poll miss.
  */
 export const waitForOutput = async (
   service: Service,
@@ -418,6 +422,7 @@ export const waitForOutput = async (
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const output = service.output();
+    pattern.lastIndex = 0;
     if (pattern.test(output)) return output;
     if (Date.now() >= deadline) return undefined;
     await sleep(20);

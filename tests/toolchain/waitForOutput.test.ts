@@ -45,11 +45,15 @@ describe("waitForOutput", () => {
       [40, "listening on https://127.0.0.1:8095 (TCP HTTP/1.1) and "],
       [80, "HTTP/3 over QUIC on UDP 8095\n"],
     ]);
+    const beganAt = Date.now();
     const matched = await waitForOutput(service, NOTICE, 2_000);
     expect(matched).toContain("HTTP/3 over QUIC on UDP 8095");
-    // The line was not there when the wait began, so the wait itself is what
-    // observed it rather than one sampling that happened to be lucky.
-    expect(service.output()).toMatch(NOTICE);
+    // The line is only written 80 ms in, so the wait cannot have returned it
+    // before that: the time it took is the observation time, at or past the
+    // write time, rather than an instantaneous sample that happened to be lucky.
+    // This is the claim the case pins, no stronger — a stalled runner makes the
+    // elapsed time larger, never smaller.
+    expect(Date.now() - beganAt).toBeGreaterThanOrEqual(80);
   });
 
   it("returns undefined when the bound expires with no line, and keeps the tail", async () => {
