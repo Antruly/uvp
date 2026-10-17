@@ -31,12 +31,13 @@ name: Publish to GitHub Packages
 # and the first step proves the checkout is exactly that tag.
 #
 # **Bootstrap for tags that predate the helpers.** A tag created before
-# `prepare-github-packages.mjs` existed cannot carry it, and a tag cannot be
-# moved. `helpers_ref` names a full 40-hex commit on `main`; the run verifies it,
-# stages the helper files outside the checkout, and executes them against the
-# tag through `--root`. The helpers never enter the checkout or `files[]`, so the
-# tarball's code is still the tag; the run summary records the helper commit.
-# Leave `helpers_ref` empty for any tag that contains the helpers.
+# `prepare-github-packages.mjs` and `verify-release-version.mjs` existed cannot
+# carry them, and a tag cannot be moved. `helpers_ref` names a full 40-hex
+# commit on `main`; the run verifies it, stages the helper files outside the
+# checkout, and executes them against the tag through `--root`. The helpers
+# never enter the checkout or `files[]`, so the tarball's code is still the
+# tag; the run summary records the helper commit. Leave `helpers_ref` empty for
+# any tag that contains the helpers.
 
 on:
   workflow_dispatch:
@@ -124,7 +125,7 @@ jobs:
             echo "${HELPERS_REF} is not on origin/main; a bootstrap helper must be merged first."
             exit 1
           fi
-          for file in scripts/prepare-github-packages.mjs scripts/lib/npmPurl.mjs scripts/lib/paths.mjs; do
+          for file in scripts/prepare-github-packages.mjs scripts/verify-release-version.mjs scripts/lib/npmPurl.mjs scripts/lib/paths.mjs; do
             if ! git cat-file -e "${HELPERS_REF}:${file}" 2>/dev/null; then
               echo "${file} does not exist at ${HELPERS_REF}."
               exit 1
@@ -143,9 +144,25 @@ jobs:
           # and the helper is not in `files[]`, so nothing it stages is shipped.
           rm -rf "$HELPERS_DIR"
           mkdir -p "$HELPERS_DIR/scripts/lib"
-          for file in scripts/prepare-github-packages.mjs scripts/lib/npmPurl.mjs scripts/lib/paths.mjs; do
+          for file in scripts/prepare-github-packages.mjs scripts/verify-release-version.mjs scripts/lib/npmPurl.mjs scripts/lib/paths.mjs; do
             git show "${HELPERS_REF}:${file}" > "${HELPERS_DIR}/${file}"
           done
+          # The version check is invoked with `--root`, which only later
+          # versions of the helper accept. A ref from before that change either
+          # fails to load or lacks the option; say so before anything is
+          # derived, rather than letting the real run fail with a stack trace.
+          if ! usage="$(node "${HELPERS_DIR}/scripts/verify-release-version.mjs" --help 2>&1)"; then
+            echo "the version check at ${HELPERS_REF} could not run from the staged files:"
+            echo "$usage"
+            exit 1
+          fi
+          case "$usage" in
+            *--root*) ;;
+            *)
+              echo "the version check at ${HELPERS_REF} does not accept --root; use a commit that contains it."
+              exit 1
+              ;;
+          esac
           echo "staged mirror helpers from ${HELPERS_REF} in ${HELPERS_DIR}"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -174,7 +191,21 @@ jobs:
       - run: npm run compile
 
       - name: Verify the canonical tree and the tag name one version
-        run: node scripts/verify-release-version.mjs --tag "$TAG"
+        # With no bootstrap ref the check runs from the tag checkout, as it
+        # always has. A tag created before this script existed is checked by a
+        # staged copy pointed back at the tag with `--root`: the file that ships
+        # is still the tag's, and the helper does not enter the checkout.
+        env:
+          HELPERS_REF: ${{ inputs.helpers_ref }}
+          HELPERS_DIR: ${{ runner.temp }}/uvp-mirror-helpers
+          ROOT: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ -n "$HELPERS_REF" ]; then
+            node "${HELPERS_DIR}/scripts/verify-release-version.mjs" --root "$ROOT" --tag "$TAG"
+          else
+            node scripts/verify-release-version.mjs --tag "$TAG"
+          fi
 
       - name: Validate generated documentation against the contracts
         run: npm run docs:check
