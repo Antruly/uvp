@@ -401,6 +401,19 @@ jobs:
             echo ::error title=pkg-config::pkg-config.exe is not on PATH, so the release archive cannot be found
             exit /b 1
           )
+          rem Say which image and toolset this run exercised. The lane follows the
+          rem moving `windows-latest` label and asks vswhere for `-latest`, so the
+          rem version is a property of the run, not of the repository. A log that
+          rem cannot name it is not evidence for a versioned Windows claim (#168).
+          rem These are the variables vcvars64.bat sets; `if not defined` fails the
+          rem run rather than printing an empty line that would read as recorded.
+          if not defined VCToolsVersion (
+            echo ::error title=toolset::vcvars64.bat set no VCToolsVersion
+            exit /b 1
+          )
+          echo ImageOS=%ImageOS% ImageVersion=%ImageVersion%
+          echo VisualStudioVersion=%VisualStudioVersion% VSCMD_VER=%VSCMD_VER%
+          echo VCToolsVersion=%VCToolsVersion%
           npm run test:toolchain
       - name: Upload toolchain diagnostics
         if: ${{ !cancelled() }}
