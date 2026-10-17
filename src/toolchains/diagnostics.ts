@@ -388,6 +388,22 @@ const LD_MULTIPLE_DEFINITION =
  */
 const COLLECT2_LINK_FAILED = /^collect2: error: (?<said>ld returned \d+ exit status)$/u;
 
+/**
+ * An MSVC link failure.
+ *
+ *     main.obj : error LNK2019: unresolved external symbol "…" referenced in function main
+ *     fatal error LNK1104: cannot open file 'missing.lib'
+ *
+ * Neither shape has a source location: there is no `file(line)` prefix, and the
+ * second has no file at all. The object or library before ` : ` is the only
+ * locator, and it is optional. It is read lazily up to the ` : ` that precedes
+ * the severity, so a drive colon or a space in a path does not end it early.
+ * The LNK code is kept in the message because the contract's diagnostic has no
+ * field for it and it is the stable name of the failure.
+ */
+const MSVC_LINK_DIAGNOSTIC =
+  /^(?:(?<file>.+?)\s*:\s*)?(?<severity>fatal error|error|warning)\s+(?<code>LNK\d+):\s*(?<said>.*)$/u;
+
 /** A line the linker printed, and whether it is the driver's summary of one. */
 interface LinkLine {
   readonly diagnostic: BuildDiagnostic;
@@ -444,6 +460,26 @@ const parseLinkLine = (line: string): LinkLine | undefined => {
       ...(file === undefined || file === "" ? {} : { file }),
       ...(lineNumber === undefined ? {} : { line: lineNumber }),
       message: withSection(groups["said"] ?? "", groups["section"]),
+      phase: "link",
+    });
+  }
+
+  // A line with a `(line)` prefix is the compiler's shape, even when the code
+  // after the severity begins with LNK: that is what a generated line looks like
+  // when it pairs a compiler location with a linker code, and MSVC link errors
+  // carry no source line. Letting the compiler format read it first keeps the
+  // location whole instead of folding `(8319)` into the file name.
+  if (MSVC_DIAGNOSTIC.test(line)) return undefined;
+
+  const msvcLink = MSVC_LINK_DIAGNOSTIC.exec(line);
+  const msvcGroups = msvcLink?.groups;
+  if (msvcGroups !== undefined) {
+    const file = msvcGroups["file"]?.trim();
+    const severity = msvcGroups["severity"] === "fatal error" ? "error" : msvcGroups["severity"];
+    return error({
+      severity: severity as BuildDiagnostic["severity"],
+      ...(file === undefined || file === "" ? {} : { file }),
+      message: `${msvcGroups["code"] ?? ""}: ${msvcGroups["said"] ?? ""}`.trim(),
       phase: "link",
     });
   }

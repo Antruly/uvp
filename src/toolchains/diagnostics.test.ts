@@ -263,6 +263,41 @@ describe("compiler diagnostics", () => {
     ]);
   });
 
+  it("reads an MSVC link failure, which has no source location", () => {
+    // MSVC link errors have no `file(line)` prefix, so neither the compiler
+    // format nor the GNU linker formats read them; the object before ` : ` is
+    // the only locator, and the LNK code is the stable name of the failure.
+    const said = parseDiagnostics(
+      "",
+      'main.obj : error LNK2019: unresolved external symbol "int __cdecl uvp_missing(void)" referenced in function main',
+      "link",
+    );
+    expect(said).toEqual([
+      {
+        severity: "error",
+        file: "main.obj",
+        message:
+          'LNK2019: unresolved external symbol "int __cdecl uvp_missing(void)" referenced in function main',
+        phase: "link",
+      },
+    ]);
+  });
+
+  it("reads an MSVC fatal link error that names no file", () => {
+    const said = parseDiagnostics(
+      "",
+      "fatal error LNK1104: cannot open file 'missing.lib'",
+      "link",
+    );
+    expect(said).toEqual([
+      {
+        severity: "error",
+        message: "LNK1104: cannot open file 'missing.lib'",
+        phase: "link",
+      },
+    ]);
+  });
+
   it("keeps a diagnostic that arrived on stdout, since a wrapper may put it there", () => {
     // A missing diagnostic is worse than a duplicate, so both streams are read.
     const said = parseDiagnostics("main.cpp:7:1: warning: unused variable ‘x’", "", "compile");
