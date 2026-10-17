@@ -271,4 +271,6 @@ re-run `uvp doctor` there.
 
 - [CLI and evidence](cli.md) — the command surface and how to read its output
 - [libuvcpp feature mapping](libuvcpp-features.md) — what each feature needs
+- [First-release support matrix](support-matrix.md) — what the lanes have
+  observed, derived, and left unknown
 - [MCP contracts](mcp-contracts.md) — what each tool does and touches
