@@ -112,17 +112,32 @@ const failureOf = async (call: Promise<unknown>): Promise<UvpError | undefined> 
  */
 const silentPort = 30_000 + (process.pid % 2_000);
 
-const abortAfter = (ms: number): { signal: AbortSignal; clear: () => void } => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, ms);
-  return {
-    signal: controller.signal,
-    clear: () => {
-      clearTimeout(timer);
-    },
-  };
+/**
+ * How long the installed service is given to write its pid file before the caller
+ * withdraws.
+ *
+ * This was 400 ms until one Windows run failed on `existsSync(pidFile)` — the
+ * withdrawal answered `cancelled` correctly, but the fake service there is a copy
+ * of Node rather than a two-line shell script, and under the runner's load it had
+ * not started inside that window. The readiness wait is ten seconds against a port
+ * nothing listens on, so waiting up to this bound still withdraws inside the wait;
+ * what changes is that the test establishes the service started instead of racing
+ * it. See docs/roadmap.md#the-cancellation-flake.
+ */
+const START_BOUND_MS = 5_000;
+
+/** Polls for a file, answering whether it appeared inside the bound. */
+const waitForFile = async (path: string, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+  return true;
 };
 
 describe("a run whose caller withdrew", () => {
@@ -152,28 +167,39 @@ describe("a run whose caller withdrew", () => {
    * leftover from another test nor a run of this test on its own can be mistaken
    * for what this one observed. The two tests below share it because each reads a
    * different one of the two — that the service started, and how it left.
+   *
+   * The withdrawal is a decision made after the service's own pid file says it
+   * started, not a fixed delay, so the claim in both titles — "over the service it
+   * started" — is a premise the test establishes rather than a race it reads after
+   * the fact. If the file never appears the caller still withdraws, so the failure
+   * is the named one below rather than a hang.
    */
   const withdrawnRun = async (): Promise<UvpError | undefined> => {
     await rm(pidFile, { force: true });
     await rm(stopFile, { force: true });
 
-    const { signal, clear } = abortAfter(400);
-    try {
-      return await failureOf(
-        run(
-          {
-            path: workspace,
-            args: serviceArgs,
-            env: {},
-            ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
-            detach: true,
-          },
-          { signal },
-        ),
-      );
-    } finally {
-      clear();
-    }
+    const controller = new AbortController();
+    const answer = failureOf(
+      run(
+        {
+          path: workspace,
+          args: serviceArgs,
+          env: {},
+          ready: { port: silentPort, path: "/", timeout_ms: 10_000 },
+          detach: true,
+        },
+        { signal: controller.signal },
+      ),
+    );
+    const started = await waitForFile(pidFile, START_BOUND_MS);
+    controller.abort();
+    const failure = await answer;
+
+    expect(
+      started,
+      `the installed service wrote no pid file within ${String(START_BOUND_MS)} ms`,
+    ).toBe(true);
+    return failure;
   };
 
   it("reports the withdrawal rather than the deadline, over the service it started", async () => {
