@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.3.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.2.0...uvp-agents-0.3.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* **http:** destroy an abandoned HTTP/2 session instead of closing gracefully ([507fd99](https://github.com/Antruly/uvp/commit/507fd99350d82ef429aaf570125efce4e3ae3aad))
+* **web:** bound the WebSocket opening handshake and settle an aborted response ([81a7ea8](https://github.com/Antruly/uvp/commit/81a7ea8dbfe6d0c741bf61fc0f7097564b8cc78d))
+* **web:** destroy the pre-upgrade request when the handshake deadline fires ([5be6fbb](https://github.com/Antruly/uvp/commit/5be6fbb64acbf2632e08b7bd5315e778e881f407)), closes [#182](https://github.com/Antruly/uvp/issues/182)
+
+
+### Documentation
+
+* **release-notes:** draft the first-release notes and upgrade guidance ([2944b95](https://github.com/Antruly/uvp/commit/2944b95b8567fcaddbc15c48de66b7b58b7c736c))
+* **release-notes:** draft the first-release notes and upgrade guidance ([3c4e413](https://github.com/Antruly/uvp/commit/3c4e413d105896df8ce882366dd76d00013054f2))
+* **release:** attribute the bootstrap choice to its recorded author ([753f6cd](https://github.com/Antruly/uvp/commit/753f6cd0d469213be2b419e86ffd27be21b23a35))
+* **release:** prepare the MCP registry entry and check it against the package ([368229f](https://github.com/Antruly/uvp/commit/368229f66cdb612bd341c083749e3c9bf748e8c0))
+* **release:** prepare the MCP registry entry and check it against the package ([0fc6b11](https://github.com/Antruly/uvp/commit/0fc6b11e73fa15eadb04c9815e2ede89c3ccdfcc)), closes [#162](https://github.com/Antruly/uvp/issues/162)
+* **release:** record the observed 0.2.0 publish and the open follow-up ([b039c19](https://github.com/Antruly/uvp/commit/b039c19ff1f211f5323b72bb2cfae221a8ee4779))
+* **support-matrix:** record what the first-release lanes observed ([becfeb5](https://github.com/Antruly/uvp/commit/becfeb57ae940738bd6a2f6b56a5685183e4c092))
+* **work-plan:** correct the release and [#184](https://github.com/Antruly/uvp/issues/184) facts after review ([5f16565](https://github.com/Antruly/uvp/commit/5f1656534697c0520847df05c631fa0559bfc6be))
+* **work-plan:** record the npm publish and support-matrix prep PRs ([4dd0315](https://github.com/Antruly/uvp/commit/4dd0315fdfbdca39c76b6b8718b7772d0520abf9))
+* **work-plan:** record the release PR and post-release lanes ([614d9a1](https://github.com/Antruly/uvp/commit/614d9a175abb0837c8de09a601cc3e6726659816))
+* **work-plan:** record the release PR and post-release lanes ([b4f155e](https://github.com/Antruly/uvp/commit/b4f155ef6b6148d804fb7e7430e0ccf72d01d167)), closes [#189](https://github.com/Antruly/uvp/issues/189)
+* **work-plan:** record the release prep claims ([ea77788](https://github.com/Antruly/uvp/commit/ea7778802d5ccb772f2e48328d0dec7243f8678d))
+* **work-plan:** refresh the snapshot after the merged prep PRs ([260d448](https://github.com/Antruly/uvp/commit/260d448e08e5904b206758b3f1a29cd1d1c4ec64))
+
+
+### Tests
+
+* **acceptance:** prove the published package onboards an agent ([65be960](https://github.com/Antruly/uvp/commit/65be960cc89de5e64aa7841e6739aa7d142102a1))
+* **acceptance:** prove the published package onboards an agent ([5816a0b](https://github.com/Antruly/uvp/commit/5816a0b526e1d1d6085d626c40f99c477f3dbdc9)), closes [#163](https://github.com/Antruly/uvp/issues/163)
+
+
+### Continuous Integration
+
+* **release:** bootstrap GitHub Packages for pre-helper tags ([79b40b3](https://github.com/Antruly/uvp/commit/79b40b314a0d902656c6d0c8f2931b66266ed2d2))
+* **release:** bootstrap GitHub Packages for pre-helper tags ([2a2a142](https://github.com/Antruly/uvp/commit/2a2a142521ec296407c8840e538c89a1e29c0c39))
+* **release:** publish a release tag from a manual dispatch ([c0adf7f](https://github.com/Antruly/uvp/commit/c0adf7f16a37c6464c52a2f0755cb5de34ab0a84))
+* **release:** publish a release tag to npm from a manual dispatch ([40b2765](https://github.com/Antruly/uvp/commit/40b276580cfc37114b76ad7f767f268d284bfb95))
+* **release:** publish a scoped GitHub Packages mirror ([5065609](https://github.com/Antruly/uvp/commit/5065609efc10994d276de1305bba3d3ffe651854))
+* **release:** publish a scoped GitHub Packages mirror ([ece06d7](https://github.com/Antruly/uvp/commit/ece06d739f202d71132c149779954e2eee86b544))
+
 ## [0.2.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.1.0...uvp-agents-0.2.0) (2026-10-17)
 
 

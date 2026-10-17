@@ -1,7 +1,7 @@
 {
   "name": "uvp-agents",
   "mcpName": "io.github.Antruly/uvp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Build, run, and verify libuvcpp-powered C++ web services from your terminal or agent with one CLI and MCP server.",
   "license": "MIT",
   "repository": {
