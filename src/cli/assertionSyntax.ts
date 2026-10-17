@@ -190,8 +190,9 @@ const withSubject = (subject: string, value: string, regex: boolean): AssertionI
     case "body":
       // The pattern belongs in `expected`, which is where `bodyMatches` reads it
       // — the same shape `header_matches` uses above. In `target` it is never
-      // read, and the evaluator falls back to the empty pattern, which matches
-      // every body: the check would report success whatever came back.
+      // read, so the assertion would carry no expectation at all: the engine
+      // reports that as a check it could not run, and `uvp assert --assert
+      // 'body~=x'` would come back without the answer it was asked for.
       return regex
         ? { kind: "body_matches", expected: value }
         : { kind: "body_contains", expected: value };

@@ -183,6 +183,12 @@ const asText = (value: unknown): string => (typeof value === "string" ? value : 
 
 const asNumber = (value: unknown): number => (typeof value === "number" ? value : Number(value));
 
+/** A value as it fits in a question, capped so a document cannot become one. */
+const brief = (value: unknown): string => {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length <= 80 ? text : `${text.slice(0, 80)}…`;
+};
+
 /** Match a pattern, reporting a bad pattern as a failure rather than throwing. */
 const matchPattern = (pattern: string, subject: string): { matched: boolean; invalid?: string } => {
   try {
@@ -191,6 +197,37 @@ const matchPattern = (pattern: string, subject: string): { matched: boolean; inv
     return { matched: false, invalid: pattern };
   }
 };
+
+/**
+ * The pattern a `*_matches` assertion compiles, or why there is none.
+ *
+ * The expectation either is a pattern or is not, and this is the one place that
+ * decides which. Read as the empty string, a value that is not a string matched
+ * everything: `expected: 42` reported `satisfied`, a claim about the service for
+ * a check that never compared the caller's expectation with anything, and its
+ * message carried the substituted pattern, which a reader cannot tell apart from
+ * a caller who wrote `""`. Reported as a failure it would be no better — a
+ * message carrying `/42/` reads as the pattern the caller named — so the
+ * substitution stays invisible to the reader either way, which is the defect
+ * rather than its fix.
+ *
+ * Resolved in one place because both callers ask the same question of the same
+ * field and differ only in what they observed, which each names for itself.
+ */
+const patternOf = (
+  expected: unknown,
+): { ok: true; pattern: string } | { ok: false; reason: string } =>
+  typeof expected === "string"
+    ? { ok: true, pattern: expected }
+    : {
+        ok: false,
+        // `shown`'s word for an absent value: a caller who left the field out
+        // did not write the string `undefined`, and the message is the only
+        // place they learn which of the two the engine saw.
+        reason: `the expected value is not a pattern: ${
+          expected === undefined ? "absent" : brief(expected)
+        }`,
+      };
 
 const statusEquals: RawEvaluator = (record, spec) => {
   const observed = record.status;
@@ -282,15 +319,18 @@ const headerMatches: RawEvaluator = (record, spec) => {
   const { name, observed, lookedAt } = headerOf(record, spec);
   if (!lookedAt) return notEvaluated(notLookedAt(record, name), observed);
   if (observed === undefined) return verdict(false, observed, `header ${name} is absent`);
-  const pattern = typeof spec.expected === "string" ? spec.expected : "";
-  const { matched, invalid } = matchPattern(pattern, observed);
+  const resolved = patternOf(spec.expected);
+  // An expectation that is not a pattern is the same kind of fact as one that
+  // does not compile below: the check did not run rather than compared a value.
+  if (!resolved.ok) return notEvaluated(resolved.reason, observed);
+  const { matched, invalid } = matchPattern(resolved.pattern, observed);
   // A pattern that does not compile is a check that did not run. Reported as a
   // failure it would read as "the header did not match", which is a statement
   // about a value nobody compared — and under `negate` it read as a pass.
   if (invalid !== undefined) {
     return notEvaluated(`invalid regular expression: ${invalid}`, observed);
   }
-  return verdict(matched, observed, `header ${name}=${observed}, expected /${pattern}/`);
+  return verdict(matched, observed, `header ${name}=${observed}, expected /${resolved.pattern}/`);
 };
 
 const bodyContains: RawEvaluator = (record, spec) => {
@@ -312,15 +352,16 @@ const bodyContains: RawEvaluator = (record, spec) => {
 const bodyMatches: RawEvaluator = (record, spec) => {
   const observed = bodyText(record);
   if (observed === undefined) return notEvaluated("no response body was recorded");
-  const pattern = typeof spec.expected === "string" ? spec.expected : "";
-  const { matched, invalid } = matchPattern(pattern, observed);
+  const resolved = patternOf(spec.expected);
+  if (!resolved.ok) return notEvaluated(resolved.reason, observed.slice(0, 512));
+  const { matched, invalid } = matchPattern(resolved.pattern, observed);
   if (invalid !== undefined) {
     return notEvaluated(`invalid regular expression: ${invalid}`, observed.slice(0, 512));
   }
   return verdict(
     matched,
     observed.slice(0, 512),
-    `body length ${String(observed.length)}, expected to match /${pattern}/`,
+    `body length ${String(observed.length)}, expected to match /${resolved.pattern}/`,
   );
 };
 
@@ -486,12 +527,6 @@ export const evaluateAssertions = (
   record: ExchangeRecord,
   specs: readonly AssertionSpec[],
 ): readonly AssertionOutcome[] => specs.map((spec) => evaluateAssertion(record, spec));
-
-/** A value as it fits in a question, capped so a document cannot become one. */
-const brief = (value: unknown): string => {
-  const text = JSON.stringify(value) ?? String(value);
-  return text.length <= 80 ? text : `${text.slice(0, 80)}…`;
-};
 
 /**
  * The question a check that could not run leaves behind.

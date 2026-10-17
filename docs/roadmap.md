@@ -1050,8 +1050,12 @@ catches rather than assertions the suite is missing, and the read queue the swee
 table presents is at most **156**. `assertions.ts`'s 129 have been read too
 ([#62](https://github.com/Antruly/uvp/issues/62)): 84 of its 90 readable survivors are
 pinned, it moves from 66.41% to **94.27%** — 361 killed of 384 — and the six that
-remain are four equivalent mutants, each measured over a 121,908-input lattice, and
-the two rows [#61](https://github.com/Antruly/uvp/issues/61) is for.
+remained were four equivalent mutants, each measured over a 121,908-input lattice, and
+the two rows [#61](https://github.com/Antruly/uvp/issues/61) was filed for. #61 is
+fixed: an expectation that is not a pattern is a check that did not run rather than
+the empty pattern that matched everything, the two rows are gone, and the file
+measures **95.44%** — 376 killed of 395, 18 survivors, four equivalents and fourteen
+refusals.
 `unknown.ts`'s have been read as well
 ([#66](https://github.com/Antruly/uvp/issues/66)): its four current survivors — two
 reason members that could become the empty string with the suite green, and the two

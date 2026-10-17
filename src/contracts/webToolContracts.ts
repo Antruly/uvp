@@ -886,9 +886,10 @@ export const assertExchangeContract = defineTool({
     "Evaluate assertions against an exchange recorded earlier in this session, without sending " +
     "any traffic. Returns one row per assertion, in the order asked, with the verdict it came to " +
     "and the observed value behind it, so a failure shows what was actually there rather than " +
-    "only that it differed. An assertion the record cannot answer — a header the client never " +
-    "read, a body that was never recorded — comes back `undetermined` with the reason in its " +
-    "message: neither a pass nor a failure, and counted as neither.",
+    "only that it differed. An assertion the engine cannot carry out — a header the client never " +
+    "read, a body that was never recorded, a pattern that does not compile, an expectation that " +
+    "is not a pattern — comes back `undetermined` with the reason in its message: neither a pass " +
+    "nor a failure, and counted as neither.",
   kind: "web",
   inputSchema: z.object({
     exchange_id: exchangeIdSchema,
