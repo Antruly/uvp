@@ -680,6 +680,75 @@ describe("the SOAP call", () => {
   );
 });
 
+describe("websocket text frame integrity", () => {
+  it.each([
+    { mode: "invalid-utf8", bytes: 4, textOmitted: "invalid-utf8", truncated: false },
+    { mode: "truncated", bytes: 90_000, textOmitted: "truncated", truncated: true },
+  ] as const)(
+    "omits replacement text for a $mode frame",
+    async ({ mode, bytes, textOmitted, truncated }) => {
+      const replacement = String.fromCodePoint(0xfffd);
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?raw_text_frame=${mode}`,
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+        expect: [replacement],
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      const frames = output["frames"] as {
+        direction: string;
+        opcode: string;
+        bytes: number;
+        text?: string;
+        base64?: string;
+        text_omitted?: "truncated" | "invalid-utf8";
+        truncated: boolean;
+      }[];
+      expect(frames).toHaveLength(1);
+      expect(frames[0]).toMatchObject({
+        direction: "received",
+        opcode: "text",
+        bytes,
+        text_omitted: textOmitted,
+        truncated,
+      });
+      expect(frames[0]).not.toHaveProperty("text");
+      expect(frames[0]).not.toHaveProperty("base64");
+      expect(output["expectations_met"]).toBe(false);
+      expect(output["expectations"]).toEqual([{ text: replacement, matched: false }]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps a valid text prefix when the payload cap ends at a character boundary",
+    async () => {
+      const text = "é".repeat(32_768);
+      const output = await call("uvp_websocket_probe", {
+        url: `ws://127.0.0.1:${String(fixture.port)}/ws?raw_text_frame=truncated-valid`,
+        max_frames: 2,
+        idle_timeout_ms: 2_000,
+        expect: [text],
+      });
+      expectConforms("uvp_websocket_probe", output);
+
+      const frames = output["frames"] as {
+        opcode: string;
+        bytes: number;
+        text?: string;
+        text_omitted?: "truncated" | "invalid-utf8";
+        truncated: boolean;
+      }[];
+      expect(frames).toHaveLength(1);
+      expect(frames[0]).toMatchObject({ opcode: "text", bytes: 90_000, text, truncated: true });
+      expect(frames[0]).not.toHaveProperty("text_omitted");
+      expect(output["expectations_met"]).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
 describe("the websocket probe", () => {
   it(
     "stamps each frame where it happened rather than at the end of the probe",

@@ -333,9 +333,9 @@ interface WebSocketProbeOutput {
  * The frame log as the output carries it.
  *
  * The close handshake is reported through `close` rather than as traffic, so it
- * is filtered out here; a frame whose payload a stack would not hand over carries
- * neither text nor base64 and says why, because substituting a decode of a
- * partial payload would be inventing bytes.
+ * is filtered out here; a text payload that cannot be rendered losslessly carries
+ * neither text nor base64 and says why, because substituting a decode of partial
+ * or invalid bytes would invent bytes the peer did not send.
  */
 const probeOutputFrames = (frames: readonly ProbeFrame[]): ProbeOutputFrame[] =>
   frames
@@ -369,6 +369,7 @@ const probeOutputFrames = (frames: readonly ProbeFrame[]): ProbeOutputFrame[] =>
         bytes: frame.bytes,
         ...(payload.text === undefined ? {} : { text: payload.text }),
         ...(payload.base64 === undefined ? {} : { base64: payload.base64 }),
+        ...(payload.textOmitted === undefined ? {} : { text_omitted: payload.textOmitted }),
         at_ms: frame.atMs,
         // Either the stack cut this payload before reporting it, or the limit cut
         // it here. Both mean the same thing to a caller reading the field.

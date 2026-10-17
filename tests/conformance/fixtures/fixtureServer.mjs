@@ -53,12 +53,18 @@ const soapFault = (code, reason) =>
 /** Frame a payload as a single unmasked server-to-client text frame. */
 const serverFrame = (payload, opcode = 0x1) => {
   const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "utf8");
-  const header = body.length < 126 ? Buffer.from([0x80 | opcode, body.length]) : null;
-  if (header !== null) return Buffer.concat([header, body]);
-  const extended = Buffer.alloc(4);
-  extended.writeUInt16BE(body.length, 2);
+  if (body.length < 126) return Buffer.concat([Buffer.from([0x80 | opcode, body.length]), body]);
+  if (body.length <= 0xffff) {
+    const extended = Buffer.alloc(4);
+    extended.writeUInt16BE(body.length, 2);
+    extended[0] = 0x80 | opcode;
+    extended[1] = 126;
+    return Buffer.concat([extended, body]);
+  }
+  const extended = Buffer.alloc(10);
   extended[0] = 0x80 | opcode;
-  extended[1] = 126;
+  extended[1] = 127;
+  extended.writeBigUInt64BE(BigInt(body.length), 2);
   return Buffer.concat([extended, body]);
 };
 
@@ -399,6 +405,26 @@ server.on("upgrade", (request, socket) => {
       "Connection: Upgrade\r\n" +
       `Sec-WebSocket-Accept: ${accept(key)}\r\n\r\n`,
   );
+
+  const rawTextFrame = url.searchParams.get("raw_text_frame");
+  if (
+    rawTextFrame === "invalid-utf8" ||
+    rawTextFrame === "truncated" ||
+    rawTextFrame === "truncated-valid"
+  ) {
+    const payload =
+      rawTextFrame === "invalid-utf8"
+        ? Buffer.from([0x68, 0x69, 0xff, 0xfe])
+        : rawTextFrame === "truncated"
+          ? Buffer.from("中".repeat(30_000), "utf8")
+          : Buffer.from("é".repeat(45_000), "utf8");
+    setImmediate(() => {
+      socket.write(serverFrame(payload));
+      socket.write(serverFrame(Buffer.alloc(0), 0x8));
+      socket.end();
+    });
+    return;
+  }
 
   if (url.searchParams.get("hangup") === "1") {
     // A far end that drops the connection with no closing handshake. This is the

@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Buffer } from "node:buffer";
 import type { IncomingMessage, ClientRequest } from "node:http";
 import type { Socket } from "node:net";
+import { textLossiness } from "./httpClient.js";
 
 /**
  * A WebSocket client, written against RFC 6455 directly.
@@ -554,9 +555,17 @@ export const probeWebSocket = async (
 export const framePayload = (
   frame: WebSocketFrame,
   maxBytes: number,
-): { text?: string; base64?: string; truncated: boolean } => {
+): {
+  text?: string;
+  base64?: string;
+  textOmitted?: "truncated" | "invalid-utf8";
+  truncated: boolean;
+} => {
   const truncated = frame.payload.byteLength > maxBytes;
   const slice = truncated ? frame.payload.subarray(0, maxBytes) : frame.payload;
   if (frame.opcode === "binary") return { base64: slice.toString("base64"), truncated };
-  return { text: slice.toString("utf8"), truncated };
+  const text = slice.toString("utf8");
+  const textOmitted = frame.opcode === "text" ? textLossiness(slice, text, truncated) : undefined;
+  if (textOmitted !== undefined) return { textOmitted, truncated };
+  return { text, truncated };
 };
