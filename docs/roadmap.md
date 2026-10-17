@@ -3106,6 +3106,10 @@ multi-configuration generators, because that is the path the manifest and
 subdirectory, so that property is derived from CMake's documented behaviour rather
 than observed here.
 
+The lane also pins the release asset's SHA-256 and fails before unpacking on a
+mismatch; the digest is the one the release API reports and a local download
+reproduced.
+
 The first runs found five things, all in the lane, its stand-ins, or the generated
 CMakeLists rather than in provider logic:
 

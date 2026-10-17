@@ -301,6 +301,20 @@ jobs:
           $zip = Join-Path $env:RUNNER_TEMP $archive
           Invoke-WebRequest -Uri "https://github.com/Antruly/libuvcpp/releases/download/v$version/$archive" -OutFile $zip
 
+          # The release asset is the one external binary this lane trusts. Pin its
+          # digest beside the tag so a replaced, partial, or otherwise different
+          # download fails here rather than being unpacked and compiled. The value
+          # is what the release API reports for this asset and what a local download
+          # on 2026-10-17 reproduced:
+          #   gh api repos/Antruly/libuvcpp/releases/tags/v1.7.0 \
+          #     --jq '.assets[] | select(.name=="libuvcpp-1.7.0-msvc-x64.zip") | .digest'
+          $expectedDigest = '9b7b5daedc23420494d60348b20939b97fe2c947df3e5bbb3fbd2cd93b3e153b'
+          $actualDigest = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualDigest -ne $expectedDigest) {
+            throw "the libuvcpp archive digest changed: expected $expectedDigest, got $actualDigest"
+          }
+          Write-Host "libuvcpp archive sha256: $actualDigest"
+
           $extract = Join-Path $env:RUNNER_TEMP 'libuvcpp-extract'
           if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
           Expand-Archive -LiteralPath $zip -DestinationPath $extract
