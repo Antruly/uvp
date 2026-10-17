@@ -533,8 +533,10 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
     });
   }
 
-  if (!input.keep_running) await stopQuietly(context, recorder, runResult.runId);
-  else
+  let cleanupFailed = false;
+  if (!input.keep_running) {
+    cleanupFailed = !(await stopQuietly(context, recorder, runResult.runId));
+  } else
     record(recorder, {
       kind: "launch",
       subject: { run_id: runResult.runId },
@@ -556,9 +558,15 @@ export const verify = async (input: VerifyInput, context: VerifyContext): Promis
   const limitations = [
     ...(input.keep_running
       ? ["The service was left running; stop it with uvp_run_stop."]
-      : [
-          "The service was stopped after the pass; the evidence describes a process that no longer exists.",
-        ]),
+      : cleanupFailed
+        ? [
+            "The pass asked the service to stop, but it did not exit cleanly and may still be " +
+              "listening. The evidence describes what it did while it was observed, not a process " +
+              "that is gone.",
+          ]
+        : [
+            "The service was stopped after the pass; the evidence describes a process that no longer exists.",
+          ]),
     ...(failed > 0
       ? ["Listeners on the loopback interface were assumed to be this workspace's service."]
       : []),
@@ -589,7 +597,7 @@ const stopQuietly = async (
   context: VerifyContext,
   recorder: EvidenceRecorder,
   runId: string,
-): Promise<void> => {
+): Promise<boolean> => {
   try {
     const stopped = await context.workspace.stop({
       runId,
@@ -597,14 +605,16 @@ const stopQuietly = async (
       graceMs: 3_000,
       force: true,
     });
-    if (stopped.cleanupComplete) return;
+    if (stopped.cleanupComplete) return true;
     recordUnknown(recorder, "Was the service stopped after the pass?", "not_attempted", {
       blockedBy: `${runId} did not exit cleanly; it may still be listening.`,
     });
+    return false;
   } catch (cause) {
     recordUnknown(recorder, "Was the service stopped after the pass?", "not_attempted", {
       blockedBy: cause instanceof Error ? cause.message : String(cause),
     });
+    return false;
   }
 };
 
