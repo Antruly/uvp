@@ -10,6 +10,7 @@ import {
   requirePositional,
 } from "../args.js";
 import type { ParsedArgv } from "../args.js";
+import { LOAD_HTTP_METHODS } from "../../contracts/webToolContracts.js";
 import type { CommandSpec, ToolCommand } from "../commandSpec.js";
 import { EXIT_NO, EXIT_WRONG } from "../exitCodes.js";
 import { parseAssertionList } from "../assertionSyntax.js";
@@ -141,6 +142,15 @@ export const httpCommand: CommandSpec = {
 };
 
 const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
+/**
+ * The methods `uvp load` may repeat, read from the contract.
+ *
+ * `HTTP_METHODS` above is the vocabulary for one request and includes `OPTIONS`;
+ * a load test repeats a method the contract's schema admits, and a second list
+ * here would be the one that drifts.
+ */
+const LOAD_METHODS = new Set<string>(LOAD_HTTP_METHODS);
 
 /**
  * `uvp http GET URL` or `uvp http URL`.
@@ -510,8 +520,11 @@ export const loadCommand: CommandSpec = {
   input: (parsed) => {
     const url = requirePositional(parsed, 0, "a URL", "uvp load http://127.0.0.1:8080/hello");
     const method = parsed.positionals[1];
-    if (method !== undefined && !HTTP_METHODS.has(method.toUpperCase())) {
-      flagError(`"${method}" is not an HTTP method.`, { usage: "uvp load URL GET --requests 200" });
+    if (method !== undefined && !LOAD_METHODS.has(method.toUpperCase())) {
+      flagError(
+        `"${method}" is not a method uvp load supports; use ${LOAD_HTTP_METHODS.join(", ")}.`,
+        { usage: "uvp load URL GET --requests 200" },
+      );
     }
     return {
       url,
