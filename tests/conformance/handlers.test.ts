@@ -334,6 +334,13 @@ describe("build", () => {
 });
 
 describe("launch and stop", () => {
+  it("refuses a stop with neither a run id nor all, instead of stopping every run", async () => {
+    // `{}` is valid input: `all` defaults to false and `run_id` is optional. The
+    // service used to read the absent id as "every run", so this input killed the
+    // whole session. The CLI already refused it; this is the MCP surface's half.
+    expect(await failureCodeOf("uvp_run_stop", {})).toBe("invalid_request");
+  });
+
   it(
     "launches a real process, waits for a real probe, then stops it",
     async () => {

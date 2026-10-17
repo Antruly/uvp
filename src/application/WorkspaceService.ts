@@ -425,10 +425,29 @@ export class WorkspaceService {
     graceMs: number;
     force: boolean;
   }): Promise<StopResult> {
-    const targets =
-      input.all || input.runId === undefined
-        ? this.store.runs()
-        : this.store.runs().filter((run) => run.runId === input.runId);
+    // "Did not say which" is not "said every one". The contract defaults `all` to
+    // false and leaves `run_id` optional, so an MCP caller can send `{}`; reading
+    // the absent id as the whole set would kill every service the session started
+    // under an input that explicitly declined to ask for it. Refusing is the
+    // third state the CLI already reports for the same call (it names --run-id
+    // or --all), raised here so a caller of this service cannot reach the
+    // destructive branch by omission either.
+    if (!input.all && input.runId === undefined) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          "A stop call must name the run to stop or ask for every run; stopping everything is " +
+          "never the default.",
+        remediation: {
+          action: "Pass the run's id, or set all to true to stop every run this session started.",
+        },
+        details: { all: false, run_id: null },
+      });
+    }
+
+    const targets = input.all
+      ? this.store.runs()
+      : this.store.runs().filter((run) => run.runId === input.runId);
 
     if (targets.length === 0) {
       return { stopped: [], cleanupComplete: true };
