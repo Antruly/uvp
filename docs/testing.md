@@ -1116,9 +1116,23 @@ substitution rather than the behaviour, and #61's fix removes them along with th
 siblings the compiler already refuses. The comparator is a scratch script under `/tmp`,
 so these numbers are quotable but not re-runnable from the repository — the same gap
 [#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
-**78** survivors are still unread — `bundleDiff.ts` 54, `evidence.ts` 13, `unknown.ts`
-6, `ToolchainProvider.ts` 5 — **66** of them readable once the classification below is
-applied.
+**67** survivors are still unread — `bundleDiff.ts` 54 (52 readable), `evidence.ts` 8
+(2), `ToolchainProvider.ts` 5 — **59** readable once the classification below is
+applied. The baseline's **78** have shrunk because tests the earlier reads added killed
+seven of them, and the four in the `unknown.ts` read above are the next four.
+
+**`unknown.ts`'s four have been read, and all four are pinned**
+([#66](https://github.com/Antruly/uvp/issues/66)). The file is the vocabulary for
+"we could not answer this, and here is why", and its survivors were the vocabulary
+itself: two reason members — `unsupported_by_platform` and `ambiguous_requirement` —
+that could become the empty string with the suite green, and the two anchors of the
+`^unk_[0-9a-f]{22}$` id grammar. The read adds an enumeration of the eight reasons
+the contract publishes, in declaration order, so a member added, removed, or respelled
+is a diff in the test rather than a silent change to the vocabulary, and a boundary
+table for the id: 22 hex digits accepted, 21 and 23 refused, trailing characters
+refused, and an `unk_` that does not start the id refused — the last two being the
+inputs the dropped anchors would have accepted. The file measures **100.00%** on the
+branch, 43 killed of 43, against 90.70% before the read.
 
 **A third of the survivor table is damage the build refuses, which segments the
 queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the

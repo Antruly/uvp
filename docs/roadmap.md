@@ -1051,8 +1051,13 @@ table presents is at most **156**. `assertions.ts`'s 129 have been read too
 ([#62](https://github.com/Antruly/uvp/issues/62)): 84 of its 90 readable survivors are
 pinned, it moves from 66.41% to **94.27%** — 361 killed of 384 — and the six that
 remain are four equivalent mutants, each measured over a 121,908-input lattice, and
-the two rows [#61](https://github.com/Antruly/uvp/issues/61) is for. The other **78**
-survivors are still unread, **66** of them readable. The instrument for it is committed
+the two rows [#61](https://github.com/Antruly/uvp/issues/61) is for.
+`unknown.ts`'s have been read as well
+([#66](https://github.com/Antruly/uvp/issues/66)): its four current survivors — two
+reason members that could become the empty string with the suite green, and the two
+anchors of the id grammar — are pinned by an enumeration of the published vocabulary
+and a boundary table for `unk_` ids, and the file moves to **100.00%**, 43 killed of 43. The other **67** survivors are still unread, **59** of them readable. The
+instrument for it is committed
 (`scripts/mutation-survivor-kinds.mjs`, with a producer golden in `check:pr`) rather
 than left in a scratch directory.
 [testing.md](testing.md#mutation-not-a-measurement) carries the per-run detail.
