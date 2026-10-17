@@ -14,5 +14,5 @@ import { PACKAGE_NAME, PACKAGE_VERSION } from "./generatedPackageMetadata.js";
  */
 export const uvpVersion = (): string => PACKAGE_VERSION;
 
-/** `uvp-agents 0.1.0`, for banners and MCP server metadata. */
+/** `uvp-agents <version>`, for banners and MCP server metadata. */
 export const uvpVersionBanner = (): string => `${PACKAGE_NAME} ${PACKAGE_VERSION}`;

@@ -28,7 +28,7 @@ it was never given.
 where there is one. A schema violation is `invalid_request` naming the field, not
 a usage dump.
 
-**`--version` before the command.** `uvp --version` prints `uvp-agents 0.1.0` on
+**`--version` before the command.** `uvp --version` prints `uvp-agents <version>` on
 stdout and exits `0`. It is answered before a command word and not after one,
 because `uvp soap --version 1.2` is already the SOAP protocol version: a command
 that declares the spelling keeps it, and `uvp doctor --version` is refused with a
