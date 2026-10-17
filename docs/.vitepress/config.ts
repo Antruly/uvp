@@ -44,6 +44,7 @@ export default defineConfig({
         items: [
           { text: "Testing", link: "/testing" },
           { text: "Releasing", link: "/releasing" },
+          { text: "AI development workflow", link: "/agent-workflow" },
         ],
       },
     ],

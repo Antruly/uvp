@@ -108,6 +108,11 @@ declarations, and never closes a PR it did not merge — those stay the owner's,
 [one branch per issue](#pull-request-ownership-and-readiness) is the same rule read
 from the agent's side.
 
+The operating roles — direction lead, development agents, review agent, and
+author proxy assistant — and the hand-off between them are defined in
+[docs/agent-workflow.md](docs/agent-workflow.md). The author remains the only
+approver, and the author completes the **Author readiness** declarations.
+
 **Disclosure is required, but light.** Add the `ai-assisted` label to a PR with
 substantial AI involvement. If a specific passage is machine-generated and you do
 not fully understand it, mark it in the diff — a comment is enough. There is no
@@ -146,6 +151,13 @@ bundle exploit payloads. `uvp_load_test` exists to measure a service you are
 developing, and its documentation says so.
 
 This is a product boundary, not a judgment about a contributor's intentions.
+
+**Upstream defects.** If a problem is in libuvcpp itself, report it or fix it in
+the libuvcpp repository and link it from the uvp issue; do not carry a local
+patch or a vendored copy. The maintainer decides whether uvp waits, works
+around, or narrows the claim. Other upstream dependencies follow the same rule:
+a uvp issue may track the problem with an upstream link and a recheck condition,
+but the fix belongs upstream where possible.
 
 ### Fail-closed integration
 
