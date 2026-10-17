@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ import { commandName } from "../../../src/cli/commandSpec.js";
 import { COMMANDS } from "../../../src/cli/commands/index.js";
 import { EXIT_NO, EXIT_OK, EXIT_WRONG } from "../../../src/cli/exitCodes.js";
 import { parseUvpError } from "../../../src/domain/errors.js";
+import { isWindows } from "../../../src/toolchains/host.js";
 import { uvpVersionBanner } from "../../../src/version.js";
 import { freePort } from "../../support/ports.js";
 
@@ -125,10 +126,22 @@ const SCRATCH = realpathSync(tmpdir());
 const workspace = join(SCRATCH, `uvp-cli-boundary-${String(process.pid)}`);
 const ABSENT_WORKSPACE = join(workspace, "no-such-workspace");
 const OCCUPIED = join(workspace, "occupied");
+/** Present, and not listable by this process — the mode is set inside the case. */
+const UNREADABLE = join(workspace, "unreadable");
+/** What the Windows skip of the unreadable-directory case states. */
+const UNREADABLE_WHY =
+  "POSIX mode bits are what stop this process listing the directory; Windows ACLs are not set by chmod";
 
 mkdirSync(workspace, { recursive: true });
 mkdirSync(OCCUPIED, { recursive: true });
 writeFileSync(join(OCCUPIED, "keep.txt"), "written before uvp was asked anything\n");
+mkdirSync(UNREADABLE, { recursive: true });
+writeFileSync(join(UNREADABLE, "keep.txt"), "written before uvp was asked anything\n");
+writeFileSync(join(workspace, "plain-file"), "a path a create cannot treat as a directory\n");
+
+/** `title`, with the reason attached on the host that cannot run it. */
+const named = (title: string, why: string): string =>
+  isWindows ? `${title} — skipped: ${why}` : title;
 
 afterAll(() => {
   rmSync(workspace, { recursive: true, force: true });
@@ -672,5 +685,60 @@ describe("a refused invocation writes nothing", () => {
     expect(error.code).toBe("invalid_request");
     expect(error.details?.["entries"]).toEqual([...before].sort());
     expect(readdirSync(OCCUPIED).sort()).toEqual(before);
+  });
+
+  it.skipIf(isWindows)(
+    named(
+      "refuses a directory it cannot look into, rather than writing beside what it could not see",
+      UNREADABLE_WHY,
+    ),
+    async () => {
+      // `0333` lets this process create files in the directory and does not let
+      // it list them, so the guard's listing fails while the write would have
+      // succeeded. The guard is the promise that `uvp init` without `--force`
+      // cannot write beside files the caller did not agree to keep; a look that
+      // did not happen must not satisfy it.
+      chmodSync(UNREADABLE, 0o333);
+      try {
+        const init = await invoke([
+          "init",
+          UNREADABLE,
+          "--name",
+          "svc",
+          "--template",
+          "hello-http",
+          "--json",
+        ]);
+        expect(init.exit).toBe(EXIT_WRONG);
+        expect(init.stdout.trim()).toBe("");
+        const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+        expect(error.code).toBe("invalid_request");
+        expect(error.message).toContain("could not be checked for existing files");
+        expect(error.message).toContain("may not read it");
+      } finally {
+        chmodSync(UNREADABLE, 0o755);
+      }
+      // Nothing was written: the file that was there is the only entry.
+      expect(readdirSync(UNREADABLE)).toEqual(["keep.txt"]);
+    },
+  );
+
+  it("refuses a path that is a file, naming what is there", async () => {
+    // The other side of the same classification: `readdir` answers `ENOTDIR`,
+    // which is a definite answer rather than a failed look. `--force` is not
+    // offered as a remedy, because the create would fail on its first file.
+    const init = await invoke([
+      "init",
+      join(workspace, "plain-file"),
+      "--name",
+      "svc",
+      "--template",
+      "hello-http",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("not a directory");
   });
 });

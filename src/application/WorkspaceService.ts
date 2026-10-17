@@ -91,11 +91,58 @@ const workspaceIdOf = (path: string): string => {
   return `wsp_${digest.slice(0, 22)}`;
 };
 
+/** Why a directory could not be listed, in terms a caller can act on. */
+const describeListFailure = (cause: unknown): string => {
+  const code = (cause as NodeJS.ErrnoException | null)?.code;
+  if (code === "EACCES" || code === "EPERM") return "this process may not read it";
+  if (code === "ELOOP") return "it is a symlink loop";
+  if (code === "ENAMETOOLONG") return "the path is too long";
+  return cause instanceof Error ? cause.message : String(cause);
+};
+
+/**
+ * The entries in `path`, or a refusal when the question could not be answered.
+ *
+ * The guard in `create` asks this to decide whether `uvp init` may write into a
+ * directory at all. Answering `[]` for a listing that failed turned "I could not
+ * look" into "there is nothing here": a directory this process may write to but
+ * not read (mode `0333`) was reported as empty, and the create wrote its
+ * template beside a file it never saw — without the `--force` that is the
+ * caller's statement that writing beside existing files is intended.
+ *
+ * Only `ENOENT` means there is nothing to list: that is the ordinary case of a
+ * directory `init` is about to create. Every other failure is the guard's own
+ * failure, and it refuses the create rather than becoming a yes.
+ */
 const directoryEntries = async (path: string): Promise<readonly string[]> => {
   try {
     return await readdir(path);
-  } catch {
-    return [];
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT") return [];
+    if (code === "ENOTDIR") {
+      // The look happened and the answer is "this is not a directory", so
+      // `--force` is not a remedy: the create would fail on its first file.
+      throw new UvpFailure({
+        code: "invalid_request",
+        message: `Refusing to write into ${path}: that path is not a directory.`,
+        remediation: {
+          action: "Choose a path that is a directory, or one that does not exist yet.",
+        },
+      });
+    }
+    throw new UvpFailure({
+      code: "invalid_request",
+      message:
+        `Refusing to write into ${path}: it could not be checked for existing files ` +
+        `(${describeListFailure(cause)}).`,
+      remediation: {
+        action:
+          "Make the directory readable by this process or choose another one, or pass force=true " +
+          "to write without the check.",
+      },
+      details: { code: code ?? "unknown" },
+    });
   }
 };
 
