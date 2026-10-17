@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
 import { emitGeneratedFile, finishCheck, repositoryPath } from "./lib/generated-file.mjs";
+import { npmPurl } from "./lib/npmPurl.mjs";
 import { loadProductionClosure } from "./lib/productionClosure.mjs";
 
 /**
@@ -87,20 +88,6 @@ Writes ${OUTPUT} (CycloneDX 1.5) for the production dependency closure.
 const fail = (message) => {
   console.error(message);
   process.exit(2);
-};
-
-/**
- * A package URL, as the purl spec spells one for npm.
- *
- * The scope's `@` is percent-encoded and the `/` after it is not: the namespace
- * is `@scope` and the name is the part after the slash, so encoding the slash
- * would move the boundary. Measured against `npm sbom`'s own output rather than
- * recalled — it emits `pkg:npm/%40modelcontextprotocol/core@2.3.1`.
- */
-const purl = (name, version) => {
-  const scoped = name.startsWith("@");
-  const encoded = scoped ? `%40${name.slice(1)}` : name;
-  return `pkg:npm/${encoded}@${version}`;
 };
 
 /**
@@ -193,7 +180,7 @@ const components = entries.map((entry) => {
     name: entry.name,
     version: entry.version,
     scope: entry.optional ? "optional" : "required",
-    purl: purl(entry.name, entry.version),
+    purl: npmPurl(entry.name, entry.version),
     properties: [],
     externalReferences: externalReferences(entry.resolved),
     ...(hash === undefined ? {} : { hashes: [{ alg: "SHA-512", content: hash }] }),
@@ -209,7 +196,7 @@ const rootComponent = {
   version: manifest.version,
   scope: "required",
   ...(typeof manifest.description === "string" ? { description: manifest.description } : {}),
-  purl: purl(manifest.name, manifest.version),
+  purl: npmPurl(manifest.name, manifest.version),
   properties: [],
   externalReferences: [
     ...(typeof manifest.repository?.url === "string"
@@ -290,8 +277,8 @@ const contents = `${JSON.stringify(
  * a document that parses and is wrong.
  */
 const selfChecks = [
-  ["purl, scoped", purl("@scope/name", "1.2.3"), "pkg:npm/%40scope/name@1.2.3"],
-  ["purl, unscoped", purl("name", "1.2.3"), "pkg:npm/name@1.2.3"],
+  ["purl, scoped", npmPurl("@scope/name", "1.2.3"), "pkg:npm/%40scope/name@1.2.3"],
+  ["purl, unscoped", npmPurl("name", "1.2.3"), "pkg:npm/name@1.2.3"],
   ["spdx id", JSON.stringify(licenseEntry("Apache-2.0")), '{"license":{"id":"Apache-2.0"}}'],
   [
     "spdx name",

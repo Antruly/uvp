@@ -1,0 +1,332 @@
+name: Publish to GitHub Packages
+
+# Publishes the scoped mirror `@antruly/uvp-agents` for a release tag, by hand.
+#
+# **Why a second name.** GitHub Packages only stores scoped npm packages, and its
+# package names and scopes must be lowercase. The canonical package is
+# `uvp-agents` on registry.npmjs.org; this workflow derives
+# `@antruly/uvp-agents` from the tagged tree, rewrites the SBOM to match it, and
+# uploads that. npmjs stays canonical: `server.json` and the MCP registry entry
+# still name `uvp-agents`, and the mirror keeps the canonical runtime identity,
+# so `uvp --version` prints `uvp-agents <version>` and `uvp mcp setup` recommends
+# the npmjs install that works without a GitHub token.
+#
+# **The credential.** The job publishes with the workflow's `GITHUB_TOKEN` and
+# `packages: write`; there is no PAT and no npm trusted-publisher entry, because
+# trusted publishing is npmjs's mechanism. The publish does not pass
+# `--provenance`: npmjs generates and stores that attestation, and this
+# repository has no observation that GitHub Packages accepts it. The mirror
+# therefore carries no provenance claim.
+#
+# **What the run does not establish.** The first publish of any package on
+# GitHub Packages is private, and installs from GitHub Packages require an
+# authenticated token even after the package is made public. Neither visibility
+# nor unauthenticated access is something this workflow can establish; the
+# maintainer sets visibility in the package's settings, and the run verifies
+# only what the registry reports and what an authenticated install gets.
+#
+# **Why it is not a tag trigger.** The same reason `publish.yml` gives:
+# release-please creates the tag with the job's `GITHUB_TOKEN`, and GitHub does
+# not start workflows from events that token causes. A dispatch names the tag,
+# and the first step proves the checkout is exactly that tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to mirror, e.g. uvp-agents-0.2.0"
+        required: true
+        type: string
+      dry_run:
+        description: "Prepare, pack, and inspect without contacting GitHub Packages"
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: publish-github-packages
+  cancel-in-progress: false
+
+env:
+  HUSKY: "0"
+
+jobs:
+  publish:
+    name: Publish @antruly/uvp-agents to GitHub Packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The whole credential for GitHub Packages: the workflow's own token,
+      # scoped to packages in this repository.
+      packages: write
+    env:
+      # The dispatch input reaches the shell only through the environment, never
+      # by substitution into the script text.
+      TAG: ${{ inputs.tag }}
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the checkout is exactly the tag
+        run: |
+          set -euo pipefail
+          tag="$TAG"
+          commit="$(git rev-parse HEAD)"
+          tagged="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          if [ "$commit" != "$tagged" ]; then
+            echo "HEAD is ${commit}, but tag ${tag} points at ${tagged}."
+            exit 1
+          fi
+          exact="$(git describe --tags --exact-match HEAD)"
+          if [ "$exact" != "$tag" ]; then
+            echo "The checkout is not exactly ${tag}: git describe says ${exact}."
+            exit 1
+          fi
+          echo "checked out ${tag} at ${commit}"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # No `registry-url`: that would make GitHub Packages the default
+          # registry for `npm ci` too, and its dependencies come from npmjs.
+          # The scope mapping below routes only `@antruly` there.
+          package-manager-cache: false
+
+      - name: Route the @antruly scope to GitHub Packages
+        run: |
+          set -euo pipefail
+          # The token stays an environment reference (`${NODE_AUTH_TOKEN}`) in
+          # npm's own config syntax; npm substitutes it when it reads the file,
+          # so the secret is not written into the runner's filesystem.
+          {
+            echo '@antruly:registry=https://npm.pkg.github.com/'
+            echo '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}'
+          } >> "$HOME/.npmrc"
+
+      - name: Cache npm package downloads
+        uses: ./.github/actions/npm-cache
+
+      - run: npm ci
+      - run: npm run compile
+
+      - name: Verify the canonical tree and the tag name one version
+        run: node scripts/verify-release-version.mjs --tag "$TAG"
+
+      - name: Validate generated documentation against the contracts
+        run: npm run docs:check
+
+      - name: The tagged tree is unchanged by the build
+        run: |
+          set -euo pipefail
+          # `npm ci` writes node_modules and `npm run compile` writes dist, both
+          # gitignored. Anything else means the tagged tree is not what would be
+          # mirrored. This runs before the derivation step, which deliberately
+          # rewrites package.json, the lockfile, and the SBOM.
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "The tree is dirty after the build:"
+            echo "$dirty"
+            exit 1
+          fi
+
+      - name: The canonical tree packs reproducibly
+        run: npm run verify:pack-reproducible
+
+      - name: Check the scoped-name rule
+        run: node scripts/prepare-github-packages.mjs --self-check
+
+      - name: Derive the scoped mirror
+        # Rewrites package.json, package-lock.json's root name, and the SBOM.
+        # server.json, src/generatedPackageMetadata.ts and dist stay canonical.
+        run: node scripts/prepare-github-packages.mjs --scope antruly
+
+      - name: The derived tree packs reproducibly
+        # The same four packs as the canonical run. The name changed, so this is
+        # not the canonical result repeated: it is the artifact this job will
+        # upload.
+        run: npm run verify:pack-reproducible
+
+      - name: Pack the exact archive that would be published
+        id: pack
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+          npm pack --pack-destination .cache --json > .cache/pack.json
+          node -e '
+            const { appendFileSync, readFileSync } = require("node:fs");
+            const [entry] = JSON.parse(readFileSync(".cache/pack.json", "utf8"));
+            appendFileSync(process.env.GITHUB_OUTPUT, `filename=${entry.filename}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `integrity=${entry.integrity}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `name=${entry.name}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `version=${entry.version}\n`);
+            console.log(`${entry.name}@${entry.version} ${entry.filename} ${entry.integrity}`);
+          '
+
+      - name: Inspect the archive's contents
+        env:
+          PACKED_FILENAME: ${{ steps.pack.outputs.filename }}
+          PACKED_NAME: ${{ steps.pack.outputs.name }}
+          PACKED_VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball=".cache/${PACKED_FILENAME}"
+          listing="$(tar -tzf "$tarball")"
+          printf '%s\n' "$listing"
+          for required in package/package.json package/scripts/uvp.mjs package/sbom.cdx.json; do
+            if ! printf '%s\n' "$listing" | grep -qx "$required"; then
+              echo "The archive does not contain ${required}."
+              exit 1
+            fi
+          done
+
+          # The manifest inside the tarball is the one the registry reads.
+          tar -xzOf "$tarball" package/package.json > .cache/packed-package.json
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const packed = JSON.parse(readFileSync(".cache/packed-package.json", "utf8"));
+            const expected = {
+              name: process.env.PACKED_NAME,
+              version: process.env.PACKED_VERSION,
+              registry: "https://npm.pkg.github.com",
+            };
+            for (const [field, wanted] of Object.entries(expected)) {
+              const actual = field === "registry" ? packed.publishConfig?.registry : packed[field];
+              if (actual !== wanted) {
+                console.error(`packed package.json ${field} is ${JSON.stringify(actual)}, expected ${JSON.stringify(wanted)}`);
+                process.exit(1);
+              }
+            }
+            console.log(`packed manifest names ${packed.name}@${packed.version} for ${expected.registry}`);
+          '
+
+          # The SBOM that ships is the one `prepare-github-packages.mjs` wrote and
+          # validated, not a second copy that happens to parse. Compare bytes.
+          tar -xzOf "$tarball" package/sbom.cdx.json > .cache/packed-sbom.json
+          if ! cmp -s sbom.cdx.json .cache/packed-sbom.json; then
+            echo "The tarball's sbom.cdx.json is not the file prepared for the mirror."
+            exit 1
+          fi
+          echo "the tarball carries the prepared SBOM byte for byte"
+
+      - name: Publish the inspected tarball
+        if: ${{ inputs.dry_run == false }}
+        env:
+          PACKED_FILENAME: ${{ steps.pack.outputs.filename }}
+        # Publishing the tarball rather than the directory means the bytes
+        # GitHub Packages receives are the bytes every check above read.
+        # `--ignore-scripts` matches the reproducibility check.
+        run: npm publish ".cache/${PACKED_FILENAME}" --registry https://npm.pkg.github.com --ignore-scripts
+
+      - name: Verify the registry's answer
+        if: ${{ inputs.dry_run == false }}
+        env:
+          PACKED_NAME: ${{ steps.pack.outputs.name }}
+          PACKED_VERSION: ${{ steps.pack.outputs.version }}
+          PACKED_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          npm view "${PACKED_NAME}@${PACKED_VERSION}" --registry https://npm.pkg.github.com --json \
+            > .cache/registry.json
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const registry = JSON.parse(readFileSync(".cache/registry.json", "utf8"));
+            const expected = {
+              version: process.env.PACKED_VERSION,
+              integrity: process.env.PACKED_INTEGRITY,
+            };
+            if (registry.version !== expected.version) {
+              console.error(`The registry reports version ${registry.version}, expected ${expected.version}.`);
+              process.exit(1);
+            }
+            if (registry.dist?.integrity !== expected.integrity) {
+              console.error(`The registry holds ${registry.dist?.integrity}, but this run packed ${expected.integrity}.`);
+              process.exit(1);
+            }
+            console.log(`GitHub Packages serves ${registry.name}@${registry.version} with the digest this run packed.`);
+            console.log(`tarball: ${registry.dist?.tarball}`);
+          '
+
+      - name: Install the mirror from GitHub Packages into an empty prefix
+        if: ${{ inputs.dry_run == false }}
+        env:
+          PACKED_NAME: ${{ steps.pack.outputs.name }}
+          PACKED_VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/prefix
+          # From the registry, not from the local tarball: this is what an
+          # authenticated consumer gets.
+          npm install --global --prefix "$PWD/.cache/prefix" \
+            --ignore-scripts \
+            "${PACKED_NAME}@${PACKED_VERSION}"
+
+      - name: Exercise the CLI from the mirror
+        if: ${{ inputs.dry_run == false }}
+        env:
+          PACKED_VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          export PATH="$PWD/.cache/prefix/bin:$PATH"
+          # The mirror keeps the canonical runtime identity, deliberately: the
+          # package name `@antruly/uvp-agents` is the distribution name, while
+          # `dist` was built from the canonical tree. A reader of this run
+          # should see that rather than a silent difference.
+          expected="uvp-agents ${PACKED_VERSION}"
+          reported="$(uvp --version)"
+          if [ "$reported" != "$expected" ]; then
+            echo "uvp --version printed '$reported', expected '$expected'"
+            exit 1
+          fi
+          uvp --help
+          doctor_status=0
+          uvp doctor --json > .cache/doctor.json || doctor_status=$?
+          if [ "$doctor_status" -ne 1 ]; then
+            echo "uvp doctor exited $doctor_status; expected 1 on a runner with no libuvcpp"
+            exit 1
+          fi
+          node -e '
+            const report = JSON.parse(require("node:fs").readFileSync(".cache/doctor.json", "utf8"));
+            if (report.libuvcpp?.found !== false) {
+              console.error(`the doctor reported libuvcpp.found = ${JSON.stringify(report.libuvcpp?.found)}, and this runner has none`);
+              process.exit(1);
+            }
+            console.log("uvp doctor reports the missing libuvcpp rather than failing on it");
+          '
+
+      - name: Exercise the stdio MCP contract from the mirror
+        if: ${{ inputs.dry_run == false }}
+        run: npm run test:packaged-mcp
+        env:
+          UVP_PACKAGED_BIN: ${{ github.workspace }}/.cache/prefix/bin/uvp
+
+      - name: Record what was published
+        env:
+          PACKED_FILENAME: ${{ steps.pack.outputs.filename }}
+          PACKED_NAME: ${{ steps.pack.outputs.name }}
+          PACKED_VERSION: ${{ steps.pack.outputs.version }}
+          PACKED_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### ${PACKED_NAME} ${PACKED_VERSION}"
+            echo ""
+            echo "- tag: \`${TAG}\`"
+            echo "- tarball: \`${PACKED_FILENAME}\`"
+            echo "- integrity: \`${PACKED_INTEGRITY}\`"
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "- mode: **dry run** — prepared, packed, inspected, and checked; nothing was uploaded and the registry checks were skipped."
+            else
+              echo "- mode: published to GitHub Packages; the registry digest and an authenticated clean install were verified above."
+            fi
+            echo "- canonical identity: \`server.json\`, \`dist\`, and the MCP registry still name \`uvp-agents\` on registry.npmjs.org."
+            echo "- visibility: **not changed by this workflow.** A first publish is private; set the package's visibility in its settings."
+            echo "- provenance: not requested; npmjs provenance is not claimed for this mirror."
+          } >> "$GITHUB_STEP_SUMMARY"
