@@ -86,7 +86,7 @@ Agent 会生成工作区、编译、运行、发起请求，最后交回一个�
 ```bash
 uvp init ./svc --name svc --template rest-api --port 8080 --features websocket
 uvp build ./svc
-uvp run ./svc --ready-port 8080
+uvp run ./svc --port 8080
 uvp http GET http://127.0.0.1:8080/items/1 --json
 uvp stop --all
 ```

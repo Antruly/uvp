@@ -45,9 +45,13 @@ can walk away from uvp and keep the project.
 ### Requirements
 
 - Node.js `^22.19.0 || ^24.11.0 || >=26.0.0`
-- A C++14 toolchain (`g++` or `clang++`) and CMake 3.20+
+- A C++14 toolchain (`g++` or `clang++`; MSVC 2019+ on Windows) and CMake 3.20+
 - [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 or newer**, either
   `cmake --install`ed or unpacked from a release archive
+
+On Windows, the archive route needs a real `pkg-config.exe` and a Release build;
+[installation.md](docs/installation.md#windows-msvc)
+has the exact steps.
 
 Run the doctor first. It reports what is present, what is missing, and which
 capabilities each gap actually blocks — rather than failing as one monolith:
@@ -89,7 +93,7 @@ back as structured data and the agent can fix them.
 ```bash
 uvp init ./svc --name svc --template rest-api --port 8080 --features websocket
 uvp build ./svc
-uvp run ./svc --ready-port 8080
+uvp run ./svc --port 8080
 uvp http GET http://127.0.0.1:8080/items/1 --json
 uvp stop --all
 ```
