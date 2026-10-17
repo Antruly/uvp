@@ -1,5 +1,16 @@
-import { asBoolean, asList, asNumber, asString, parseCsv, requirePositional } from "../args.js";
+import { basename } from "node:path";
+
+import {
+  asBoolean,
+  asList,
+  asNumber,
+  asString,
+  flagError,
+  parseCsv,
+  requirePositional,
+} from "../args.js";
 import type { CommandSpec } from "../commandSpec.js";
+import { workspaceNameProblem } from "../../domain/workspaceName.js";
 
 /**
  * `uvp init`.
@@ -65,13 +76,27 @@ export const initCommand: CommandSpec = {
     const port = asNumber(parsed, "port");
     const features = parseCsv(asList(parsed, "features"));
     const force = asBoolean(parsed, "force");
+    // `--name` is not optional in practice, but the contract has no default for
+    // it. The name defaults to the directory's basename, which is what a caller
+    // who typed only a path meant — read with `node:path` so that a Windows
+    // path is a path on Windows rather than one string with backslashes in it.
+    //
+    // A derived name that cannot be a CMake target is refused here rather than
+    // sent to the contract: the caller did not choose it, and the remedy that
+    // works is on this command line (`--name`), not in a schema error.
+    const derivedName = name === undefined ? defaultWorkspaceName(path) : undefined;
+    if (derivedName !== undefined) {
+      const problem = workspaceNameProblem(derivedName);
+      if (problem !== undefined) {
+        flagError(
+          `Cannot derive a workspace name from "${path}": it yields "${derivedName}". ${problem}`,
+          { usage: "uvp init PATH --name NAME", name: derivedName },
+        );
+      }
+    }
     return {
       path,
-      // `--name` is not optional in practice, but the contract has no default for
-      // it and refusing here would duplicate the contract's own "required" rule.
-      // The name defaults to the directory's basename, which is what a caller who
-      // typed only a path meant.
-      ...(name === undefined ? { name: basename(path) } : { name }),
+      ...(derivedName === undefined ? { name } : { name: derivedName }),
       ...(template === undefined ? {} : { template }),
       ...(port === undefined ? {} : { port }),
       ...(features.length === 0 ? {} : { features }),
@@ -80,9 +105,15 @@ export const initCommand: CommandSpec = {
   },
 };
 
-const basename = (path: string): string => {
-  const trimmed = path.replace(/\/+$/u, "");
-  const at = trimmed.lastIndexOf("/");
-  const name = at === -1 ? trimmed : trimmed.slice(at + 1);
-  return name === "" || name === "." ? "uvp-service" : name;
+/**
+ * The name a caller who typed only a path meant.
+ *
+ * `.`, `..`, and the root directory have no basename that can serve as a name,
+ * so they take the same fallback the command always used. Everything else is
+ * the platform's own basename; whether it is a usable name is the validator's
+ * question, not this function's.
+ */
+const defaultWorkspaceName = (path: string): string => {
+  const name = basename(path);
+  return name === "" || name === "." || name === ".." ? "uvp-service" : name;
 };

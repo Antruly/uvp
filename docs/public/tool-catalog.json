@@ -455,7 +455,8 @@
           "name": {
             "type": "string",
             "minLength": 1,
-            "description": "Project name; used for the CMake target and the default binary name."
+            "pattern": "^(?!(?:all|clean|help|install|preinstall|edit_cache|rebuild_cache|ALL_BUILD|ZERO_CHECK|INSTALL)$)(?!(?:[Cc][Oo][Nn]|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][1-9]|[Ll][Pp][Tt][1-9])(?:\\..*)?$)(?!.*\\.$)[A-Za-z0-9_][A-Za-z0-9._+-]*$",
+            "description": "Project name; used for the CMake target and the default binary name. Use letters, digits, '_', '.', '+' or '-', starting with a letter, digit or '_'; CMake's reserved target names, Windows device names, and a trailing dot are not allowed."
           },
           "template": {
             "default": "hello-http",
