@@ -1116,11 +1116,12 @@ substitution rather than the behaviour, and #61's fix removes them along with th
 siblings the compiler already refuses. The comparator is a scratch script under `/tmp`,
 so these numbers are quotable but not re-runnable from the repository — the same gap
 [#57](https://github.com/Antruly/uvp/issues/57) records for #54's. The sweep's other
-**62** survivors are still unread — `bundleDiff.ts` 54 (52 readable), `evidence.ts` 8
-(2), `ToolchainProvider.ts` 5 — **54** readable once the classification below is
-applied. The baseline's **78** have shrunk because tests the earlier reads added killed
-seven of them, and the four `unknown.ts` survivors and five `ToolchainProvider.ts`
-survivors read below are the next nine.
+**60** survivors are still unread — `bundleDiff.ts` 54 (52 readable) and the six in
+`evidence.ts` this read leaves all compiler-refused — **52** readable once the
+classification below is applied. The baseline's **78** had already shrunk to **71**
+because tests the earlier reads added killed seven of them, five of those in
+`evidence.ts`, and the four `unknown.ts` and five `ToolchainProvider.ts` survivors read
+below are the next nine.
 
 **`unknown.ts`'s four have been read, and all four are pinned**
 ([#66](https://github.com/Antruly/uvp/issues/66)). The file is the vocabulary for
@@ -1147,6 +1148,18 @@ mentioning the header, so the two third-state sentences were interchangeable. Bo
 now asserted exactly, because which sentence a caller reads is what tells them whether
 they forgot to supply a probe or the install could not be read. The file measures
 **100.00%** on the branch, 90 killed of 90, against 94.44% before the read.
+
+**`evidence.ts`'s have been read, and what is left is the compiler's** ([#65](https://github.com/Antruly/uvp/issues/65)).
+The fresh report left eight survivors: six enum members whose `""` mutation cannot flow
+into the literal uses downstream — three of `evidence_kind` (one is `"comparison"`, the
+kind that says a record looked at nothing), the `coverage.status` member, and two of
+`evidence_sources.kind` — and the two anchors of the `^ev_[0-9a-f]{22}$` id grammar.
+The two readable ones are pinned by a boundary table over `evidence_id`: 22 hex digits
+accepted; 21 and 23 refused; trailing characters refused; an `ev_` that does not start
+the id refused; a different prefix refused. The remaining six survivors are the
+compiler-refused rows, measured by `scripts/mutation-survivor-kinds.mjs` rather than
+assumed: all six are `TS2322`, so the file measures **85.00%** — 34 killed of 40 — and
+the gap is damage `npm run compile` refuses, not an assertion the suite is missing.
 
 **A third of the survivor table is damage the build refuses, which segments the
 queue without shrinking it.** [#56](https://github.com/Antruly/uvp/issues/56) is the
