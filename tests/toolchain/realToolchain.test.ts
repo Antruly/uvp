@@ -16,6 +16,7 @@ import {
   runCli,
   skipReason,
   startService,
+  waitForOutput,
 } from "../support/realLibuvcpp.js";
 import type { RealLibuvcpp } from "../support/realLibuvcpp.js";
 
@@ -183,7 +184,17 @@ const http3Service = async (): Promise<void> => {
     // the UDP port the endpoint was bound on — so this is an observation that the
     // leg this template exists for was opened, which no number of TCP requests
     // could establish.
-    expect(service.output()).toMatch(/HTTP\/3 over QUIC on UDP \d+/u);
+    //
+    // Waited for rather than sampled: readiness is a TCP connection, and the
+    // notice is printed after `server.listen()` returns, so a probe can connect
+    // before the line exists. The bound is what keeps this an observation: the
+    // row asserts the line appeared within it, and the tail is printed when it
+    // did not.
+    const notice = await waitForOutput(service, /HTTP\/3 over QUIC on UDP \d+/u);
+    expect(
+      notice,
+      `the http3-service never printed its QUIC notice within 5s\n${service.output()}`,
+    ).toBeDefined();
 
     // The TCP leg over TLS. `--no-tls` because the certificate is the one the
     // template generates for itself: no client should accept it, and the lane

@@ -395,6 +395,35 @@ export interface Service {
   stop(): Promise<{ readonly escalated: boolean; readonly code: number | null }>;
 }
 
+/**
+ * Wait for a service's captured output to match, up to a bound.
+ *
+ * `startService` resolves on a TCP **connection**, not on a line in the log.
+ * The `http3-service` template prints its QUIC notice after `server.listen()`
+ * returns (`src/application/templates.ts`), and a listening socket accepts a
+ * connection as soon as `listen()` is called — so a probe can connect in the
+ * window before the print runs, which is what made one lane run read the tail
+ * before the notice existed ([#173](https://github.com/Antruly/uvp/issues/173)).
+ *
+ * The observation the lane needs is the line, so wait for the line rather than
+ * sampling the tail at one instant. Returns the matched output, or `undefined`
+ * when the bound expired; callers report the tail either way, so a service that
+ * never wrote the line still fails with its own output beside the assertion.
+ */
+export const waitForOutput = async (
+  service: Service,
+  pattern: RegExp,
+  timeoutMs = 5_000,
+): Promise<string | undefined> => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const output = service.output();
+    if (pattern.test(output)) return output;
+    if (Date.now() >= deadline) return undefined;
+    await sleep(20);
+  }
+};
+
 /** Services this lane started and has not yet seen exit. */
 const started = new Set<ChildProcess>();
 
