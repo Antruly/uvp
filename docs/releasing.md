@@ -497,5 +497,7 @@ the reason is visible in the registry.
 
 ## Next
 
+- [Release notes](release-notes.md) — what the first release shipped and what
+  remains unknown
 - [Testing](testing.md) — what the pre-release lane runs
 - [Roadmap](roadmap.md) — where the project is going

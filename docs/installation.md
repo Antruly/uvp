@@ -289,4 +289,5 @@ re-run `uvp doctor` there.
 - [libuvcpp feature mapping](libuvcpp-features.md) — what each feature needs
 - [First-release support matrix](support-matrix.md) — what the lanes have
   observed, derived, and left unknown
+- [Release notes](release-notes.md) — what shipped and what remains unknown
 - [MCP contracts](mcp-contracts.md) — what each tool does and touches
