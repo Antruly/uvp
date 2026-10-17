@@ -24,6 +24,12 @@ Follow the [contribution scope and fail-closed rule](CONTRIBUTING.md#contributio
 Do not integrate capabilities while material scope, authority, side-effect, or
 required-verification questions remain unresolved.
 
+A defect in libuvcpp is fixed in libuvcpp. File the issue or fix PR there, link it
+from the uvp issue, and let the maintainer decide whether uvp waits, works
+around, or narrows the claim. Do not patch libuvcpp inside uvp or in generated
+code. Other upstream dependencies follow the same rule; a uvp issue may track one
+with an upstream link and a recheck condition.
+
 ## Architecture and Cleanup
 
 Dependencies flow inward: `domain` semantics, then `contracts`, then
@@ -137,6 +143,12 @@ may merge that PR **only** after the owner has explicitly approved it on the PR,
 since a green run is evidence rather than approval. Never push to `main` directly.
 Keep the PR body and affected validation current as the work changes, and report
 only checks that actually ran.
+
+The operating workflow — roles, one owner per task, triage states, review, the
+approval packet, and the author proxy assistant's limits — is defined in
+[docs/agent-workflow.md](docs/agent-workflow.md). It is normative for every agent
+here, and it does not change the human gate above: the author completes the
+**Author readiness** declarations and is the only approver.
 
 <!-- BEGIN:turborepo-agent-rules -->
 
