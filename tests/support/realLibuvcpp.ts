@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { EXE, isWindows } from "../../src/toolchains/host.js";
+
 /**
  * The shared helper for the lanes that need a real compiler and a real libuvcpp:
  * find the install, generate a workspace, build it, run it, end it, clean up.
@@ -312,13 +314,33 @@ export const createWorkspace = async (
     port,
     root,
     buildDir,
-    binary: join(buildDir, WORKSPACE_NAME),
+    // The host names the executable, not the CMake target: on Windows the build
+    // writes `svc.exe`, and `existsSync` does not apply `CreateProcess`'s `.exe`
+    // suffix the way a spawn does. `EXE` is the product's own answer to how this
+    // host names an executable, and it is empty off Windows.
+    binary: join(buildDir, WORKSPACE_NAME + EXE),
   };
 };
 
-/** Build a generated workspace through uvp. The caller judges the result. */
+/**
+ * Build a generated workspace through uvp. The caller judges the result.
+ *
+ * On Windows the lane names Ninja and Release. The archive is a release build
+ * with the release CRT, and the Visual Studio generator is multi-configuration:
+ * `-DCMAKE_BUILD_TYPE` is ignored there, so the default build was Debug linked
+ * against a release library — two CRTs in one process, which is not a supported
+ * combination. Ninja makes the build type effective and Release matches the
+ * archive. This is the lane's route, not a change to the product's default; the
+ * default Windows generator is exercised by the source lane and its compiler
+ * probe, but not by a C++ build here.
+ */
 export const buildWorkspace = async (workspace: Workspace): Promise<CliOutcome> =>
-  await runCli(["build", workspace.root, "--json"]);
+  await runCli([
+    "build",
+    workspace.root,
+    ...(isWindows ? ["--generator", "ninja", "--build-type", "Release"] : []),
+    "--json",
+  ]);
 
 const sleep = async (ms: number): Promise<void> =>
   await new Promise((resolve) => setTimeout(resolve, ms));

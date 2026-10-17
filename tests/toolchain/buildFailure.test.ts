@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { EXIT_NO, EXIT_OK } from "../../src/cli/exitCodes.js";
 import { parseUvpError } from "../../src/domain/errors.js";
+import { isWindows } from "../../src/toolchains/host.js";
 import {
   buildWorkspace,
   cleanup,
@@ -280,11 +281,11 @@ describe.skipIf(realLibuvcpp === undefined)(
       // open the file at the failure.
       expect(String(error?.file)).toContain("main.cpp");
       expect(error?.line).toBe(lineOf(join(workspace.root, "src", "main.cpp"), BROKEN_LINE));
-      // The compiler's own words. A substring, because the exact spelling is GCC's
-      // — including the quotation marks it puts around `this`. Pinning the
-      // typography would make this test fail on a compiler upgrade for a reason
-      // that is not a regression.
-      expect(String(error?.message)).toContain("in non-member function");
+      // The compiler's own words. A substring, because the exact spelling is the
+      // toolchain's — GCC says "in non-member function", MSVC says "inside
+      // non-static member functions" — and pinning the typography would make this
+      // test fail on a compiler change for a reason that is not a regression.
+      expect(String(error?.message)).toMatch(/non-member function|non-static member function/u);
     });
 
     it("reports a configure failure by naming CMake's own error, not by promising one", async () => {
@@ -330,85 +331,95 @@ describe.skipIf(realLibuvcpp === undefined)(
       ).toBe(false);
     });
 
-    it("reports a link failure as a link failure, with the linker's own diagnostic", async () => {
-      const workspace = await generatedThenBroken("hello-http", 8100, breakLink);
-      const expectedLine = lineOf(join(workspace.root, "src", "main.cpp"), ABSENT_CALL);
+    it.skipIf(isWindows)(
+      isWindows
+        ? "reports a link failure as a link failure, with the linker's own diagnostic — skipped: MSVC link diagnostics (LNK2019/LNK2001) are deliberately unmatched"
+        : "reports a link failure as a link failure, with the linker's own diagnostic",
+      async () => {
+        const workspace = await generatedThenBroken("hello-http", 8100, breakLink);
+        const expectedLine = lineOf(join(workspace.root, "src", "main.cpp"), ABSENT_CALL);
 
-      const outcome = await buildWorkspace(workspace);
-      expect(outcome.exit).toBe(EXIT_NO);
-      const result = resultOrThrow(outcome);
-      expect(result["succeeded"]).toBe(false);
-      expect(result["exit_code"]).not.toBe(0);
-      // The compile ran and finished before the link failed, so time went into it.
-      // Zero here would be the configure case — the compiler never ran at all.
-      expect(result["compile_duration_ms"]).toBeGreaterThan(0);
+        const outcome = await buildWorkspace(workspace);
+        expect(outcome.exit).toBe(EXIT_NO);
+        const result = resultOrThrow(outcome);
+        expect(result["succeeded"]).toBe(false);
+        expect(result["exit_code"]).not.toBe(0);
+        // The compile ran and finished before the link failed, so time went into it.
+        // Zero here would be the configure case — the compiler never ran at all.
+        expect(result["compile_duration_ms"]).toBeGreaterThan(0);
 
-      const diagnostics = diagnosticsOf(result);
-      const error = diagnostics.find((entry) => entry.severity === "error");
-      expect(error, `no error diagnostic in ${JSON.stringify(diagnostics)}`).toBeDefined();
-      // **The regression.** The contract has had a `link` phase with no producer:
-      // the linker's lines name a file, a line and a section and no column, so
-      // every format the parser knew passed them by, and a link failure came back
-      // as a build that failed with an empty diagnostic list — which reads as a
-      // failure with no cause, and sends a caller back to re-run a compile that had
-      // already succeeded.
-      expect(error?.phase).toBe("link");
-      // The caller's own file and the line in it, which is what a caller needs to
-      // open the file where the missing symbol is used.
-      expect(String(error?.file)).toContain("main.cpp");
-      expect(error?.line).toBe(expectedLine);
-      // The linker's own words. A substring, because the spelling of the demangled
-      // symbol and the wording around it are the toolchain's, and pinning the whole
-      // message would make this fail on a compiler upgrade for a reason that is not
-      // a regression.
-      expect(String(error?.message)).toContain(`undefined reference to \`${ABSENT_SYMBOL}()`);
-    });
+        const diagnostics = diagnosticsOf(result);
+        const error = diagnostics.find((entry) => entry.severity === "error");
+        expect(error, `no error diagnostic in ${JSON.stringify(diagnostics)}`).toBeDefined();
+        // **The regression.** The contract has had a `link` phase with no producer:
+        // the linker's lines name a file, a line and a section and no column, so
+        // every format the parser knew passed them by, and a link failure came back
+        // as a build that failed with an empty diagnostic list — which reads as a
+        // failure with no cause, and sends a caller back to re-run a compile that had
+        // already succeeded.
+        expect(error?.phase).toBe("link");
+        // The caller's own file and the line in it, which is what a caller needs to
+        // open the file where the missing symbol is used.
+        expect(String(error?.file)).toContain("main.cpp");
+        expect(error?.line).toBe(expectedLine);
+        // The linker's own words. A substring, because the spelling of the demangled
+        // symbol and the wording around it are the toolchain's, and pinning the whole
+        // message would make this fail on a compiler upgrade for a reason that is not
+        // a regression.
+        expect(String(error?.message)).toContain(`undefined reference to \`${ABSENT_SYMBOL}()`);
+      },
+    );
 
-    it("asks the linker for English even when the caller's own locale is not English", async () => {
-      const probe = probeHostLinkerLocale();
-      // Never built successfully: this test is about the language of a failure's
-      // diagnostics and not about attributing the failure to the edit, so the extra
-      // successful build `generatedThenBroken` would do is work nothing asserts on.
-      const workspace = await createWorkspace("hello-http", 8101);
-      breakLink(workspace);
+    it.skipIf(isWindows)(
+      isWindows
+        ? "asks the linker for English even when the caller's own locale is not English — skipped: MSVC link diagnostics (LNK2019/LNK2001) are deliberately unmatched"
+        : "asks the linker for English even when the caller's own locale is not English",
+      async () => {
+        const probe = probeHostLinkerLocale();
+        // Never built successfully: this test is about the language of a failure's
+        // diagnostics and not about attributing the failure to the edit, so the extra
+        // successful build `generatedThenBroken` would do is work nothing asserts on.
+        const workspace = await createWorkspace("hello-http", 8101);
+        breakLink(workspace);
 
-      // The environment someone with a Chinese locale actually has, passed to uvp
-      // itself: the build inherits it, and this is the invocation that used to end
-      // in a diagnostic list nothing could read.
-      const outcome = await runCli(["build", workspace.root, "--json"], {
-        env: { LANG: "zh_CN.UTF-8", LC_ALL: "zh_CN.UTF-8", LC_MESSAGES: "zh_CN.UTF-8" },
-      });
-      expect(outcome.exit).toBe(EXIT_NO);
-      const diagnostics = diagnosticsOf(resultOrThrow(outcome));
-      const error = diagnostics.find((entry) => entry.severity === "error");
-      expect(error, `no error diagnostic in ${JSON.stringify(diagnostics)}`).toBeDefined();
-      expect(error?.phase).toBe("link");
-      expect(String(error?.file)).toContain("main.cpp");
-      expect(String(error?.message)).toContain(`undefined reference to \`${ABSENT_SYMBOL}()`);
+        // The environment someone with a Chinese locale actually has, passed to uvp
+        // itself: the build inherits it, and this is the invocation that used to end
+        // in a diagnostic list nothing could read.
+        const outcome = await runCli(["build", workspace.root, "--json"], {
+          env: { LANG: "zh_CN.UTF-8", LC_ALL: "zh_CN.UTF-8", LC_MESSAGES: "zh_CN.UTF-8" },
+        });
+        expect(outcome.exit).toBe(EXIT_NO);
+        const diagnostics = diagnosticsOf(resultOrThrow(outcome));
+        const error = diagnostics.find((entry) => entry.severity === "error");
+        expect(error, `no error diagnostic in ${JSON.stringify(diagnostics)}`).toBeDefined();
+        expect(error?.phase).toBe("link");
+        expect(String(error?.file)).toContain("main.cpp");
+        expect(String(error?.message)).toContain(`undefined reference to \`${ABSENT_SYMBOL}()`);
 
-      if (probe.localized) {
-        // The same `ld`, on the same host, asked by the environment rather than by
-        // uvp — the contrast is the evidence, and this is the text that would have
-        // reached the parser had the build not set the language its output is read
-        // in. `localized` already means the wording is not the English one, so what
-        // is asserted here is the separate fact that a translated catalogue was
-        // loaded at all: a message carrying a non-ASCII byte is one no pattern in
-        // `src/toolchains/diagnostics.ts` matches.
-        expect(
-          /\P{ASCII}/u.test(probe.said),
-          `the probe answered, but in ASCII: ${probe.said}`,
-        ).toBe(true);
-      } else {
-        // Named rather than silent, and in the output: a host whose linker does not
-        // localize cannot show the half that matters, so the run says so instead of
-        // passing as though it had.
-        console.log(
-          "locale probe: this host's ld did not answer in another language " +
-            `(${probe.said === "" ? "it printed nothing" : probe.said}), so the hostile ` +
-            "environment was not shown to change anything — only the English half is asserted",
-        );
-      }
-    });
+        if (probe.localized) {
+          // The same `ld`, on the same host, asked by the environment rather than by
+          // uvp — the contrast is the evidence, and this is the text that would have
+          // reached the parser had the build not set the language its output is read
+          // in. `localized` already means the wording is not the English one, so what
+          // is asserted here is the separate fact that a translated catalogue was
+          // loaded at all: a message carrying a non-ASCII byte is one no pattern in
+          // `src/toolchains/diagnostics.ts` matches.
+          expect(
+            /\P{ASCII}/u.test(probe.said),
+            `the probe answered, but in ASCII: ${probe.said}`,
+          ).toBe(true);
+        } else {
+          // Named rather than silent, and in the output: a host whose linker does not
+          // localize cannot show the half that matters, so the run says so instead of
+          // passing as though it had.
+          console.log(
+            "locale probe: this host's ld did not answer in another language " +
+              `(${probe.said === "" ? "it printed nothing" : probe.said}), so the hostile ` +
+              "environment was not shown to change anything — only the English half is asserted",
+          );
+        }
+      },
+    );
 
     it("refuses to launch a workspace that failed to build", async () => {
       // The join between this lane and `process-boundary`: a build that failed

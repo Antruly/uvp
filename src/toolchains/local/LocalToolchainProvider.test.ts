@@ -6,8 +6,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { toUvpError, type UvpError } from "../../domain/errors.js";
+import { isWindows } from "../host.js";
+import { renderCommand } from "../processRunner.js";
+import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
-import { assignmentOf } from "../../../tests/support/recordedCommand.js";
+import { assignmentOf, wordsOf } from "../../../tests/support/recordedCommand.js";
 import { removeTree } from "../../../tests/support/temporaryTree.js";
 import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
 
@@ -65,8 +68,8 @@ const fakeInstall = (root: string, version: string): string => {
 };
 
 /**
- * The second thing a Windows host does differently here, and why it is not a bug
- * in this file's fake.
+ * The runner the build tests use on a host whose `cmake` stand-in cannot be
+ * started.
  *
  * The provider chooses this command's arguments — `-S <ws> -B <build>` to
  * configure, `--build <build>` to compile. On Windows the `cmake` on `PATH` is a
@@ -80,22 +83,36 @@ const fakeInstall = (root: string, version: string): string => {
  *     node: bad option: --build                   → exit 9
  *
  * Nothing is imported in that run, which is why the program the fake carries
- * never executes and the configure the assertions read never happened. A fake
- * that receives the arguments *it* is handed (a service `uvp_run` starts) has no
- * such problem: the program is the first argument, so Node finds a script before
- * it finds an option. This is the price of the provider choosing the argv, and the
- * ways out are a `run` seam on this provider — which is what the container
- * provider already has — or an executable image that is not Node. #22 records
- * both and leaves the choice to a maintainer.
+ * never executes and the configure the assertions read never happened. #22
+ * recorded that wall and left the product change to a maintainer; #11 is the
+ * Windows C++ lane that needs it, so the provider now takes a `run` slot
+ * (`LocalProviderOptions`) and this file uses it on Windows.
+ *
+ * What the injected runner does **not** establish is that the host can start
+ * `cmake`. It answers the request the provider would have made, rendering the
+ * command line through the same `renderCommand` that `runProcess` uses, so the
+ * assertions below still read the product's decision rather than a second
+ * spelling of it. On every other host the real runner is used and the real child
+ * is started; the Windows toolchain lane is where a real `cmake` runs on that
+ * platform.
  */
-const argvGap =
-  process.platform === "win32"
-    ? "the provider chooses `cmake`'s argv, and a Node-backed fake reads `-S`/`--build` as its own bad options (exit 9, no program run) — see #22"
-    : undefined;
-
-/** `title`, with the reason attached on the host that cannot run it. */
-const named = (title: string, reason: string | undefined): string =>
-  reason === undefined ? title : `${title} — skipped: ${reason}`;
+const syntheticRun = async (options: RunProcessOptions): Promise<ProcessOutcome> => {
+  const aborted = options.signal?.aborted === true;
+  return {
+    command: renderCommand(options),
+    exitCode: aborted ? null : 0,
+    signal: null,
+    timedOut: false,
+    aborted,
+    durationMs: 0,
+    stdout: "",
+    stderr: "",
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+  };
+};
 
 let root: string;
 let workspacePath: string;
@@ -115,8 +132,9 @@ const signal = new AbortController().signal;
  * A program, not a banner in a script: the provider chooses this command's
  * arguments itself, so the program is baked into the fake rather than passed to
  * it, and the two hosts bake it in differently. See
- * `tests/support/fakeExecutable.ts` for the two mechanisms, and `argvGap` above
- * for what a host that bakes it in through the environment still cannot do.
+ * `tests/support/fakeExecutable.ts` for the two mechanisms. The build tests start
+ * this fake on POSIX; on Windows they use the injected `syntheticRun`, because a
+ * copy of Node cannot be handed `-S`/`--build`.
  */
 const SUCCEEDS_QUIETLY = fileURLToPath(
   new URL("../../../tests/support/fixtures/succeedsQuietly.mjs", import.meta.url),
@@ -130,7 +148,8 @@ beforeAll(async () => {
 
   // A `cmake` whose arguments mean nothing to it: exits 0 and says nothing. On
   // Windows it is a copy of Node answering its own `bad option` for the build
-  // commands — that is `argvGap`, and it is why two tests below are skipped there.
+  // commands; the build tests below therefore use `buildProvider`, whose injected
+  // runner answers the provider's request without starting that copy.
   const bin = join(root, "bin");
   const cmake = await installFakeTool(bin, "cmake", { module: SUCCEEDS_QUIETLY });
 
@@ -176,9 +195,20 @@ afterAll(async () => {
 
 const provider = new LocalToolchainProvider();
 
+/**
+ * The provider the build assertions use.
+ *
+ * On Windows it is the same provider with a runner that answers instead of
+ * starting a Node copy; on every other host it is `provider`, so the real
+ * `spawn` stays part of the evidence.
+ */
+const buildProvider: LocalToolchainProvider = isWindows
+  ? new LocalToolchainProvider({ run: syntheticRun })
+  : provider;
+
 /** Build the workspace the way a workflow does: without naming a prefix. */
 const buildWithoutPrefix = async () =>
-  await provider.createClient().build({
+  await buildProvider.createClient().build({
     workspacePath,
     buildDir,
     buildType: "Debug",
@@ -241,7 +271,7 @@ describe("the libuvcpp a build points CMake at", () => {
     // Discovery must not overrule it — a caller naming a specific build is
     // naming it on purpose, and that install is the one its workspace's CMake
     // will be judged against.
-    const outcome = await provider.createClient().build({
+    const outcome = await buildProvider.createClient().build({
       workspacePath,
       buildDir,
       buildType: "Debug",
@@ -283,24 +313,56 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(configure.slice(configure.indexOf("cmake"))).toContain("cmake -S ");
   });
 
-  it.skipIf(argvGap !== undefined)(
-    named("records the compile as a second command, with the locale pin and no prefix", argvGap),
-    async () => {
-      // `cmake --build` does not search for anything: the configure already wrote the
-      // paths into the build tree, so a prefix here would be noise in the record, and
-      // noise in a record is where a caller stops reading it. The locale pin is the
-      // other half and is not conditional — this is the step the compiler and the
-      // linker print in, and the step whose output is parsed, so it is the one where
-      // re-running the recorded line without it would answer in another language.
-      const outcome = await buildWithoutPrefix();
-      expect(outcome.commands).toHaveLength(2);
-      const compile = outcome.commands[1] ?? "";
-      expect(assignmentOf(compile, "CMAKE_PREFIX_PATH")).toBeUndefined();
-      expect(assignmentOf(compile, "LC_MESSAGES")).toBe("C");
-      expect(compile.endsWith(`cmake --build ${buildDir}`)).toBe(true);
-      expect(outcome.succeeded).toBe(true);
-    },
-  );
+  it("records the compile as a second command, with the locale pin and no prefix", async () => {
+    // `cmake --build` does not search for anything: the configure already wrote the
+    // paths into the build tree, so a prefix here would be noise in the record, and
+    // noise in a record is where a caller stops reading it. The locale pin is the
+    // other half and is not conditional — this is the step the compiler and the
+    // linker print in, and the step whose output is parsed, so it is the one where
+    // re-running the recorded line without it would answer in another language.
+    const outcome = await buildWithoutPrefix();
+    expect(outcome.commands).toHaveLength(2);
+    const compile = outcome.commands[1] ?? "";
+    expect(assignmentOf(compile, "CMAKE_PREFIX_PATH")).toBeUndefined();
+    expect(assignmentOf(compile, "LC_MESSAGES")).toBe("C");
+    // Read the record in its own notation rather than as raw text. On Windows
+    // the build directory is single-quoted because it contains backslashes, so an
+    // `endsWith` comparison fails on the quoting rather than on the command; the
+    // last two words are the claim either way.
+    expect(wordsOf(compile).slice(-2)).toEqual(["--build", buildDir]);
+    expect(outcome.succeeded).toBe(true);
+  });
+});
+
+describe("the process runner a local build is given", () => {
+  it("uses that runner for both steps, rather than starting cmake itself", async () => {
+    // The seam's own claim, on every host. The assertions on the requests are the
+    // provider's decisions — the arguments it chooses and the environment it
+    // builds — not a second copy of the command line.
+    const seen: RunProcessOptions[] = [];
+    const scripted = new LocalToolchainProvider({
+      run: async (options) => {
+        seen.push(options);
+        return await syntheticRun(options);
+      },
+    });
+
+    const outcome = await scripted.createClient().build({
+      workspacePath,
+      buildDir,
+      buildType: "Debug",
+      clean: false,
+      timeoutMs: 60_000,
+      configureOnly: false,
+      signal,
+    });
+
+    expect(seen.map((call) => call.command)).toEqual(["cmake", "cmake"]);
+    expect(seen[0]?.args.slice(0, 4)).toEqual(["-S", workspacePath, "-B", buildDir]);
+    expect(seen[1]?.args.slice(0, 2)).toEqual(["--build", buildDir]);
+    expect(outcome.commands).toHaveLength(2);
+    expect(outcome.succeeded).toBe(true);
+  });
 });
 
 /**
@@ -359,33 +421,30 @@ describe("a call whose signal was already aborted", () => {
     expect(failure.message).toContain("cancelled");
   });
 
-  it.skipIf(argvGap !== undefined)(
-    named("names a cancelled build, rather than a workspace that does not compile", argvGap),
-    async () => {
-      // The control: this workspace has no `CMakeLists.txt`, and `cmake` here is a
-      // program that always exits 0, so the same build with a live signal reports
-      // success. A `succeeded: false` reached by aborting would therefore be a claim
-      // about code that nothing compiled, and the control is what rules out a second
-      // reason for it to fail.
-      expect((await buildWithoutPrefix()).succeeded).toBe(true);
+  it("names a cancelled build, rather than a workspace that does not compile", async () => {
+    // The control: this workspace has no `CMakeLists.txt`, and `cmake` here is a
+    // program that always exits 0, so the same build with a live signal reports
+    // success. A `succeeded: false` reached by aborting would therefore be a claim
+    // about code that nothing compiled, and the control is what rules out a second
+    // reason for it to fail.
+    expect((await buildWithoutPrefix()).succeeded).toBe(true);
 
-      const failure = await failureOf(() =>
-        provider.createClient().build({
-          workspacePath,
-          buildDir,
-          buildType: "Debug",
-          clean: false,
-          timeoutMs: 60_000,
-          configureOnly: false,
-          // A prefix is named so the build reaches the process it would have run:
-          // without one it stops in the search instead, which is the test above.
-          libuvcppPrefix: otherPrefix,
-          signal: withdrawn(),
-        }),
-      );
+    const failure = await failureOf(() =>
+      buildProvider.createClient().build({
+        workspacePath,
+        buildDir,
+        buildType: "Debug",
+        clean: false,
+        timeoutMs: 60_000,
+        configureOnly: false,
+        // A prefix is named so the build reaches the process it would have run:
+        // without one it stops in the search instead, which is the test above.
+        libuvcppPrefix: otherPrefix,
+        signal: withdrawn(),
+      }),
+    );
 
-      expect(failure.code).toBe("cancelled");
-      expect(failure.message).toContain("cancelled");
-    },
-  );
+    expect(failure.code).toBe("cancelled");
+    expect(failure.message).toContain("cancelled");
+  });
 });

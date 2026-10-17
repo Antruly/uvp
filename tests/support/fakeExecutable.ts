@@ -67,9 +67,12 @@ import { EXE, isWindows } from "../../src/toolchains/host.js";
  * with the measurement above rather than an assertion — but it cannot stand in
  * for one that is handed its own flags. The launcher-chosen case has no such
  * limit: there the program is the first argument, so Node finds a script before
- * it finds an option. Two tests in `LocalToolchainProvider.test.ts` are skipped on
- * Windows for this reason, named in their own titles, and the wall is filed as
- * #22 rather than worked around here.
+ * it finds an option. Two tests in `LocalToolchainProvider.test.ts` used to skip
+ * on Windows for this reason; they now inject the provider's `run` slot
+ * (`LocalProviderOptions`) instead, which is the seam
+ * [#11](https://github.com/Antruly/uvp/issues/11) needed. The wall itself is
+ * still real for any provider that chooses its own argv and offers no seam, and
+ * [#22](https://github.com/Antruly/uvp/issues/22) carries the measurement.
  *
  * ## What this module does not own
  *
