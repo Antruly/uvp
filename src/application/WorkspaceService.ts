@@ -15,6 +15,7 @@ import { SessionStore } from "./sessionStore.js";
 import { renderTemplate, templateFeatureProblem, type TemplateId } from "./templates.js";
 import type { UvpFeature } from "../domain/features.js";
 import { describeStop } from "./ProcessSupervisor.js";
+import { tailWithin } from "./evidenceHelpers.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
 import { readWorkspaceManifest } from "./workspaceManifest.js";
@@ -83,6 +84,15 @@ export interface StopResult {
  * stays alive.
  */
 const CANCELLED_RUN_GRACE_MS = 3_000;
+
+/**
+ * How much of each output stream a run result carries.
+ *
+ * The supervisor keeps a larger tail for its own use; this is the part a caller
+ * reads, and it is cut by `tailWithin` rather than `slice` so the cut cannot leave
+ * half a character in the evidence.
+ */
+const REPORT_TAIL_UNITS = 4_096;
 
 const workspaceIdOf = (path: string): string => {
   // Derived, not random: re-opening the same directory must yield the same id,
@@ -397,8 +407,8 @@ export class WorkspaceService {
     // Snapshot before releasing: `release()` detaches the pipes, so a tail read
     // afterwards would return whatever happened to be buffered and never grow —
     // a startup error printed a millisecond later would vanish from the report.
-    const stdoutTail = process_.stdoutTail().slice(-4_096);
-    const stderrTail = process_.stderrTail().slice(-4_096);
+    const stdoutTail = tailWithin(process_.stdoutTail(), REPORT_TAIL_UNITS);
+    const stderrTail = tailWithin(process_.stderrTail(), REPORT_TAIL_UNITS);
     const stillRunning = process_.isRunning();
     const detached = input.detach && stillRunning;
     if (detached) process_.release();

@@ -87,6 +87,15 @@ export interface StartSupervisedOptions {
   readonly args: readonly string[];
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * The bound on each retained output tail, in bytes of UTF-8 output.
+   *
+   * Bytes rather than characters or code units: the tail exists to be bounded,
+   * and a bound counted in something else is a promise the caller cannot size
+   * memory against. The retained text begins at a character boundary, so a cap
+   * that lands inside one character drops that character rather than returning
+   * half of it.
+   */
   readonly maxTailBytes?: number;
 }
 

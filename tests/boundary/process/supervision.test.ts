@@ -193,9 +193,33 @@ describe("the output tail", () => {
     );
     await service.whenStarted();
     await eventually(() => service.stdoutTail().length >= 1_000, "the tail to fill");
-    // The claim is boundedness, not a byte count: the tail keeps the newest output
-    // and drops the oldest, which is what a startup error printed last needs.
+    // The tail keeps the newest output and drops the oldest, which is what a
+    // startup error printed last needs, and the bound it holds to is bytes.
     expect(service.stdoutTail().length).toBeLessThanOrEqual(1_000);
+    await service.stop(3_000, true);
+  });
+
+  it("keeps a multi-byte tail valid and within its byte bound", async () => {
+    // The regression for #84. A pipe chunk boundary is a byte offset and can fall
+    // inside one UTF-8 character, so decoding each chunk on its own turned valid
+    // output into U+FFFD; and the bound counted UTF-16 code units, so three-byte
+    // text was kept at three times the stated number of bytes. The child writes
+    // 210,000 bytes of `中` and nothing invalid, so every replacement character
+    // and every character lost from the end is the supervisor's own doing.
+    const service = launch(
+      `process.stdout.write("\\u4e2d".repeat(70000) + "done\\n"); setInterval(() => {}, 1000);`,
+      { maxTailBytes: 65_536 },
+    );
+    await service.whenStarted();
+    // The marker arrives after the last multi-byte character, so a tail holding it
+    // is not a window that ends in the middle of one.
+    await eventually(() => service.stdoutTail().endsWith("done\n"), "the tail to fill");
+    const tail = service.stdoutTail();
+    expect(Buffer.byteLength(tail, "utf8")).toBeLessThanOrEqual(65_536);
+    expect(tail).not.toContain("�");
+    // The cut advances to a character boundary, so the tail is the stream's own
+    // text and nothing else.
+    expect(tail).toMatch(/^中+done\n$/u);
     await service.stop(3_000, true);
   });
 });
