@@ -15,6 +15,7 @@ import {
   processSource,
   record,
   recordUnknown,
+  tailWithin,
   toEvidenceRef,
   toUnknownOutput,
 } from "./evidenceHelpers.js";
@@ -285,6 +286,42 @@ describe("toUnknownOutput", () => {
       question: "q",
       reason: "resource_limit",
     });
+  });
+});
+
+describe("tailWithin", () => {
+  it("returns text that already fits, unchanged", () => {
+    expect(tailWithin("build failed", 40)).toBe("build failed");
+    expect(tailWithin("build failed", 12)).toBe("build failed");
+  });
+
+  it("keeps the newest characters when it has to cut", () => {
+    expect(tailWithin("abcdef", 3)).toBe("def");
+  });
+
+  it("does not leave half a surrogate pair behind when the cut lands inside it", () => {
+    // "a😀b" is four code units: `a`, the high half, the low half, `b`. Two units
+    // is exactly the cut that used to begin the tail with a lone low surrogate.
+    expect(tailWithin("a😀b", 2)).toBe("b");
+    // One unit further, the cut lands on the high half, and the pair is kept
+    // whole rather than repaired.
+    expect(tailWithin("a😀b", 3)).toBe("😀b");
+  });
+
+  it("returns a valid suffix at every cut point", () => {
+    for (const text of ["a😀b", "中文😀x", "😀😀😀"]) {
+      for (let units = 0; units <= text.length; units += 1) {
+        const where = `${JSON.stringify(text)} at ${String(units)}`;
+        const tail = tailWithin(text, units);
+        // A prefix cut from well-formed text can only leave a lone low surrogate
+        // at the start, so that is the whole validity claim.
+        expect(/^[\uDC00-\uDFFF]/u.test(tail), where).toBe(false);
+        // It is the requested suffix, minus at most the orphaned half.
+        expect(text.endsWith(tail), where).toBe(true);
+        expect(tail.length, where).toBeLessThanOrEqual(units);
+        expect(tail.length, where).toBeGreaterThanOrEqual(units - 1);
+      }
+    }
   });
 });
 

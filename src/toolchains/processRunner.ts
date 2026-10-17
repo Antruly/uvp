@@ -318,6 +318,70 @@ const refusedLaunch = (options: StartSupervisedOptions, cause: unknown): Supervi
 };
 
 /**
+ * The newest output, bounded by bytes, kept as bytes until it is read.
+ *
+ * Decoding each pipe chunk as it arrived was wrong in three ways that one fix
+ * settles. A chunk boundary is a byte offset and can fall inside one UTF-8
+ * character, so a valid stream came back with U+FFFD in it; the bound compared
+ * UTF-16 code units against a number named in bytes, so three-byte text was kept
+ * at three times the stated amount; and the trim could cut between the halves of
+ * a surrogate pair, leaving a string that is not valid Unicode to be serialized
+ * into a tool result. Holding buffers and decoding once — what `createCapture`
+ * above already does — fixes all three, because a UTF-8 suffix cut at a
+ * character boundary is still UTF-8.
+ */
+const createTail = (maxBytes: number) => {
+  const chunks: Buffer[] = [];
+  let retained = 0;
+  let cached: string | undefined;
+
+  /** Drop the oldest bytes, starting the remainder at a UTF-8 character. */
+  const trim = (): void => {
+    while (retained > maxBytes && chunks.length > 0) {
+      const first = chunks[0] as Buffer;
+      const excess = retained - maxBytes;
+      if (first.byteLength <= excess) {
+        chunks.shift();
+        retained -= first.byteLength;
+        continue;
+      }
+      chunks[0] = first.subarray(excess);
+      retained -= excess;
+    }
+    // The cut can land inside a character, and dropping whole chunks can too:
+    // consecutive chunks are contiguous slices, so a chunk boundary may fall
+    // between a character's lead byte and its continuation bytes. Either way the
+    // tail would begin with continuation bytes the decoder can only report as
+    // damage, so they go too — at most three, and never more than the excess was
+    // already dropping.
+    for (;;) {
+      const head = chunks[0] as Buffer | undefined;
+      if (head === undefined) break;
+      if (head.byteLength === 0) {
+        chunks.shift();
+        continue;
+      }
+      if (((head[0] as number) & 0xc0) !== 0x80) break;
+      chunks[0] = head.subarray(1);
+      retained -= 1;
+    }
+  };
+
+  return {
+    push(chunk: Buffer): void {
+      chunks.push(chunk);
+      retained += chunk.byteLength;
+      trim();
+      cached = undefined;
+    },
+    text(): string {
+      cached ??= Buffer.concat(chunks).toString("utf8");
+      return cached;
+    },
+  };
+};
+
+/**
  * The local host's implementation of the supervision port.
  *
  * Annotated with the port type rather than with its own signature so that the
@@ -342,13 +406,9 @@ export const startSupervised: ProcessSupervisor = (options) => {
     return refusedLaunch(options, cause);
   }
 
-  const tails = { stdout: "", stderr: "" };
-  const append = (which: "stdout" | "stderr", chunk: Buffer): void => {
-    const combined = tails[which] + chunk.toString("utf8");
-    tails[which] = combined.length > maxTail ? combined.slice(combined.length - maxTail) : combined;
-  };
-  child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
-  child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
+  const tails = { stdout: createTail(maxTail), stderr: createTail(maxTail) };
+  child.stdout?.on("data", (chunk: Buffer) => tails.stdout.push(chunk));
+  child.stderr?.on("data", (chunk: Buffer) => tails.stderr.push(chunk));
 
   // Held in a mutable record rather than a bare `let`: the handlers run in nested
   // closures, and a bare `let` would be flow-narrowed to `undefined` at every read
@@ -406,8 +466,8 @@ export const startSupervised: ProcessSupervisor = (options) => {
       lifecycle.exited === undefined &&
       child.exitCode === null,
     exitInfo: () => lifecycle.exited,
-    stdoutTail: () => tails.stdout,
-    stderrTail: () => tails.stderr,
+    stdoutTail: () => tails.stdout.text(),
+    stderrTail: () => tails.stderr.text(),
     stop: async (graceMs, force) => {
       // A process that never started has nothing to signal, and `killed: true` for
       // it would be the same false claim as reporting it as running.

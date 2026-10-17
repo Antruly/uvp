@@ -103,6 +103,25 @@ export const toUnknownOutput = (unknown: ResidualUnknown): ResidualUnknownOutput
 });
 
 /**
+ * The last `units` UTF-16 code units of captured text, cut at a character.
+ *
+ * A report tail is evidence, so the cut must not damage what it keeps. Slicing
+ * on code units can land between the halves of a surrogate pair, and the half
+ * left behind is not valid Unicode: it reaches an MCP caller as a lone escaped
+ * surrogate, and a terminal renders it as U+FFFD. Dropping the orphan is the
+ * same cut without the damage. (The producer must hand over valid text first —
+ * `createTail` in `toolchains/processRunner.ts` is where a byte-bounded tail is
+ * decoded.)
+ */
+export const tailWithin = (text: string, units: number): string => {
+  if (text.length <= units) return text;
+  const start = text.length - units;
+  const first = text.charCodeAt(start);
+  // A low surrogate here is the second half of a pair whose first half was cut.
+  return text.slice(0xdc00 <= first && first <= 0xdfff ? start + 1 : start);
+};
+
+/**
  * Seal a recorder into the envelope every tool result carries.
  *
  * Everything a tool did not put here is a claim it is not making. That is why
