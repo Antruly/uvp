@@ -486,6 +486,56 @@ const performHttp1 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     req.end();
   });
 
+/**
+ * What HTTP/2 does not carry, and why dropping it is not a rewrite.
+ *
+ * RFC 9113 §8.2.2 removes the fields HTTP/1.1 uses to manage a connection that
+ * HTTP/2 no longer has: `Connection`, `Proxy-Connection`, `Keep-Alive`,
+ * `Transfer-Encoding`, and `Upgrade`. `TE` survives only with the value
+ * `trailers`. Node rejects a request that carries any of them, so forwarding
+ * them would turn a caller's harmless `connection: keep-alive` into a transport
+ * error rather than a request.
+ *
+ * `Host` is separate: the session sets `:authority` from the URL, and a second
+ * statement of the same fact is a second one that can disagree. Pseudo-headers
+ * are the client's to own for the same reason.
+ */
+const HTTP2_FORBIDDEN_HEADERS = new Set([
+  "connection",
+  "proxy-connection",
+  "keep-alive",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+/**
+ * The caller's header map in the form an HTTP/2 request carries.
+ *
+ * The HTTP/1.1 path spreads `spec.headers` directly because that is already the
+ * right shape. This path used to pick two names out of the map — exact-lowercase
+ * `accept` and `content-type` — so the same call made two different requests,
+ * and `authorization`, `cookie`, `user-agent`, a capitalised `Accept`, and every
+ * custom header were silently absent. A `401` after that is the peer's answer to
+ * a request uvp wrote, not the one the caller asked for.
+ *
+ * Names are lowercased (HTTP/2 requires it; HTTP/1.1 is case-insensitive), and
+ * `content-length` is added from the body the way the HTTP/1.1 path adds it.
+ */
+const http2Headers = (
+  headers: Readonly<Record<string, string>>,
+  body: Buffer | undefined,
+): Record<string, string> => {
+  const forwarded: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower.startsWith(":") || lower === "host" || HTTP2_FORBIDDEN_HEADERS.has(lower)) continue;
+    if (lower === "te" && value.trim().toLowerCase() !== "trailers") continue;
+    forwarded[lower] = value;
+  }
+  if (body !== undefined) forwarded["content-length"] = String(body.byteLength);
+  return forwarded;
+};
+
 const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult> =>
   new Promise((resolve, reject) => {
     const started = Date.now();
@@ -531,10 +581,7 @@ const performHttp2 = (spec: HttpRequestSpec, url: URL): Promise<SingleShotResult
     const stream = client.request({
       ":method": spec.method,
       ":path": `${url.pathname}${url.search}`,
-      ...(spec.headers["accept"] === undefined ? {} : { accept: spec.headers["accept"] }),
-      ...(spec.headers["content-type"] === undefined
-        ? {}
-        : { "content-type": spec.headers["content-type"] }),
+      ...http2Headers(spec.headers, spec.body),
     });
 
     let firstByteAt: number | undefined;

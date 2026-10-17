@@ -44,9 +44,18 @@ afterAll(() => {
 });
 
 /** An h2c server that answers every request through `respond`. */
-const startH2c = async (respond: (stream: ServerHttp2Stream) => void): Promise<number> => {
+const startH2c = async (
+  respond: (
+    stream: ServerHttp2Stream,
+    headers: Record<string, string | string[] | undefined>,
+  ) => void,
+): Promise<number> => {
   const server = createHttp2Server();
-  server.on("stream", respond);
+  // The request's header block is the listener's second argument; `stream.headers`
+  // is not populated yet when the `stream` event fires. The stream is annotated
+  // because the listener overload infers the base `Http2Stream`, which has no
+  // `respond`; the server's own event carries a `ServerHttp2Stream`.
+  server.on("stream", (stream: ServerHttp2Stream, headers) => respond(stream, headers));
   servers.push(server);
   return await new Promise<number>((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
@@ -243,6 +252,60 @@ describe("a connection that answered", () => {
     const exchange = await performRequest({ ...SPEC, url: url(port), httpVersion: "2" });
     expect(exchange.status).toBe(204);
     expect(exchange.body.byteLength).toBe(0);
+  });
+
+  it("sends every caller header, not only accept and content-type", async () => {
+    // The h2 path used to pick two names out of `spec.headers` (exact-lowercase
+    // `accept` and `content-type`) while the HTTP/1.1 path spread all of them.
+    // The same call therefore made two different requests, and a 401 was
+    // reported as the service's answer to a request that omitted its
+    // `authorization`. `Accept` with a capital A was dropped too, because the
+    // lookup was exact-case.
+    let seen: Record<string, string | string[] | undefined> = {};
+    const port = await startH2c((stream, headers) => {
+      seen = headers;
+      stream.respond({ ":status": 200 });
+      stream.end();
+    });
+    const exchange = await performRequest({
+      ...SPEC,
+      url: url(port),
+      httpVersion: "2",
+      headers: {
+        authorization: "Bearer secret",
+        Accept: "text/plain",
+        "x-request-id": "req-1",
+      },
+    });
+    expect(exchange.status).toBe(200);
+    expect(seen["authorization"]).toBe("Bearer secret");
+    expect(seen["accept"]).toBe("text/plain");
+    expect(seen["x-request-id"]).toBe("req-1");
+  });
+
+  it("does not send the fields HTTP/2 forbids, and states the body's length", async () => {
+    // RFC 9113 §8.2.2: the connection-specific fields HTTP/1.1 uses do not exist
+    // in HTTP/2, and Node rejects a request that carries them. Dropping them is
+    // not rewriting the caller's request — there is no connection for them to
+    // describe. `content-length` is the other direction: HTTP/1.1 adds it from
+    // the body, and the h2 path must too or the peer is told nothing about it.
+    let seen: Record<string, string | string[] | undefined> = {};
+    const port = await startH2c((stream, headers) => {
+      seen = headers;
+      stream.respond({ ":status": 200 });
+      stream.end();
+    });
+    await performRequest({
+      ...SPEC,
+      method: "POST",
+      url: url(port),
+      httpVersion: "2",
+      headers: { connection: "keep-alive", "x-kept": "yes" },
+      body: Buffer.from("hello"),
+    });
+    expect(seen["x-kept"]).toBe("yes");
+    expect(seen["connection"]).toBeUndefined();
+    expect(seen["content-length"]).toBe("5");
   });
 });
 
