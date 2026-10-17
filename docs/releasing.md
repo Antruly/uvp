@@ -9,9 +9,13 @@ on pull request titles, the workflow that runs release-please
 workflow that publishes a tag (`publish.yml`, added for #161) exist. The first
 release was cut on 2026-10-17: release PR #188, opened and updated by
 release-please, carried the maintainer's regeneration commit and merged at
-`74df710`, and the tag `uvp-agents-0.2.0` was created on it. Nothing has been
-published to npm yet, so everything from the first publish onward is written
-from the configuration and has not been observed — see
+`74df710`, and the tag `uvp-agents-0.2.0` was created on it. The first publish
+was made by hand on 2026-10-17 and is observed: `uvp-agents@0.2.0` is on the
+official registry, `latest` names it, and `npm view uvp-agents@0.2.0
+dist.integrity` reports
+`sha512-uXh6BqCNlPO4B3U47/0wqgKyLTf7pzHgeHZ756tUtDww+uf7tOLeC28HSDFy1EAq6uMaWxcjhAPD4igYLOCGLA==`.
+The trusted-publisher entry is not attached yet, so `publish.yml` has not been
+dispatched and the workflow half of the path below is still unobserved — see
 [Publishing the tag](#publishing-the-tag).
 
 ## The flow
@@ -106,45 +110,55 @@ to store or rotate. What that requires:
   Neither the settings page nor that command is reachable from this repository,
   so this section states the configuration rather than a check that verifies it.
 
-**The first publish is manual, by decision.** Trusted publishing is configured
+**The first publish was manual, by decision.** Trusted publishing is configured
 from an existing package's settings page, and npm's `npm trust` documentation
 states the requirement directly: _"The package you're configuring must already
-exist on the npm registry."_ `uvp-agents` has never been published, so a first
-publish cannot use trusted publishing. The maintainer authorized the direction
-lead to choose the bootstrap, and the choice recorded on
-[#161](https://github.com/Antruly/uvp/issues/161#issuecomment-6233847724) is:
+exist on the npm registry."_ `uvp-agents` had never been published, so the first
+publish could not use trusted publishing. The maintainer authorized the
+direction lead to choose the bootstrap, and the choice recorded on
+[#161](https://github.com/Antruly/uvp/issues/161#issuecomment-6233847724) was:
 
 1. Publish the first version by hand, from the tag `uvp-agents-0.2.0`, to the
    official registry (`registry.npmjs.org` — not a mirror, and not a local
-   `publishConfig` override), at that tag's commit.
+   `publishConfig` override), at that tag's commit. **Done:** the registry's
+   `time` field records `0.2.0` at 2026-10-17T13:22:05Z, and `latest` names it.
+   The version list also holds `0.0.0-stage` (13:19:58Z), a staging upload from
+   the same session; `latest` does not point at it.
 2. Attach the trusted publisher to the package afterwards, as configured above.
-3. Use `publish.yml` for every later version.
+   **Outstanding:** `npm trust` wants interactive confirmation and a second
+   factor, so the attachment has not been made. Until it is, a dispatch of
+   `publish.yml` fails at `npm publish` with an authentication error and uploads
+   nothing.
+3. Use `publish.yml` for every later version. **Not yet exercised:** no dispatch
+   has run, so the workflow's publish half is still unobserved.
 
-What that manual publish has to establish, because the workflow cannot run for
+What the manual publish had to establish, because the workflow could not run for
 it: check out the tag, run the same preflight the workflow runs
 (`node scripts/verify-release-version.mjs --tag <tag>` and `npm run
 verify:pack-reproducible`), and upload the tarball whose digest those checks
 produced. A manual publish carries **no provenance attestation** — provenance is
-generated from the workflow's OIDC token, so the first version is the one
-version without it. `npm view uvp-agents@0.2.0 dist.integrity` after the upload
-records what landed.
+generated from the workflow's OIDC token, so 0.2.0 is the one version without
+it. What survives for it is the registry's digest, compared above; whether the
+publisher ran the preflight is not observable from the registry.
 
-**2FA applies to the manual publish.** For an account with two-factor
+**2FA applied to the manual publish.** For an account with two-factor
 authentication enabled, npm's registry answers a publish without a second
 factor with `403 Two-factor authentication or granular access token with bypass
-2fa enabled is required to publish packages.`, and nothing is uploaded. So the
-manual publish needs either the one-time code at the prompt or a granular access
-token scoped to `uvp-agents` with the `publish` permission and **bypass 2FA**
-enabled; a browser session on its own is not enough. A failed attempt uploads
-nothing, so it can be retried once the credential is in hand — the version is
-still unclaimed until a publish succeeds.
+2fa enabled is required to publish packages.`, and nothing is uploaded — which
+is what the first attempt here received. The publish therefore needs either the
+one-time code at the prompt or a granular access token scoped to `uvp-agents`
+with the `publish` permission and **bypass 2FA** enabled; a browser session on
+its own is not enough. A failed attempt uploads nothing, so it can be retried
+once the credential is in hand — the version is still unclaimed until a publish
+succeeds.
 
 The workflow itself never holds a token: if the trusted publisher is attached,
 it publishes; if not, `npm publish` fails with an authentication error and
 nothing is uploaded. npm requires a newly created trusted publisher
 configuration to complete its first successful publish within two days, after
-which it expires and can no longer be used or edited — so attach it right after
-the manual publish and dispatch the next version inside that window.
+which it expires and can no longer be used or edited — so attach it and dispatch
+the next version inside that window. As of 0.2.0 the attachment has not been
+made, so that window has not started.
 
 ### What the run establishes
 

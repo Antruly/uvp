@@ -27,8 +27,9 @@ npx uvp-agents doctor
 `npx` fetches the package into a cache and runs it. Nothing is added to your
 `PATH` and nothing is written outside the npm cache.
 
-> [!IMPORTANT]
-> `uvp-agents` is not yet published to npm. Until it is, run from a clone:
+> [!NOTE]
+> `uvp-agents` was first published on 2026-10-17; the version the commands above
+> install is `0.2.0`. To run the latest unreleased `main` instead, use a clone:
 > `git clone https://github.com/Antruly/uvp && cd uvp && npm ci && npm run build && node scripts/uvp.mjs doctor`.
 
 ## Install
