@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { websocketCommand } from "./cli/commands/web.js";
+import { captureReplayCommand, websocketCommand } from "./cli/commands/web.js";
+import { isToolCommand } from "./cli/commandSpec.js";
+import { EXIT_NO, EXIT_WRONG } from "./cli/exitCodes.js";
 import type { ParsedArgv } from "./cli/args.js";
 import type { ToolCommand } from "./cli/commandSpec.js";
 
@@ -21,6 +23,56 @@ import type { ToolCommand } from "./cli/commandSpec.js";
  */
 
 const ARGV: ParsedArgv = { positionals: [], values: {}, occurrences: [], help: false };
+
+/**
+ * The capture replay verdict.
+ *
+ * `verified` is the only outcome the contract calls a pass. `partial` is
+ * produced both by an omission the tool makes on purpose (`skipped`: a writing
+ * method is never replayed) and by an exchange whose call did not complete
+ * (`not_comparable`). The second is a question that was never put, and the CLI's
+ * exit table has a code for that; reporting it as success is the collapse this
+ * command's verdict exists to prevent.
+ */
+describe("the capture replay verdict", () => {
+  // `CommandSpec` is the union of tool-driven and local commands, and only the
+  // first carries a verdict. This command drives `uvp_capture_replay`, so the
+  // guard is a fact the compiler can use rather than a cast. The narrowed value
+  // is bound once: a type predicate on the imported const does not survive into
+  // a nested arrow function.
+  const replay = isToolCommand(captureReplayCommand) ? captureReplayCommand : undefined;
+  if (replay === undefined) {
+    throw new Error("uvp capture replay must drive a tool contract");
+  }
+  const verdict = (output: Record<string, unknown>): number | undefined =>
+    replay.verdict?.(output, ARGV);
+
+  it("does not report success when a replayed exchange could not be compared", () => {
+    expect(
+      verdict({ outcome: "partial", matched: 1, differed: 0, skipped: 0, not_comparable: 1 }),
+    ).toBe(EXIT_WRONG);
+  });
+
+  it("keeps a documented omission at success", () => {
+    // A capture with a POST is always partial; exiting 2 for that would make
+    // replaying any ordinary capture look like a wrong environment.
+    expect(
+      verdict({ outcome: "partial", matched: 1, differed: 0, skipped: 1, not_comparable: 0 }),
+    ).toBeUndefined();
+  });
+
+  it("lets a real difference outrank a comparison that did not run", () => {
+    expect(
+      verdict({ outcome: "partial", matched: 0, differed: 1, skipped: 0, not_comparable: 1 }),
+    ).toBe(EXIT_NO);
+  });
+
+  it("still refuses to call a run that compared nothing a pass", () => {
+    expect(
+      verdict({ outcome: "unknown", matched: 0, differed: 0, skipped: 0, not_comparable: 0 }),
+    ).toBe(EXIT_WRONG);
+  });
+});
 
 /** The command's post-call check, reached the way `runToolCommand` reaches it. */
 const verdictOf = (spec: ToolCommand, output: Record<string, unknown>): string | undefined =>
