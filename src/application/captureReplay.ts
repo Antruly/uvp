@@ -536,6 +536,24 @@ const replayOne = async (
     };
   }
 
+  if (recorded.requestBodyTruncated) {
+    // The captured request is a prefix: the session's limit cut it before it was
+    // stored. Sending those bytes would be a request the captured client never
+    // made, presented as the same one — and the response it got would be
+    // compared against the recorded exchange as though the two were comparable.
+    // There is no whole request to replay, so this is a skip with a name, not an
+    // approximation.
+    return {
+      ...base,
+      outcome: "skipped",
+      reason:
+        "the recorded request body is a prefix — the capture retained at most " +
+        `${String(maxBodyBytes)} bytes of it — so replaying it would send a request the capture ` +
+        "never saw",
+      compared: [],
+    };
+  }
+
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(recorded.requestHeaders)) {
     if (!CONNECTION_HEADERS.has(name.toLowerCase())) headers[name] = value;
