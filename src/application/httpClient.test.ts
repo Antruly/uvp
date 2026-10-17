@@ -320,6 +320,46 @@ describe("a connection that answered", () => {
  * those decisions was once a regex over an error message, so a timeout on the
  * default configuration came back classified as an unreachable endpoint.
  */
+describe("an abandoned HTTP/2 attempt", () => {
+  it("tears the session down when the deadline fires, instead of letting the peer finish", async () => {
+    // `close()` is graceful: an active stream keeps running and the socket stays
+    // attached, so the peer could finish a request the caller was told had timed
+    // out. The server-side stream closing before its handler would have answered
+    // is what tells the two apart.
+    let closedAt: number | undefined;
+    const port = await startH2c((stream) => {
+      stream.on("close", () => {
+        closedAt = Date.now();
+      });
+      setTimeout(() => {
+        if (stream.destroyed) return;
+        try {
+          stream.respond({ ":status": 200 });
+          stream.end("late");
+        } catch {
+          // The stream was torn down first; the client's report is what matters.
+        }
+      }, 1_000).unref();
+    });
+    const started = Date.now();
+
+    const { kind } = await failureOf({
+      ...SPEC,
+      url: url(port),
+      httpVersion: "2",
+      timeoutMs: 200,
+    });
+    expect(kind).toBe("timeout");
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(
+      closedAt,
+      "the server-side stream was still open after the client reported a timeout",
+    ).toBeDefined();
+    expect((closedAt ?? started) - started).toBeLessThan(800);
+  }, 10_000);
+});
+
 describe("the kind of a transport failure", () => {
   it("is `protocol` for a peer that does not speak the version it was asked for", async () => {
     // Not reachable through HTTP/1.1 at all: an h2c server's first bytes are a
