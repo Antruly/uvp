@@ -497,6 +497,16 @@ export const soapCallContract = defineTool({
 });
 
 /**
+ * The methods `uvp_load_test` can repeat.
+ *
+ * Exported so the CLI's own check reads the same list the schema enforces. A
+ * method the CLI accepts and the contract rejects fails at the wrong boundary:
+ * the caller gets an answer about a `method` field it never typed, instead of
+ * the CLI's error naming the word it did type.
+ */
+export const LOAD_HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
+
+/**
  * Load test.
  *
  * Reports a distribution, never a single number. A mean without percentiles
@@ -512,7 +522,7 @@ export const loadTestContract = defineTool({
   kind: "web",
   inputSchema: z.object({
     url: z.string().min(1),
-    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]).default("GET"),
+    method: z.enum(LOAD_HTTP_METHODS).default("GET"),
     headers: headerMapSchema.default({}),
     body: z.string().optional(),
     concurrency: z.number().int().min(1).max(512).default(8),

@@ -777,3 +777,18 @@ describe("a refused invocation writes nothing", () => {
     expect(error.message).toContain("not valid JSON");
   });
 });
+
+describe("a load invocation the contract cannot put", () => {
+  it("refuses a method uvp load does not offer, naming the method and the usage", async () => {
+    // `OPTIONS` is a valid one-off request (`uvp http`) but not a method the load
+    // contract repeats. The CLI used to accept it and leave the contract to
+    // reject a `method` field the caller never typed.
+    const load = await invoke(["load", "http://127.0.0.1:1/", "OPTIONS", "--json"]);
+    expect(load.exit).toBe(EXIT_WRONG);
+    expect(load.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(load.stderr, "uvp load"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("OPTIONS");
+    expect(String(error.details?.["usage"])).toContain("uvp load");
+  });
+});
