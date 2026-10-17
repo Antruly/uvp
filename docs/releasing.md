@@ -254,6 +254,33 @@ change visibility; the maintainer sets it in the package's settings. A successfu
 run therefore proves the registry accepts and serves this artifact to an
 authenticated consumer, not that it is publicly installable.
 
+### Bootstrap a tag that predates the helpers {#github-packages-bootstrap}
+
+The workflow runs `scripts/prepare-github-packages.mjs` from the tag checkout. A
+tag created before that helper existed cannot carry it, and a tag is immutable.
+`uvp-agents-0.2.0` (`74df710`) is such a tag: the helper merged after the tag was
+cut.
+
+For that case only, dispatch with `helpers_ref` set to a full 40-hex commit on
+`main` that contains the helper:
+
+```bash
+gh workflow run publish-github-packages.yml \
+  -f tag=uvp-agents-0.2.0 \
+  -f helpers_ref=<40-hex-commit-on-main> \
+  -f dry_run=true
+```
+
+The workflow verifies that the commit is on `origin/main` and contains
+`scripts/prepare-github-packages.mjs`, `scripts/lib/npmPurl.mjs`, and
+`scripts/lib/paths.mjs`, stages those files outside the checkout, and runs them
+with `--root` pointing at the tag checkout. The tag tree stays exactly the tag,
+and the helper is not in `files[]`, so the tarball's code is still the tag's. The
+run summary records the helper commit and labels the run a bootstrap.
+
+This is a one-time exception for tags that predate the helper. Every later tag
+contains it; leave `helpers_ref` empty.
+
 Consumers install the mirror with a scoped `.npmrc` and a token:
 
 ```ini
