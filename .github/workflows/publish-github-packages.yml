@@ -29,6 +29,14 @@ name: Publish to GitHub Packages
 # release-please creates the tag with the job's `GITHUB_TOKEN`, and GitHub does
 # not start workflows from events that token causes. A dispatch names the tag,
 # and the first step proves the checkout is exactly that tag.
+#
+# **Bootstrap for tags that predate the helpers.** A tag created before
+# `prepare-github-packages.mjs` existed cannot carry it, and a tag cannot be
+# moved. `helpers_ref` names a full 40-hex commit on `main`; the run verifies it,
+# stages the helper files outside the checkout, and executes them against the
+# tag through `--root`. The helpers never enter the checkout or `files[]`, so the
+# tarball's code is still the tag; the run summary records the helper commit.
+# Leave `helpers_ref` empty for any tag that contains the helpers.
 
 on:
   workflow_dispatch:
@@ -42,6 +50,11 @@ on:
         required: false
         type: boolean
         default: false
+      helpers_ref:
+        description: "Bootstrap only: full 40-hex commit on main to take the mirror helper scripts from. Leave empty for tags that contain them."
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -92,6 +105,49 @@ jobs:
           fi
           echo "checked out ${tag} at ${commit}"
 
+      - name: Validate the bootstrap helper ref
+        if: ${{ inputs.helpers_ref != '' }}
+        env:
+          HELPERS_REF: ${{ inputs.helpers_ref }}
+        run: |
+          set -euo pipefail
+          # A bootstrap run takes the helper scripts from a named commit on
+          # `main` because a tag created before those scripts existed cannot
+          # carry them. The ref is a commit, never a branch: a moving ref would
+          # mean two dispatches of the same tag could run different helpers.
+          if ! printf '%s' "$HELPERS_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "helpers_ref must be a full 40-hex commit SHA, not '${HELPERS_REF}'."
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$HELPERS_REF" origin/main; then
+            echo "${HELPERS_REF} is not on origin/main; a bootstrap helper must be merged first."
+            exit 1
+          fi
+          for file in scripts/prepare-github-packages.mjs scripts/lib/npmPurl.mjs scripts/lib/paths.mjs; do
+            if ! git cat-file -e "${HELPERS_REF}:${file}" 2>/dev/null; then
+              echo "${file} does not exist at ${HELPERS_REF}."
+              exit 1
+            fi
+          done
+          echo "bootstrap helpers at ${HELPERS_REF} are on origin/main and complete"
+
+      - name: Stage the bootstrap helper files
+        if: ${{ inputs.helpers_ref != '' }}
+        env:
+          HELPERS_REF: ${{ inputs.helpers_ref }}
+          HELPERS_DIR: ${{ runner.temp }}/uvp-mirror-helpers
+        run: |
+          set -euo pipefail
+          # Outside the checkout on purpose: the tag tree stays exactly the tag,
+          # and the helper is not in `files[]`, so nothing it stages is shipped.
+          rm -rf "$HELPERS_DIR"
+          mkdir -p "$HELPERS_DIR/scripts/lib"
+          for file in scripts/prepare-github-packages.mjs scripts/lib/npmPurl.mjs scripts/lib/paths.mjs; do
+            git show "${HELPERS_REF}:${file}" > "${HELPERS_DIR}/${file}"
+          done
+          echo "staged mirror helpers from ${HELPERS_REF} in ${HELPERS_DIR}"
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
@@ -141,12 +197,33 @@ jobs:
         run: npm run verify:pack-reproducible
 
       - name: Check the scoped-name rule
-        run: node scripts/prepare-github-packages.mjs --self-check
+        env:
+          HELPERS_REF: ${{ inputs.helpers_ref }}
+          HELPERS_DIR: ${{ runner.temp }}/uvp-mirror-helpers
+        run: |
+          set -euo pipefail
+          helper="scripts/prepare-github-packages.mjs"
+          if [ -n "$HELPERS_REF" ]; then
+            helper="${HELPERS_DIR}/scripts/prepare-github-packages.mjs"
+          fi
+          node "$helper" --self-check
 
       - name: Derive the scoped mirror
         # Rewrites package.json, package-lock.json's root name, and the SBOM.
         # server.json, src/generatedPackageMetadata.ts and dist stay canonical.
-        run: node scripts/prepare-github-packages.mjs --scope antruly
+        # With a bootstrap ref, the helper runs from outside the checkout and
+        # resolves every input and output under `--root`, which is the tag.
+        env:
+          HELPERS_REF: ${{ inputs.helpers_ref }}
+          HELPERS_DIR: ${{ runner.temp }}/uvp-mirror-helpers
+          ROOT: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ -n "$HELPERS_REF" ]; then
+            node "${HELPERS_DIR}/scripts/prepare-github-packages.mjs" --root "$ROOT" --scope antruly
+          else
+            node scripts/prepare-github-packages.mjs --scope antruly
+          fi
 
       - name: The derived tree packs reproducibly
         # The same four packs as the canonical run. The name changed, so this is
@@ -309,6 +386,7 @@ jobs:
 
       - name: Record what was published
         env:
+          HELPERS_REF: ${{ inputs.helpers_ref }}
           PACKED_FILENAME: ${{ steps.pack.outputs.filename }}
           PACKED_NAME: ${{ steps.pack.outputs.name }}
           PACKED_VERSION: ${{ steps.pack.outputs.version }}
@@ -321,6 +399,11 @@ jobs:
             echo "- tag: \`${TAG}\`"
             echo "- tarball: \`${PACKED_FILENAME}\`"
             echo "- integrity: \`${PACKED_INTEGRITY}\`"
+            if [ -n "$HELPERS_REF" ]; then
+              echo "- helpers: \`${HELPERS_REF}\` — **bootstrap**: the helper scripts are not from the tag. They operated on the tag checkout through \`--root\` and are not in \`files[]\`, so the tarball's code is still the tag."
+            else
+              echo "- helpers: the tagged tree."
+            fi
             if [ "${{ inputs.dry_run }}" = "true" ]; then
               echo "- mode: **dry run** — prepared, packed, inspected, and checked; nothing was uploaded and the registry checks were skipped."
             else

@@ -53,6 +53,19 @@ import { REPO_ROOT } from "./lib/paths.mjs";
  * that package. A tree that already disagrees is not a tree to derive a second
  * identity from — it is one to repair with `npm run docs:generate` first.
  *
+ * ## Operating on another checkout (`--root`)
+ *
+ * A release tag created before this helper existed cannot carry it, and a tag
+ * cannot be moved. `--root` lets the workflow stage this helper from a named
+ * commit on `main` and run it against the tag's checkout without adding a file
+ * to that tree. Every input and output is resolved under `--root`; the helper's
+ * own location is used only to import its modules. When `--root` is omitted the
+ * helper operates on its own checkout, which is the normal release path.
+ *
+ * The bootstrap does not change what is published: the tarball's code still
+ * comes from the tag. Only the helper that derives the mirror comes from a newer
+ * commit, and it is not part of `files[]`.
+ *
  * Exit status: 0 when the tree was rewritten, 1 when the request or the canonical
  * tree is invalid, 2 when a file could not be read or the SBOM could not be
  * regenerated (so the answer is "could not prepare", not a verdict).
@@ -188,26 +201,26 @@ const fail = (message, code) => {
   process.exit(code);
 };
 
-/** Read and parse one repository file, or exit 2 saying it could not. */
-const readJson = async (relative) => {
+/** Read and parse one file under `root`, or exit 2 saying it could not. */
+const readJson = async (root, relative) => {
   let text;
   try {
-    text = await readFile(path.join(REPO_ROOT, relative), "utf8");
+    text = await readFile(path.join(root, relative), "utf8");
   } catch (error) {
-    fail(`could not read ${relative} (${error.code ?? error.message}).`, 2);
+    fail(`could not read ${relative} under ${root} (${error.code ?? error.message}).`, 2);
   }
   try {
     return JSON.parse(text);
   } catch (error) {
-    fail(`could not parse ${relative} (${error.message}).`, 2);
+    fail(`could not parse ${relative} under ${root} (${error.message}).`, 2);
   }
 };
 
-const writeJson = async (relative, value) => {
+const writeJson = async (root, relative, value) => {
   try {
-    await writeFile(path.join(REPO_ROOT, relative), `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await writeFile(path.join(root, relative), `${JSON.stringify(value, null, 2)}\n`, "utf8");
   } catch (error) {
-    fail(`could not write ${relative} (${error.code ?? error.message}).`, 2);
+    fail(`could not write ${relative} under ${root} (${error.code ?? error.message}).`, 2);
   }
 };
 
@@ -259,13 +272,13 @@ const requireCanonicalIdentity = ({ packageJson, serverJson, sbom }) => {
 };
 
 /** Rewrite both manifests, keeping their package name in step. */
-const applyMirrorIdentity = async ({ packageJson, packageLock, scoped }) => {
+const applyMirrorIdentity = async ({ root, packageJson, packageLock, scoped }) => {
   packageJson.name = scoped;
   packageJson.publishConfig = {
     ...packageJson.publishConfig,
     registry: REGISTRY,
   };
-  await writeJson("package.json", packageJson);
+  await writeJson(root, "package.json", packageJson);
 
   // The lockfile's root entry names the package too. It is not shipped, but a
   // tree whose two manifests disagree about the package's own name is the kind
@@ -276,27 +289,28 @@ const applyMirrorIdentity = async ({ packageJson, packageLock, scoped }) => {
   if (typeof packageLock.name === "string") {
     packageLock.name = scoped;
   }
-  await writeJson("package-lock.json", packageLock);
+  await writeJson(root, "package-lock.json", packageLock);
 };
 
 /** Regenerate the SBOM, whose root component names the package. */
-const regenerateSbom = () => {
+const regenerateSbom = (root) => {
   // The SBOM generator is the owner of the document's spelling; deriving it
   // here rather than editing the JSON keeps one implementation of purl and
-  // bom-ref.
+  // bom-ref. It comes from the same root as the manifests, so a bootstrap run
+  // uses the tag's generator even when this helper came from a newer commit.
   try {
-    execFileSync(process.execPath, [path.join(REPO_ROOT, "scripts/sbom.mjs")], {
-      cwd: REPO_ROOT,
+    execFileSync(process.execPath, [path.join(root, "scripts/sbom.mjs")], {
+      cwd: root,
       stdio: "inherit",
     });
   } catch (error) {
-    fail(`the SBOM generator failed (${error.status ?? error.message}).`, 2);
+    fail(`the SBOM generator under ${root} failed (${error.status ?? error.message}).`, 2);
   }
 };
 
 /** The regenerated document must describe the mirror, not the canonical tree. */
-const assertMirrorSbom = async ({ scoped, version }) => {
-  const mirrored = await readJson("sbom.cdx.json");
+const assertMirrorSbom = async ({ root, scoped, version }) => {
+  const mirrored = await readJson(root, "sbom.cdx.json");
   const component = mirrored.metadata?.component;
   const purl = npmPurl(scoped, version);
   const agreements = [
@@ -320,6 +334,7 @@ const main = async () => {
   const { values } = parseArgs({
     options: {
       scope: { type: "string" },
+      root: { type: "string" },
       "self-check": { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
@@ -329,7 +344,7 @@ const main = async () => {
   selfCheck();
 
   if (values.help) {
-    console.log(`Usage: node scripts/prepare-github-packages.mjs --scope <scope> [--self-check]
+    console.log(`Usage: node scripts/prepare-github-packages.mjs --scope <scope> [--root <dir>] [--self-check]
 
 Rewrites the checkout for a GitHub Packages publish:
   package.json#name                 -> @<scope>/<name>
@@ -338,6 +353,8 @@ Rewrites the checkout for a GitHub Packages publish:
   sbom.cdx.json                     -> regenerated for @<scope>/<name>
 
 server.json, src/generatedPackageMetadata.ts and dist keep the canonical name.
+--root <dir>  operate on another checkout (default: this helper's checkout);
+              every input and output is resolved there.
 --self-check  run the scoped-name rule against its known cases and exit.`);
     return;
   }
@@ -347,10 +364,12 @@ server.json, src/generatedPackageMetadata.ts and dist keep the canonical name.
     fail("--scope is required (for this repository: --scope antruly).", 2);
   }
 
-  const packageJson = await readJson("package.json");
-  const packageLock = await readJson("package-lock.json");
-  const serverJson = await readJson("server.json");
-  const sbom = await readJson("sbom.cdx.json");
+  const root = path.resolve(values.root ?? REPO_ROOT);
+
+  const packageJson = await readJson(root, "package.json");
+  const packageLock = await readJson(root, "package-lock.json");
+  const serverJson = await readJson(root, "server.json");
+  const sbom = await readJson(root, "sbom.cdx.json");
 
   const verdict = scopedNameFor({ name: packageJson.name, scope: values.scope });
   if (!verdict.ok) {
@@ -360,12 +379,12 @@ server.json, src/generatedPackageMetadata.ts and dist keep the canonical name.
   const canonicalName = packageJson.name;
 
   requireCanonicalIdentity({ packageJson, serverJson, sbom });
-  await applyMirrorIdentity({ packageJson, packageLock, scoped });
-  regenerateSbom();
-  await assertMirrorSbom({ scoped, version: packageJson.version });
+  await applyMirrorIdentity({ root, packageJson, packageLock, scoped });
+  regenerateSbom(root);
+  await assertMirrorSbom({ root, scoped, version: packageJson.version });
 
   console.log(
-    `prepared ${scoped}@${packageJson.version} for ${REGISTRY} ` +
+    `prepared ${scoped}@${packageJson.version} in ${root} for ${REGISTRY} ` +
       `(server.json and dist keep ${JSON.stringify(canonicalName)} as the canonical identity)`,
   );
 };
