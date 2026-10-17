@@ -14,7 +14,7 @@ import type {
   ToolchainIdentity,
   ToolchainProvider,
 } from "../../application/ToolchainProvider.js";
-import { cancelledFailure } from "../../domain/errors.js";
+import { UvpFailure, cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
 import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
 import { configHeaderPaths, modulesFromConfigHeader } from "../libuvcppConfig.js";
@@ -231,7 +231,12 @@ const generatorArgs = (generator: BuildRequest["generator"]): readonly string[] 
     case "unix-makefiles":
       return ["-G", "Unix Makefiles"];
     case "msbuild":
-      return ["-G", "Visual Studio 17 2022", "-A", "x64"];
+      // The versioned name was hardcoded to "Visual Studio 17 2022", which fails
+      // on VS 2019 and on the VS 18 runner. CMake's default generator on Windows
+      // is the installed Visual Studio, so omitting `-G`/`-A` follows the host
+      // instead of a version fixed at authoring time. The client rejects the flag
+      // off Windows rather than handing CMake a Windows generator.
+      return [];
     default:
       return [];
   }
@@ -432,6 +437,19 @@ class LocalToolchainClient implements ToolchainClient {
   ) {}
 
   async build(request: BuildRequest): Promise<BuildOutcome> {
+    // A withdrawn call establishes nothing, so it is `cancelled` before any
+    // question about the host or the requested generator is answered.
+    if (request.signal.aborted) throw cancelledFailure(BUILD_CANCELLED);
+    if (request.generator === "msbuild" && !isWindows) {
+      // The same refusal `ContainerToolchainProvider` makes for a Windows build
+      // system it cannot run. Without it, the VS flags reach CMake and the
+      // caller gets a CMake failure instead of the port's typed answer.
+      throw new UvpFailure({
+        code: "unsupported_toolchain",
+        message: "MSBuild is a Windows build system and cannot run on this host.",
+        remediation: { action: "Ask for the ninja or unix-makefiles generator instead." },
+      });
+    }
     // A caller that named a prefix is taken at its word; otherwise the build
     // uses the install this toolchain found, which is the same answer
     // `uvp doctor` reports. Not a convenience: a build that leaves CMake to
