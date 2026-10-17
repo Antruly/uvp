@@ -147,7 +147,8 @@ $env:Path = "$prefix\bin;$env:Path"
 The archive ships `lib/pkgconfig/uvcpp.pc` and no CMake config, and CMake's
 `FindPkgConfig` looks for an executable image (`pkg-config.exe` or
 `pkgconf.exe`), not a `.bat` wrapper. If `pkg-config --version` answers but
-`uvp doctor` reports `missing: PKG_CONFIG_EXECUTABLE`, the `pkg-config` on
+`uvp build` fails during configure with CMake's
+`Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`, the `pkg-config` on
 `PATH` is a script — the Windows runner has Strawberry Perl's
 `pkg-config.bat`, which is exactly that case. Install an executable one, for
 example with `choco install pkgconfiglite`, then reopen the shell:
@@ -163,7 +164,7 @@ Windows. Name Ninja explicitly — it is the route the Windows lane verifies:
 ```powershell
 uvp init .\svc --name svc --template hello-http --port 8090
 uvp build .\svc --generator ninja --build-type Release
-uvp run .\svc --ready-port 8090
+uvp run .\svc --port 8090
 ```
 
 `uvp doctor --json` should report the prefix, the version, and the modules the
