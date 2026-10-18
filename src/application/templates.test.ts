@@ -481,21 +481,17 @@ describe("the routes `uvp init` reports", () => {
     expect(render("rest-api", ["db"])).toContain('app.post("/items/:id"');
   });
 
-  it("names every registration in the rendered source", () => {
-    const featuresFor = (template: TemplateId): readonly UvpFeature[] =>
-      template === "http3-service" ? ["tls", "http3"] : [];
-
+  it("names every registration in the rendered source, in both directions", () => {
     // `serve_static` is one call that registers four routes; the four entries in
     // the table are the four registrations, and this is the call behind them.
+    const STATIC_ROUTES: ReadonlySet<string> = new Set([
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
     const registrationOf = (route: string, template: TemplateId): string => {
-      if (
-        route === "GET /" ||
-        route === "HEAD /" ||
-        route === "GET /*path" ||
-        route === "HEAD /*path"
-      ) {
-        return 'app.serve_static("/", "./public")';
-      }
+      if (STATIC_ROUTES.has(route)) return 'app.serve_static("/", "./public")';
       const [method, path] = route.split(" ") as [string, string];
       const call = method === "WS" ? "websocket" : method.toLowerCase();
       // `http3-service` is written against `uvcpp_http_server`, so its routes are
@@ -503,15 +499,39 @@ describe("the routes `uvp init` reports", () => {
       const receiver = template === "http3-service" ? "server" : "app";
       return `${receiver}.${call}("${path}"`;
     };
+    // The registrations the source spells out itself. `serve_static` is the one
+    // call that registers routes without naming them, so it is counted
+    // separately; that is the only place this pair of checks is not mechanical.
+    const explicitCalls = (source: string): readonly string[] =>
+      [...source.matchAll(/(?:app|server)\.(?:get|post|websocket)\(/gu)].map((match) => match[0]);
 
-    for (const template of TEMPLATE_IDS) {
-      const features = featuresFor(template);
+    const variants: readonly (readonly [TemplateId, readonly UvpFeature[]])[] = [
+      ...TEMPLATE_IDS.map((template): readonly [TemplateId, readonly UvpFeature[]] => [
+        template,
+        template === "http3-service" ? ["tls", "http3"] : [],
+      ]),
+      ["rest-api", ["db"]],
+    ];
+
+    for (const [template, features] of variants) {
       const source = render(template, features);
-      const registrations = new Set(
-        templateRoutes(template, features).map((route) => registrationOf(route, template)),
-      );
+      const routes = templateRoutes(template, features);
+      const registrations = new Set(routes.map((route) => registrationOf(route, template)));
       for (const registration of registrations) {
         expect(source, `${template} does not register ${registration}`).toContain(registration);
+      }
+
+      // The reverse direction: a registration in the source that the table omits
+      // would tell the caller about fewer routes than the service answers. A
+      // count catches that even when the extra route has no table entry to
+      // search for.
+      const tableCalls = routes.filter((route) => !STATIC_ROUTES.has(route)).length;
+      expect(
+        explicitCalls(source).length,
+        `${template} registers a route the table does not name`,
+      ).toBe(tableCalls);
+      if (template === "static-files") {
+        expect(source.match(/app\.serve_static\(/gu)?.length ?? 0).toBe(1);
       }
     }
   });
