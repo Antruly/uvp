@@ -47,6 +47,7 @@ import {
   importTemplatePackage,
   inspectTemplatePackage,
   previewTemplateImport,
+  readStoredTemplatePackage,
   removeTemplatePackage,
   resolveTemplateStoreRoot,
   TemplateStoreError,
@@ -481,11 +482,22 @@ export const createToolHandlers = (
     [workspaceCreateContract.name]: handler(
       workspaceCreateContract.inputSchema,
       async (input, recorder) => {
+        // The store read happens at this edge, through the same projection the
+        // template tools use: a package that no longer matches its manifest is
+        // `artifact_modified` here rather than a rendering failure later.
+        const selector = input.template_package;
+        const templatePackage =
+          selector === undefined
+            ? undefined
+            : await storeCall("stored", () =>
+                readStoredTemplatePackage(selector.id, selector.version),
+              );
         const created = await services.workspace.create({
           path: input.path,
           name: input.name,
-          template: input.template,
-          features: input.features,
+          ...(input.template === undefined ? {} : { template: input.template }),
+          ...(input.features === undefined ? {} : { features: input.features }),
+          ...(templatePackage === undefined ? {} : { templatePackage }),
           port: input.port,
           force: input.force,
           ...(input.modules === undefined ? {} : { modules: input.modules }),
@@ -495,7 +507,13 @@ export const createToolHandlers = (
 
         record(recorder, {
           kind: "build",
-          subject: { workspace_id: created.workspaceId, template: created.template },
+          subject:
+            created.templatePackage === undefined
+              ? { workspace_id: created.workspaceId, template: created.template }
+              : {
+                  workspace_id: created.workspaceId,
+                  template_package: created.templatePackage,
+                },
           observed: {
             path: created.path,
             files: created.files.map((file) => ({ path: file.path, digest: file.digest })),
@@ -513,12 +531,16 @@ export const createToolHandlers = (
             tool: workspaceCreateContract.name,
             provider: identity,
             limitations: [
+              ...(created.limitations ?? []),
               "The generated project has not been compiled. Its first build is the evidence that it works.",
             ],
           }),
           workspace_id: created.workspaceId,
           path: created.path,
-          template: created.template,
+          ...(created.template === undefined ? {} : { template: created.template }),
+          ...(created.templatePackage === undefined
+            ? {}
+            : { template_package: { ...created.templatePackage } }),
           modules: [...created.modules],
           frontends: [...created.frontends],
           files: created.files.map((file) => ({

@@ -126,6 +126,21 @@ app, and an app on `static-files`, `websocket-test`, `static-console`, or
 `http3-service` are refused before any file is written. The selection is
 recorded in `uvp.json` and reported beside `routes`.
 
+`template_package: {id, version}` selects a stored package instead of a
+built-in `template`. Exactly one selector is used: naming both is refused before
+the store is read. Absent `template` and absent `template_package` mean
+`hello-http`, and absent `features` means `websocket` for a built-in template.
+The package's `files/` tree is rendered with its placeholders substituted and
+every file re-hashed against the manifest first — a stored tree that no longer
+matches is `artifact_modified`, and no partial workspace is written. `features`,
+`modules`, `event_payloads`, and `frontends` are refused with a package, because
+they compose the built-in generators rather than the package's source. The
+result reports either `template` or `template_package: {id, version, digest}`,
+never both. The routes are exactly the package's declared `routes`; when the
+manifest declared none, the result carries an empty list and a limitation saying
+the package declared no routes, rather than implying the service registers
+nothing.
+
 ### Template packages
 
 The six `uvp_template_*` tools read and write the local template store. The

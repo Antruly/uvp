@@ -456,6 +456,90 @@ describe("preview", () => {
   });
 });
 
+describe("routes", () => {
+  it("accepts the declared methods, parameters, and subtree paths", () => {
+    const routes = [
+      "GET /hello",
+      "HEAD /",
+      "POST /items",
+      "PUT /items/:id",
+      "PATCH /items/:id",
+      "DELETE /items/:id",
+      "OPTIONS /items",
+      "WS /echo",
+      "GET /*path",
+    ];
+    const result = check({ routes });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The declaration's order is kept: it is the package author's, and a reader
+    // comparing the rendered source to the manifest should not have to sort.
+    expect(result.manifest.routes).toEqual(routes);
+  });
+
+  it("omits an absent declaration rather than reading it as no routes", () => {
+    const result = check();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.routes).toBeUndefined();
+  });
+
+  it("refuses a value that is not a list of strings", () => {
+    rejects(check({ routes: "GET /hello" }), "routes", /array/u);
+    rejects(check({ routes: [42] }), "routes.0", /string/u);
+  });
+
+  it.each([
+    ["no method", "/hello"],
+    ["a lowercase method", "get /hello"],
+    ["no space", "GET"],
+    ["whitespace in the path", "GET /hello world"],
+    ["an absolute URL", "GET http://example.test/hello"],
+  ])("refuses %s", (_label, route) => {
+    rejects(check({ routes: [route] }), "routes.0", /METHOD \/path/u);
+  });
+
+  it("refuses a method the route table does not name", () => {
+    rejects(check({ routes: ["TRACE /hello"] }), "routes.0", /method must be one of/u);
+  });
+
+  it("refuses a control character, which would reach the terminal raw", () => {
+    // `uvp init` prints each route through `row()`, which pads but does not
+    // sanitise: an escape sequence would erase and repaint the line a caller
+    // already read. The same rule `name` and `description` carry applies here.
+    rejects(check({ routes: ["GET /\u001b[2Kred"] }), "routes.0", /control character/u);
+    rejects(check({ routes: ["GET /a\u0000b"] }), "routes.0", /control character/u);
+  });
+
+  it("accepts a non-ASCII path, which the control-character rule does not refuse", () => {
+    const result = check({ routes: ["GET /你好"] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.routes).toEqual(["GET /你好"]);
+  });
+
+  it("refuses a duplicate and names the entry", () => {
+    rejects(check({ routes: ["GET /hello", "GET /hello"] }), "routes.1", /duplicates/u);
+  });
+
+  it("bounds the list and the path length", () => {
+    // A short declared path keeps the file rule out of a test about routes.
+    const shortFile = { files: [{ path: "a.cc", digest: DIGEST_A, bytes: 1 }] };
+    const counts = { ...DEFAULT_TEMPLATE_PACKAGE_LIMITS, maxRoutes: 2 };
+    expect(check({ ...shortFile, routes: ["GET /a", "GET /b"] }, undefined, counts).ok).toBe(true);
+    rejects(
+      check({ ...shortFile, routes: ["GET /a", "GET /b", "GET /c"] }, undefined, counts),
+      "routes",
+    );
+    const lengths = { ...DEFAULT_TEMPLATE_PACKAGE_LIMITS, maxPathLength: 8 };
+    rejects(
+      check({ ...shortFile, routes: ["GET /abcdefghij"] }, undefined, lengths),
+      "routes.0",
+      /path/u,
+    );
+  });
+});
+
 describe("file paths", () => {
   it.each([
     ["a source file", "src/main.cc", true],

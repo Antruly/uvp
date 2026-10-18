@@ -26,9 +26,10 @@ import { Problems, asString, isRecord } from "./templatePackageProblems.js";
  * the registry (`path`), the manifest's canonical digest (`digest`), and that
  * each version entry repeats the manifest's `files[]`.
  *
- * The documented entry shape omits the manifest's `variables` and `preview`,
- * but the registry's generator currently spreads the whole `template.json` into
- * each entry, so those fields (and the redundant `schema`/`id`) can be present.
+ * The documented entry shape omits the manifest's `variables`, `preview`, and
+ * `routes`, but the registry's generator currently spreads the whole
+ * `template.json` into each entry, so those fields (and the redundant
+ * `schema`/`id`) can be present.
  * They are accepted and validated with the manifest rules, and `schema`/`id`
  * must agree with the index when present. The generator also repeats its
  * observation list as `files[]`, which carries `binary`; that field is accepted
@@ -58,6 +59,13 @@ export interface TemplateRegistryVersion {
   readonly framework?: TemplatePackageFramework;
   readonly tags?: readonly string[];
   readonly requires?: TemplatePackageRequires;
+  /**
+   * The routes the package declares, carried through from the mirrored manifest.
+   *
+   * The index is a manifest mirror, so dropping a field the package declared
+   * would make the registry's answer disagree with the package it describes.
+   */
+  readonly routes?: readonly string[];
   readonly files: readonly TemplatePackageFile[];
   readonly license: TemplatePackageLicense;
   readonly provenance: TemplatePackageProvenance;
@@ -102,6 +110,7 @@ const VERSION_KEYS = new Set([
   "license",
   "provenance",
   "preview",
+  "routes",
   "files",
   // The generator spreads `template.json` into the entry, so the manifest's own
   // `schema` and `id` can appear here as redundant repeats.
@@ -128,6 +137,7 @@ const MANIFEST_FIELDS = [
   "license",
   "provenance",
   "preview",
+  "routes",
 ] as const;
 
 const PACKAGE_PATH_PREFIX = "packages/";
@@ -261,6 +271,7 @@ function readVersionEntry(
     ...(value.framework === undefined ? {} : { framework: value.framework }),
     ...(value.tags === undefined ? {} : { tags: value.tags }),
     ...(value.requires === undefined ? {} : { requires: value.requires }),
+    ...(value.routes === undefined ? {} : { routes: value.routes }),
     files: value.files,
     license: value.license,
     provenance: value.provenance,

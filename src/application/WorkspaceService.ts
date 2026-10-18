@@ -44,6 +44,8 @@ import {
   unknownModules,
   type UvpModule,
 } from "../domain/modules.js";
+import { renderTemplatePackageWorkspace } from "./TemplatePackageRender.js";
+import type { StoredTemplatePackageSource } from "./TemplateStore.js";
 import { describeStop } from "./ProcessSupervisor.js";
 import { tailWithin } from "./evidenceHelpers.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
@@ -60,7 +62,19 @@ export interface CreatedFile {
 export interface CreateWorkspaceResult {
   readonly workspaceId: string;
   readonly path: string;
-  readonly template: string;
+  /** The built-in template, for a workspace generated from one. */
+  readonly template?: string;
+  /**
+   * The stored package this workspace was rendered from, for a package
+   * workspace. Exactly one of `template` and `templatePackage` is present.
+   */
+  readonly templatePackage?: {
+    readonly id: string;
+    readonly version: string;
+    readonly digest: string;
+  };
+  /** Limitations the caller must report beside the result, if any. */
+  readonly limitations?: readonly string[];
   /**
    * The application modules the workspace was born with, in canonical order.
    *
@@ -197,6 +211,31 @@ const directoryEntries = async (path: string): Promise<readonly string[]> => {
 };
 
 /**
+ * Write generated files, accepting both text and bytes.
+ *
+ * The built-in templates render strings; a template package may carry a binary
+ * asset, whose bytes must reach the workspace unchanged. One writer keeps the
+ * digest in `CreatedFile` computed from the same bytes that were written.
+ */
+const writeGeneratedFiles = async (
+  root: string,
+  files: readonly { readonly path: string; readonly content: string | Uint8Array }[],
+): Promise<CreatedFile[]> => {
+  const created: CreatedFile[] = [];
+  for (const file of files) {
+    const target = join(root, file.path);
+    await mkdir(dirname(target), { recursive: true });
+    const bytes =
+      typeof file.content === "string"
+        ? Buffer.from(file.content, "utf8")
+        : Buffer.from(file.content);
+    await writeFile(target, bytes);
+    created.push({ path: target, bytes: bytes.byteLength, digest: sha256(bytes) });
+  }
+  return created;
+};
+
+/**
  * Poll an endpoint until it answers, the deadline passes, or the caller stops us.
  *
  * Three outcomes rather than two, because a deadline and a withdrawal are
@@ -280,8 +319,28 @@ export class WorkspaceService {
   async create(input: {
     path: string;
     name: string;
-    template: TemplateId;
-    features: readonly UvpFeature[];
+    /**
+     * The built-in template, for the generated-workspace path.
+     *
+     * Optional so a caller can name a package instead; absent with no
+     * `templatePackage` means `hello-http`, the default the contract used to
+     * apply. The contract cannot apply that default any more, because it has to
+     * tell "omitted" from "explicitly hello-http" to refuse the two selectors
+     * together.
+     */
+    template?: TemplateId | undefined;
+    /**
+     * A stored package to render, already read and verified against its
+     * manifest. The composition edge owns the store read and its error
+     * projection; this service owns the rendering and the writes.
+     */
+    templatePackage?: StoredTemplatePackageSource | undefined;
+    /**
+     * Transport features. Absent means the default (`websocket`) for a built-in
+     * template, and is refused for a package: the package's `requires.features`
+     * are the authority on what its source was written for.
+     */
+    features?: readonly UvpFeature[] | undefined;
     port: number;
     force: boolean;
     /**
@@ -325,7 +384,79 @@ export class WorkspaceService {
       }
     }
 
-    const featureProblem = templateFeatureProblem(input.template, input.features);
+    if (input.template !== undefined && input.templatePackage !== undefined) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          "A workspace is generated from one selector: a built-in template or a stored package, not both.",
+        remediation: {
+          action: "Pass one of --template and --template-package, not both.",
+        },
+        details: { template: input.template, template_package: input.templatePackage.package.id },
+      });
+    }
+
+    if (input.templatePackage !== undefined) {
+      // `features`, modules, skins, and the payload policy are all fragments of
+      // the built-in generators. This workspace's source is the package's, so
+      // accepting one would either change nothing or compose code the package
+      // never declared; refusing names the option instead of silently ignoring
+      // it.
+      const builtInOnly = [
+        input.features === undefined ? undefined : "features",
+        input.modules === undefined ? undefined : "modules",
+        input.eventPayloads === undefined ? undefined : "event_payloads",
+        input.frontends === undefined ? undefined : "frontends",
+      ].filter((name): name is string => name !== undefined);
+      if (builtInOnly.length > 0) {
+        throw new UvpFailure({
+          code: "invalid_request",
+          message:
+            `A package workspace's source comes from the package, so ${builtInOnly.join(", ")} ` +
+            "would compose code the package does not declare.",
+          remediation: {
+            action:
+              "Drop the built-in-composition option, or use --template for a built-in template.",
+          },
+          details: {
+            template_package: input.templatePackage.package.id,
+            refused: builtInOnly,
+          },
+        });
+      }
+      const rendered = renderTemplatePackageWorkspace({
+        source: input.templatePackage,
+        name: input.name,
+        port: input.port,
+      });
+      const createdFiles = await writeGeneratedFiles(root, rendered.files);
+      return {
+        workspaceId: workspaceIdOf(root),
+        path: root,
+        templatePackage: {
+          id: input.templatePackage.package.id,
+          version: input.templatePackage.package.version,
+          digest: input.templatePackage.package.digest,
+        },
+        modules: [],
+        frontends: [],
+        files: createdFiles,
+        routes: [...rendered.routes],
+        nextSteps: [
+          `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
+          `cmake --build ${join(root, "build")}`,
+          join(root, "build", rendered.binary),
+        ],
+        ...(rendered.routesLimitation === undefined
+          ? {}
+          : { limitations: [rendered.routesLimitation] }),
+      };
+    }
+
+    const template = input.template ?? "hello-http";
+    const features = input.features ?? ["websocket"];
+
+    const featureProblem = templateFeatureProblem(template, features);
     if (featureProblem !== undefined) {
       // `missing_requirement` rather than `invalid_request`, which is what this
       // was first written as. Both are `invalid_input` and both exit 2, so the
@@ -335,13 +466,13 @@ export class WorkspaceService {
       // for a module the installed libuvcpp was not built with.
       throw new UvpFailure({
         code: "missing_requirement",
-        message: `The ${input.template} template cannot be generated with the requested features: ${featureProblem}.`,
+        message: `The ${template} template cannot be generated with the requested features: ${featureProblem}.`,
         remediation: {
           action:
             "Re-run with a feature list this template can honour. `uvp doctor --features` reports " +
             "which of them the installed libuvcpp provides.",
         },
-        details: { template: input.template, features: [...input.features] },
+        details: { template: template, features: [...features] },
       });
     }
 
@@ -349,7 +480,7 @@ export class WorkspaceService {
     // workspace that exists with a manifest naming a module whose code is not in
     // it would be a claim the source does not support, and a half-written one is
     // worse than a refusal because the caller has to clean it up.
-    const requested = input.modules ?? defaultModules(input.template);
+    const requested = input.modules ?? defaultModules(template);
     const unknown = unknownModules(requested);
     if (unknown.length > 0) {
       throw new UvpFailure({
@@ -375,7 +506,7 @@ export class WorkspaceService {
       });
     }
     const modules = resolveModules(requested.filter(isUvpModule));
-    if (input.template === "http3-service" && modules.length > 0) {
+    if (template === "http3-service" && modules.length > 0) {
       // Not a route conflict but a layering one: this template's routes are
       // registered on `uvcpp_http_server`, and every module is written against
       // `uvcpp_web_app`. Composing them would generate a file that does not
@@ -390,10 +521,10 @@ export class WorkspaceService {
           action:
             "Choose a web-app template for module composition, or generate http3-service without --modules.",
         },
-        details: { template: input.template, modules: [...modules] },
+        details: { template: template, modules: [...modules] },
       });
     }
-    const moduleFeatureRefusal = moduleFeatureProblem(modules, input.features);
+    const moduleFeatureRefusal = moduleFeatureProblem(modules, features);
     if (moduleFeatureRefusal !== undefined) {
       throw new UvpFailure({
         code: "missing_requirement",
@@ -403,7 +534,7 @@ export class WorkspaceService {
             "Re-run with the feature the module is written against; `uvp doctor --features` reports " +
             "which of them the installed libuvcpp provides.",
         },
-        details: { modules: [...modules], features: [...input.features] },
+        details: { modules: [...modules], features: [...features] },
       });
     }
     const dependencyRefusal = moduleDependencyProblem(modules);
@@ -419,8 +550,8 @@ export class WorkspaceService {
     // whether the template already serves what the module would register.
     const conflict = moduleRouteConflictProblem(
       modules,
-      input.template,
-      templateRoutes(input.template, input.features, []),
+      template,
+      templateRoutes(template, features, []),
     );
     if (conflict !== undefined) {
       throw new UvpFailure({
@@ -430,7 +561,7 @@ export class WorkspaceService {
           action:
             "Drop the conflicting module, or choose a template that does not already serve that route.",
         },
-        details: { template: input.template, modules: [...modules] },
+        details: { template: template, modules: [...modules] },
       });
     }
 
@@ -526,23 +657,23 @@ export class WorkspaceService {
     // registrations fighting over `/`. Refused here rather than rendered with
     // one of them silently dropped.
     const ownsDocumentRoot =
-      input.template === "static-files" ||
-      input.template === "websocket-test" ||
+      template === "static-files" ||
+      template === "websocket-test" ||
       modules.includes("static-console");
     if (selection.app !== undefined && ownsDocumentRoot) {
       throw new UvpFailure({
         code: "invalid_request",
         message:
-          `The ${input.template} template already serves a page at / ` +
-          `(${input.template === "static-files" ? "its public/ document root" : "its test console"}), ` +
+          `The ${template} template already serves a page at / ` +
+          `(${template === "static-files" ? "its public/ document root" : "its test console"}), ` +
           `so the ${selection.app} frontend cannot own that document root too.`,
         remediation: {
           action: "Choose a backend template for a frontend app, or drop the app selection.",
         },
-        details: { template: input.template, app: selection.app },
+        details: { template: template, app: selection.app },
       });
     }
-    if (input.template === "http3-service" && (selection.pages.length > 0 || selection.app)) {
+    if (template === "http3-service" && (selection.pages.length > 0 || selection.app)) {
       // Not a preference: this template's routes are registered on a plain
       // `uvcpp_http_server`, and the generated code never gives that server a
       // document root. Accepting the selection would write a frontend nothing serves.
@@ -556,39 +687,32 @@ export class WorkspaceService {
             "Choose a web-app template for a frontend, or generate http3-service without --frontend/--frontends.",
         },
         details: {
-          template: input.template,
+          template: template,
           frontends: frontendSelectionNames(selection),
         },
       });
     }
     const frontends = frontendSelectionNames(selection);
 
-    const files = renderTemplate(input.template, {
+    const files = renderTemplate(template, {
       name: input.name,
       port: input.port,
-      features: input.features,
+      features: features,
       modules,
       frontends,
       ...(input.eventPayloads === undefined ? {} : { eventPayloads: input.eventPayloads }),
     });
 
-    const created: CreatedFile[] = [];
-    for (const file of files) {
-      const target = join(root, file.path);
-      await mkdir(dirname(target), { recursive: true });
-      const bytes = Buffer.from(file.content, "utf8");
-      await writeFile(target, bytes);
-      created.push({ path: target, bytes: bytes.byteLength, digest: sha256(bytes) });
-    }
+    const created = await writeGeneratedFiles(root, files);
 
     return {
       workspaceId: workspaceIdOf(root),
       path: root,
-      template: input.template,
+      template: template,
       modules,
       frontends,
       files: created,
-      routes: templateRoutes(input.template, input.features, modules, frontends),
+      routes: templateRoutes(template, features, modules, frontends),
       nextSteps: [
         `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
         `cmake --build ${join(root, "build")}`,

@@ -101,6 +101,8 @@ export interface StoredTemplatePackage {
   readonly requires?: TemplatePackageManifest["requires"];
   readonly license?: TemplatePackageManifest["license"];
   readonly provenance?: TemplatePackageManifest["provenance"];
+  /** The routes the package declares, as `METHOD /path`; absent means none declared. */
+  readonly routes?: readonly string[];
   readonly digest: string;
   readonly files: readonly TemplatePackageFile[];
   readonly preview?: string;
@@ -508,6 +510,7 @@ const storedFields = (validated: ValidatedPackage): InspectedTemplatePackage => 
     ...(validated.unverified || manifest.provenance === undefined
       ? {}
       : { provenance: manifest.provenance }),
+    ...(manifest.routes === undefined ? {} : { routes: manifest.routes }),
     digest: validated.digest,
     files: validated.files,
     ...(manifest.preview === undefined ? {} : { preview: manifest.preview }),
@@ -852,6 +855,54 @@ export const getTemplatePackage = async (
     throw recordFailureOf(metadata, error) ?? error;
   }
   return toStored(validated, target);
+};
+
+export interface StoredTemplatePackageFile {
+  /** Path relative to the package's `files/` directory. */
+  readonly path: string;
+  readonly bytes: Uint8Array;
+}
+
+export interface StoredTemplatePackageSource {
+  readonly package: StoredTemplatePackage;
+  /** One entry per declared file, in manifest order, with its bytes. */
+  readonly files: readonly StoredTemplatePackageFile[];
+}
+
+/**
+ * Read a stored package and the bytes of every file its manifest declares.
+ *
+ * `getTemplatePackage` answers "what does the store hold and does the tree match
+ * the declaration"; this adds the bytes a caller needs to render a workspace.
+ * The files are read after that validation and hashed again against the declared
+ * digest, so a tree replaced between the two reads is refused rather than
+ * rendered — the same defence `exportTemplatePackage` applies to its copy.
+ */
+export const readStoredTemplatePackage = async (
+  id: string,
+  version: string,
+  options: TemplateStoreOptions = {},
+): Promise<StoredTemplatePackageSource> => {
+  const stored = await getTemplatePackage(id, version, options);
+  const files: StoredTemplatePackageFile[] = [];
+  for (const declared of stored.files) {
+    const target = path.join(stored.path, TOP_LEVEL_DIRECTORY, declared.path);
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(target);
+    } catch (error) {
+      throw ioError(`could not read ${target}`, error);
+    }
+    const digest = `sha256:${sha256(bytes)}`;
+    if (digest !== declared.digest || bytes.byteLength !== declared.bytes) {
+      throw invalid(`${declared.path} no longer matches the manifest`, [
+        `${declared.path}: observed ${String(bytes.byteLength)} byte(s) with digest ${digest}, ` +
+          `manifest declares ${String(declared.bytes)} byte(s) with digest ${declared.digest}`,
+      ]);
+    }
+    files.push({ path: declared.path, bytes });
+  }
+  return { package: stored, files };
 };
 
 /**

@@ -29,8 +29,9 @@ export const initCommand: CommandSpec = {
   tool: "uvp_workspace_create",
   summary: "Scaffold a buildable libuvcpp C++ project.",
   usage:
-    "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] " +
-    "[--modules LIST] [--event-payloads summary|verbatim] [--frontend ID|none] " +
+    "uvp init PATH --name NAME [--template TEMPLATE | --template-package ID@VERSION] " +
+    "[--port PORT] [--features LIST] [--modules LIST] " +
+    "[--event-payloads summary|verbatim] [--frontend ID|none] " +
     "[--frontends LIST] [--force] [--json]",
   positionals: [{ name: "PATH", description: "Directory to create the workspace in." }],
   flags: [
@@ -42,6 +43,14 @@ export const initCommand: CommandSpec = {
       description:
         "hello-http, rest-api, websocket-echo, websocket-test, soap-service, static-files, or " +
         "http3-service.",
+    },
+    {
+      name: "template-package",
+      type: "string",
+      value: "ID@VERSION",
+      description:
+        "A stored template package to render instead of a built-in template, for example " +
+        "acme-dashboard@1.0.0. Import one with `uvp template import`.",
     },
     {
       name: "port",
@@ -120,11 +129,25 @@ export const initCommand: CommandSpec = {
     "then / answers 503 with that instruction. One app per workspace, and it cannot be combined",
     "with static skins or with a template that already owns the document root.",
     "http3-service refuses a frontend: its generated source registers no static document root.",
+    "--template-package renders a stored package's files instead of a built-in template's: the",
+    "package's declared placeholders are substituted, its routes are reported, and uvp.json",
+    "records the package id, version, and digest. Only one selector is used, so --template and",
+    "--template-package are refused together. --features, --modules, --event-payloads, and",
+    "--frontend/--frontends are refused with a package: the package's own source and",
+    "requires.features say what it was written for.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp init ./svc --name svc");
     const name = asString(parsed, "name");
     const template = asString(parsed, "template");
+    const templatePackageFlag = asString(parsed, "template-package");
+    if (template !== undefined && templatePackageFlag !== undefined) {
+      flagError("--template and --template-package both name a selector; pass one of them.", {
+        usage: "uvp init PATH --name NAME --template-package acme-dashboard@1.0.0",
+      });
+    }
+    const templatePackage =
+      templatePackageFlag === undefined ? undefined : templatePackageRef(templatePackageFlag);
     const port = asNumber(parsed, "port");
     const features = parseCsv(asList(parsed, "features"));
     // Not `parseCsv`: that helper drops repeats, and a module named twice is a
@@ -196,6 +219,7 @@ export const initCommand: CommandSpec = {
       path,
       ...(derivedName === undefined ? { name } : { name: derivedName }),
       ...(template === undefined ? {} : { template }),
+      ...(templatePackage === undefined ? {} : { template_package: templatePackage }),
       ...(port === undefined ? {} : { port }),
       ...(features.length === 0 ? {} : { features }),
       ...(modulesGiven ? { modules } : {}),
@@ -204,6 +228,25 @@ export const initCommand: CommandSpec = {
       ...(force === undefined ? {} : { force }),
     };
   },
+};
+
+/**
+ * Split `--template-package ID@VERSION`.
+ *
+ * The split happens here rather than in the contract because the flag is one
+ * word and the contract takes one object. A missing `@`, an empty half, or a
+ * second `@` is a malformed flag and is refused with the accepted spelling;
+ * whether the halves exist in the store, and whether the version is SemVer, is
+ * the contract's and the store's question.
+ */
+const templatePackageRef = (value: string): { id: string; version: string } => {
+  const at = value.indexOf("@");
+  if (at <= 0 || at === value.length - 1 || value.indexOf("@", at + 1) !== -1) {
+    flagError(`--template-package takes ID@VERSION, not "${value}".`, {
+      usage: "uvp init PATH --name NAME --template-package acme-dashboard@1.0.0",
+    });
+  }
+  return { id: value.slice(0, at), version: value.slice(at + 1) };
 };
 
 /**
