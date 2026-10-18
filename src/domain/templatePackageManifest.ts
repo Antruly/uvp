@@ -452,6 +452,16 @@ function readRoutes(
       problems.add(location, "must be a string");
       return;
     }
+    // The same rule `name`, `description`, the licence name, and the author
+    // carry: a route is printed in reports and in `uvp init`'s human output, so
+    // an escape sequence in the path could rewrite the line the terminal has
+    // already written. Refused before the shape check, so the message that
+    // repeats the route in a duplicate report cannot carry one either.
+    const textProblem = templatePackageTextProblem(route);
+    if (textProblem !== undefined) {
+      problems.add(location, textProblem);
+      return;
+    }
     if (!TEMPLATE_PACKAGE_ROUTE_PATTERN.test(route)) {
       problems.add(location, "must be 'METHOD /path' with no whitespace in the path");
       return;

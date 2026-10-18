@@ -100,9 +100,9 @@ manifest would silently drop it.
 | `provenance`        | yes      | `author`, `createdAt`; optional `source` and `revision`                                          |
 | `preview`           | no       | `preview.png`, `preview.svg`, or `preview.webp`                                                  |
 
-`name`, `description`, `license.name`, and `provenance.author` may not contain
-control characters. They appear in search results and reports, and a control
-character could rewrite the line a terminal has already written.
+`name`, `description`, `license.name`, `provenance.author`, and every route may
+not contain control characters. They appear in search results and reports, and
+a control character could rewrite the line a terminal has already written.
 
 `routes` is what the package's service registers, and it is the only route
 information `uvp init` reports for a package workspace. A method must be one of
@@ -208,8 +208,12 @@ The one file uvp writes rather than copies is `uvp.json`:
 
 - a package that ships one keeps every field, loses `template` (the selectors
   are mutually exclusive), and gains `template_package: {id, version, digest}`;
+  the package's own `name`, `port`, and `binary` therefore win over `--name` and
+  `--port` — those still drive the placeholder substitution and the result's
+  identity, so a package whose `uvp.json` disagrees with them produces source and
+  a manifest that disagree, and `uvp run` follows the manifest;
 - a package without one gets a minimal manifest with `uvp`, `name`, `binary`,
-  `port`, `features`, `template_package`, and `requires.libuvcpp` when the
+  `port`, `features`, `template_package`, and `requirements.libuvcpp` when the
   package declared one.
 
 The result reports the built-in `template` or the `template_package`

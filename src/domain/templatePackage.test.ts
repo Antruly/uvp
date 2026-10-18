@@ -503,6 +503,21 @@ describe("routes", () => {
     rejects(check({ routes: ["TRACE /hello"] }), "routes.0", /method must be one of/u);
   });
 
+  it("refuses a control character, which would reach the terminal raw", () => {
+    // `uvp init` prints each route through `row()`, which pads but does not
+    // sanitise: an escape sequence would erase and repaint the line a caller
+    // already read. The same rule `name` and `description` carry applies here.
+    rejects(check({ routes: ["GET /\u001b[2Kred"] }), "routes.0", /control character/u);
+    rejects(check({ routes: ["GET /a\u0000b"] }), "routes.0", /control character/u);
+  });
+
+  it("accepts a non-ASCII path, which the control-character rule does not refuse", () => {
+    const result = check({ routes: ["GET /你好"] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.routes).toEqual(["GET /你好"]);
+  });
+
   it("refuses a duplicate and names the entry", () => {
     rejects(check({ routes: ["GET /hello", "GET /hello"] }), "routes.1", /duplicates/u);
   });
