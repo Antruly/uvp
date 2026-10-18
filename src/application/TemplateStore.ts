@@ -488,17 +488,29 @@ const readStoreMetadata = async (
   return { digest: raw["digest"], unverified: raw["unverified"] };
 };
 
-const writeStoreMetadata = async (
+interface StagedStoreMetadata {
+  readonly id: string;
+  readonly version: string;
+  readonly temporary: string;
+  readonly target: string;
+}
+
+/**
+ * Write the metadata beside its destination without publishing it. Staging
+ * happens before any tree move, so a metadata directory that cannot be written
+ * fails the import while the store is still untouched.
+ */
+const stageStoreMetadata = async (
   root: string,
   id: string,
   version: string,
   metadata: StoreMetadata,
-): Promise<void> => {
+): Promise<StagedStoreMetadata> => {
   const directory = path.join(root, META_NAME, id);
-  await ensureDirectory(directory);
   const target = metadataPath(root, id, version);
   const temporary = path.join(directory, `.${randomUUID()}.json`);
   try {
+    await ensureDirectory(directory);
     await writeFile(
       temporary,
       `${JSON.stringify({
@@ -511,10 +523,36 @@ const writeStoreMetadata = async (
       })}\n`,
       "utf8",
     );
-    await rename(temporary, target);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined);
-    throw ioError(`could not write metadata for ${id}@${version}`, error);
+    throw ioError(`could not stage metadata for ${id}@${version}`, error);
+  }
+  return { id, version, temporary, target };
+};
+
+/** Publish staged metadata; the caller rolls back the tree when this fails. */
+const commitStoreMetadata = async (staged: StagedStoreMetadata): Promise<void> => {
+  try {
+    await rename(staged.temporary, staged.target);
+  } catch (error) {
+    await rm(staged.temporary, { force: true }).catch(() => undefined);
+    throw ioError(`could not write metadata for ${staged.id}@${staged.version}`, error);
+  }
+};
+
+const discardStoreMetadata = async (staged: StagedStoreMetadata): Promise<void> => {
+  await rm(staged.temporary, { force: true }).catch(() => undefined);
+};
+
+/**
+ * Drop a tree that was already renamed into place. The caller restores the
+ * previous package separately; a failure here is left to that caller to report.
+ */
+const rollbackNewTree = async (target: string, staging: string): Promise<void> => {
+  try {
+    await rename(target, staging);
+  } catch {
+    await rm(target, { recursive: true, force: true }).catch(() => undefined);
   }
 };
 
@@ -606,6 +644,7 @@ export const importTemplatePackage = async (
     await ensureDirectory(path.join(root, TMP_NAME));
     let retained: string | undefined;
     let replaced = false;
+    let stagedMetadata: StagedStoreMetadata | undefined;
     try {
       await copyPackage(sourceDir, staging);
       const staged = await readPackageDirectory(staging, {
@@ -613,6 +652,12 @@ export const importTemplatePackage = async (
         allowUnverified: options.allowUnverified === true,
       });
       await ensureDirectory(path.dirname(target));
+      // Stage metadata before moving any tree: a metadata directory that
+      // cannot be written fails the import while the store is still untouched.
+      stagedMetadata = await stageStoreMetadata(root, id, version, {
+        digest: staged.digest,
+        unverified: staged.unverified,
+      });
 
       if (targetExists) {
         const trash = path.join(root, TRASH_NAME, randomUUID());
@@ -625,6 +670,23 @@ export const importTemplatePackage = async (
           } catch (error) {
             await rename(trash, target).catch(() => undefined);
             throw ioError(`could not move ${staging} into place`, error);
+          }
+          try {
+            await commitStoreMetadata(stagedMetadata);
+          } catch (error) {
+            // The old tree is still in trash and its metadata is untouched.
+            // Put the old package back and drop the new tree, so a failed
+            // replace neither reports success nor loses the previous version.
+            await rollbackNewTree(target, staging);
+            await rename(trash, target).catch(() => {
+              retained = trash;
+            });
+            throw retained === undefined
+              ? error
+              : ioError(
+                  `could not restore ${target}; the previous package remains at ${trash}`,
+                  error,
+                );
           }
           await rm(trash, { recursive: true, force: true }).catch(() => {
             retained = trash;
@@ -639,18 +701,27 @@ export const importTemplatePackage = async (
         } catch (error) {
           throw ioError(`could not move ${staging} into place`, error);
         }
+        try {
+          await commitStoreMetadata(stagedMetadata);
+        } catch (error) {
+          // Removing the tree keeps the promised invariant: a failed import
+          // leaves no package. A cleanup failure is named, not hidden.
+          await rm(target, { recursive: true, force: true }).catch(() => {
+            retained = target;
+          });
+          throw retained === undefined
+            ? error
+            : ioError(`could not remove ${target} after a failed metadata write`, error);
+        }
       }
 
-      await writeStoreMetadata(root, id, version, {
-        digest: staged.digest,
-        unverified: staged.unverified,
-      });
       return {
         package: toStored(staged, target),
         replaced,
         ...(retained === undefined ? {} : { retained }),
       };
     } finally {
+      if (stagedMetadata !== undefined) await discardStoreMetadata(stagedMetadata);
       await rm(staging, { recursive: true, force: true }).catch(() => undefined);
     }
   });

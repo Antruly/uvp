@@ -276,6 +276,46 @@ describe("the store's failure paths", () => {
     );
   });
 
+  it("leaves no package when metadata cannot be published after the tree move", async () => {
+    const storeRoot = await makeStore();
+    // A directory at the metadata destination makes the final rename fail
+    // after the staged tree is already in place.
+    const blockedMetadata = path.join(storeRoot, ".meta", "acme-dashboard", "1.2.1.json");
+    await mkdir(blockedMetadata, { recursive: true });
+    await writeFile(path.join(blockedMetadata, "occupied"), "x\n");
+    const fixture = await makePackage({ overrides: { version: "1.2.1" } });
+
+    expect(await codeOf(importTemplatePackage({ sourceDir: fixture.dir, storeRoot }))).toBe(
+      "io_error",
+    );
+    expect(await codeOf(getTemplatePackage("acme-dashboard", "1.2.1", { storeRoot }))).toBe(
+      "not_found",
+    );
+    const listed = await listTemplatePackages({ storeRoot });
+    expect(listed.packages.map((entry) => `${entry.id}@${entry.version}`)).toEqual([]);
+  });
+
+  it("restores the previous package when a replace cannot publish metadata", async () => {
+    const storeRoot = await makeStore();
+    const first = await makePackage();
+    const original = await importTemplatePackage({ sourceDir: first.dir, storeRoot });
+    const blockedMetadata = path.join(storeRoot, ".meta", "acme-dashboard", "1.2.0.json");
+    await rm(blockedMetadata, { force: true });
+    await mkdir(blockedMetadata, { recursive: true });
+    await writeFile(path.join(blockedMetadata, "occupied"), "x\n");
+    const next = await makePackage({
+      overrides: { version: "1.2.0" },
+      content: "int main() { return 7; }\n",
+    });
+
+    expect(
+      await codeOf(importTemplatePackage({ sourceDir: next.dir, storeRoot, replace: true })),
+    ).toBe("io_error");
+    const read = await getTemplatePackage("acme-dashboard", "1.2.0", { storeRoot });
+    expect(read.digest).toBe(original.package.digest);
+    expect(read.files[0]?.path).toBe("src/main.cc");
+  });
+
   it("removes a version, then reports it as absent", async () => {
     const storeRoot = await makeStore();
     const fixture = await makePackage();
