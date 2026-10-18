@@ -197,7 +197,17 @@ describe("effects and annotations", () => {
     // `uvp_capture_replay` is absent for the same reason `uvp_load_test` is: it
     // reports what it compared and the digests behind it, never the bytes. Its
     // whole result is statuses, counts, and hashes of the target's responses.
+    // The template tools are marked because their results carry manifest text
+    // the package author wrote — `name`, `description`, `tags`, `preview`.
+    // `uvp_template_export` and `uvp_template_remove` are absent: they return
+    // only paths, digests, and counts that uvp computed.
     expect(marked).toEqual([
+      // The template contracts appear first in `TOOL_CONTRACTS`, after
+      // `workspace_create`, so the exact order is the declaration order.
+      "uvp_template_search",
+      "uvp_template_get",
+      "uvp_template_validate",
+      "uvp_template_import",
       "uvp_build",
       // npm's own diagnostics and anything the registry printed in them are
       // not uvp's words.

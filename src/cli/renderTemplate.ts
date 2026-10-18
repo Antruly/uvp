@@ -102,6 +102,17 @@ export const renderTemplateImport = (output: Record<string, unknown>): string[] 
   ];
   const path = str(output["path"]);
   if (path !== "") lines.push(row("store", path));
+  if (dryRun) {
+    lines.push(
+      row(
+        "would",
+        `${bool(output["would_import"]) === true ? "import" : "refuse"}` +
+          `${bool(output["would_replace"]) === true ? ", replacing the stored entry" : ""}`,
+      ),
+    );
+    const conflict = str(output["conflict"]);
+    if (conflict !== "") lines.push(row("conflict", conflict));
+  }
   const retained = str(output["retained"]);
   if (retained !== "") lines.push(row("retained", retained));
   lines.push(

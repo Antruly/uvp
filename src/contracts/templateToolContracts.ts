@@ -24,6 +24,15 @@ import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
  * The store root is not an input. It is resolved by the store from
  * `UVP_TEMPLATE_HOME` or `~/.uvp/templates`, so two callers of the same tool
  * cannot silently use different stores.
+ *
+ * `returnsTargetContent` is true for `search`, `get`, `validate`, and `import`,
+ * and false for `export` and `remove`. The flag marks text uvp did not author:
+ * the first four return `name`, `description`, `tags`, and `preview` exactly as
+ * the package author wrote them, so a client must render them as data rather
+ * than as uvp's own words. `export` and `remove` return only paths, digests,
+ * and counts that uvp computed. The line is drawn at free-form text: a path or
+ * a digest is constrained by validation and carries no prose an agent could
+ * mistake for a directive.
  */
 
 const templateId = z
@@ -182,6 +191,7 @@ export const templateSearchContract = defineTool({
     spawnsProcess: false,
     mutatesTarget: false,
   },
+  returnsTargetContent: true,
   examples: [
     {
       description: "Find a WebSocket-capable frontend package",
@@ -220,6 +230,7 @@ export const templateGetContract = defineTool({
     spawnsProcess: false,
     mutatesTarget: false,
   },
+  returnsTargetContent: true,
   examples: [
     { description: "Read acme-dashboard 1.2.0", input: { id: "acme-dashboard", version: "1.2.0" } },
   ],
@@ -260,6 +271,7 @@ export const templateValidateContract = defineTool({
     spawnsProcess: false,
     mutatesTarget: false,
   },
+  returnsTargetContent: true,
   examples: [
     {
       description: "Validate a package before importing it",
@@ -296,7 +308,14 @@ export const templateImportContract = defineTool({
       .boolean()
       .default(false)
       .describe("Admit a package whose only problems are licence/provenance."),
-    dry_run: z.boolean().default(false).describe("Validate and scan without writing to the store."),
+    dry_run: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Validate and scan without writing to the store. A dry run also reports whether the " +
+          "same call would write, replace, or be refused, in `would_import`, `would_replace`, " +
+          "and `conflict`.",
+      ),
   }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
@@ -304,6 +323,18 @@ export const templateImportContract = defineTool({
     path: z.string().optional().describe("Present when the package was written to the store."),
     replaced: z.boolean(),
     dry_run: z.boolean(),
+    would_import: z
+      .boolean()
+      .optional()
+      .describe("Present on a dry run: whether the same call without dry_run would write."),
+    would_replace: z
+      .boolean()
+      .optional()
+      .describe("Present on a dry run: whether that write would replace an existing id@version."),
+    conflict: z
+      .string()
+      .optional()
+      .describe("Present on a dry run that would be refused, and why."),
     retained: z.string().optional().describe("A trash directory whose cleanup failed."),
     scan: scanSummary,
   }),
@@ -314,6 +345,7 @@ export const templateImportContract = defineTool({
     spawnsProcess: false,
     mutatesTarget: true,
   },
+  returnsTargetContent: true,
   examples: [
     {
       description: "Check a package without installing it",

@@ -7,6 +7,7 @@ import {
   TemplateStoreError,
   importTemplatePackage,
   inspectTemplatePackage,
+  previewTemplateImport,
 } from "./TemplateStore.js";
 import { makeTemplatePackage } from "../../tests/support/templatePackageFixture.js";
 
@@ -112,5 +113,61 @@ describe("inspecting a template package", () => {
     expect(inspected.unverified).toBe(true);
     expect(inspected.license).toBeUndefined();
     expect(inspected.provenance).toBeUndefined();
+  });
+});
+
+describe("previewing an import", () => {
+  it("says the import would write when the store is empty", async () => {
+    const root = await temporaryRoot("uvp-preview-empty-");
+    const fixture = await makeTemplatePackage({ root });
+    const storeRoot = path.join(root, "store");
+
+    const preview = await previewTemplateImport({ sourceDir: fixture.dir, storeRoot });
+    expect(preview.exists).toBe(false);
+    expect(preview.wouldImport).toBe(true);
+    expect(preview.wouldReplace).toBe(false);
+    expect(preview.conflict).toBeUndefined();
+    // The preview answers, it does not act: no entry appeared.
+    await expect(access(storeRoot)).rejects.toThrow();
+  });
+
+  it("names the conflict the real import would hit, and writes nothing", async () => {
+    const root = await temporaryRoot("uvp-preview-conflict-");
+    const fixture = await makeTemplatePackage({ root });
+    const storeRoot = path.join(root, "store");
+    await importTemplatePackage({ sourceDir: fixture.dir, storeRoot });
+
+    const refused = await previewTemplateImport({ sourceDir: fixture.dir, storeRoot });
+    expect(refused.exists).toBe(true);
+    expect(refused.wouldImport).toBe(false);
+    expect(refused.wouldReplace).toBe(false);
+    expect(refused.conflict).toContain("pass replace");
+
+    const replacing = await previewTemplateImport({
+      sourceDir: fixture.dir,
+      storeRoot,
+      replace: true,
+    });
+    expect(replacing.wouldImport).toBe(true);
+    expect(replacing.wouldReplace).toBe(true);
+    expect(replacing.conflict).toBeUndefined();
+
+    // The preview itself never changed the stored digest.
+    const stored = await inspectTemplatePackage({ sourceDir: fixture.dir });
+    expect(replacing.package.digest).toBe(stored.digest);
+  });
+
+  it("refuses a source that is already the store entry, with or without replace", async () => {
+    const root = await temporaryRoot("uvp-preview-same-");
+    const fixture = await makeTemplatePackage({ root });
+    const storeRoot = path.join(root, "store");
+    await importTemplatePackage({ sourceDir: fixture.dir, storeRoot });
+    const storedDir = path.join(storeRoot, "acme-dashboard", "1.2.0");
+
+    for (const replace of [false, true]) {
+      const preview = await previewTemplateImport({ sourceDir: storedDir, storeRoot, replace });
+      expect(preview.wouldImport, `replace: ${String(replace)}`).toBe(false);
+      expect(preview.conflict).toContain("already this package's store entry");
+    }
   });
 });

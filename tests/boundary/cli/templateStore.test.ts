@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { requireToolContract } from "../../../src/contracts/toolContracts.js";
 import { makeTemplatePackage } from "../../support/templatePackageFixture.js";
 
 /**
@@ -62,6 +63,18 @@ const run = async (args: readonly string[], env: Record<string, string>): Promis
 const json = (result: RunResult): Record<string, unknown> =>
   JSON.parse(result.stdout) as Record<string, unknown>;
 
+const failureOf = (result: RunResult): Record<string, unknown> =>
+  JSON.parse(result.stderr) as Record<string, unknown>;
+
+/** Every successful result is the contract's output, not merely JSON. */
+const expectContractOutput = (tool: string, output: Record<string, unknown>): void => {
+  const parsed = requireToolContract(tool).outputSchema.safeParse(output);
+  const issues = parsed.success
+    ? ""
+    : parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
+  expect(parsed.success, `${tool} output did not match its schema: ${issues}`).toBe(true);
+};
+
 describe("the template commands", () => {
   it("validates, imports, searches, gets, exports, and removes a package", async () => {
     const root = await temporaryRoot();
@@ -113,5 +126,97 @@ describe("the template commands", () => {
     });
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("not in the store");
+  });
+
+  it("refuses a trailing @ instead of widening a removal to every version", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({ root });
+    expect((await run(["template", "import", fixture.dir, "--json"], env)).code).toBe(0);
+
+    const refused = await run(["template", "remove", "acme-dashboard@", "--json"], env);
+    expect(refused.code).toBe(2);
+    expect(failureOf(refused)["code"]).toBe("invalid_request");
+    expect(String(failureOf(refused)["message"])).toContain("no version after '@'");
+
+    // The refusal happened before any removal: the package is still readable.
+    const after = await run(["template", "get", "acme-dashboard@1.2.0", "--json"], env);
+    expect(after.code).toBe(0);
+  });
+
+  it("tells a dry run what the same import would do", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({ root });
+    expect((await run(["template", "import", fixture.dir, "--json"], env)).code).toBe(0);
+
+    const refused = await run(["template", "import", fixture.dir, "--dry-run", "--json"], env);
+    expect(refused.code).toBe(0);
+    const refusedOutput = json(refused);
+    expectContractOutput("uvp_template_import", refusedOutput);
+    expect(refusedOutput["dry_run"]).toBe(true);
+    expect(refusedOutput["would_import"]).toBe(false);
+    expect(refusedOutput["would_replace"]).toBe(false);
+    expect(String(refusedOutput["conflict"])).toContain("pass replace");
+
+    const replacing = await run(
+      ["template", "import", fixture.dir, "--dry-run", "--replace", "--json"],
+      env,
+    );
+    expect(replacing.code).toBe(0);
+    const replacingOutput = json(replacing);
+    expectContractOutput("uvp_template_import", replacingOutput);
+    expect(replacingOutput["would_import"]).toBe(true);
+    expect(replacingOutput["would_replace"]).toBe(true);
+    expect(replacingOutput["conflict"]).toBeUndefined();
+
+    // A dry run writes nothing, so the store still holds exactly one entry.
+    const listed = await run(["template", "search", "--json"], env);
+    expect((json(listed)["matches"] as readonly unknown[]).length).toBe(1);
+  });
+
+  it("carries one error code per store failure", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({ root });
+    expect((await run(["template", "import", fixture.dir, "--json"], env)).code).toBe(0);
+
+    const missing = await run(["template", "get", "acme-dashboard@9.9.9", "--json"], env);
+    expect(missing.code).toBe(2);
+    expect(failureOf(missing)["code"]).toBe("template_not_found");
+
+    const duplicate = await run(["template", "import", fixture.dir, "--json"], env);
+    expect(duplicate.code).toBe(2);
+    expect(failureOf(duplicate)["code"]).toBe("invalid_request");
+
+    // A stored tree that no longer matches its manifest is the store's
+    // integrity, not the caller's input, so it earns a different code and a
+    // different exit code.
+    await writeFile(
+      path.join(store, "acme-dashboard", "1.2.0", "files", "src", "main.cc"),
+      "//x\n",
+    );
+    const tampered = await run(["template", "get", "acme-dashboard@1.2.0", "--json"], env);
+    expect(tampered.code).toBe(1);
+    expect(failureOf(tampered)["code"]).toBe("artifact_modified");
+  });
+
+  it("carries a malformed package's problems in the error contract", async () => {
+    const root = await temporaryRoot();
+    const fixture = await makeTemplatePackage({
+      root,
+      overrides: { schema: "uvp.template/2" },
+    });
+    const result = await run(["template", "validate", fixture.dir, "--json"], {
+      UVP_TEMPLATE_HOME: path.join(root, "store"),
+    });
+    expect(result.code).toBe(2);
+    const failure = failureOf(result);
+    expect(failure["code"]).toBe("invalid_request");
+    const details = failure["details"] as { problems?: readonly unknown[] } | undefined;
+    expect((details?.problems ?? []).length).toBeGreaterThan(0);
   });
 });

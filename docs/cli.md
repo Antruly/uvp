@@ -816,6 +816,54 @@ was asked for — `--http-version 3` against a probe built without an HTTP/3-cap
 libuvcpp, where the remedy is the install and not a rebuild — and `undetermined`
 when there is a binary that did not answer its version check at all.
 
+## `uvp template`
+
+```bash
+uvp template search [--text TEXT] [--category C] [--framework F] [--tags a,b] \
+  [--tag-mode all|any] [--features websocket,ssl] [--version 1.2.0] [--all-versions] \
+  [--limit 20] [--offset 0]
+uvp template get acme-dashboard@1.2.0
+uvp template validate ./acme-dashboard [--allow-unverified]
+uvp template import ./acme-dashboard [--replace] [--allow-unverified] [--dry-run]
+uvp template export acme-dashboard@1.2.0 --target ./exported
+uvp template remove acme-dashboard[@1.2.0]
+```
+
+The six commands read and write the local template store. The store root is
+`$UVP_TEMPLATE_HOME` when set, otherwise `~/.uvp/templates`; it is not a flag,
+so a person and an agent reached through MCP use the same store.
+
+`search` answers with the matching packages and what matched each one. An empty
+query lists the store. It reads metadata only — no file bytes and no network.
+A store entry that cannot be read is reported under `corrupt`, never omitted:
+a corrupt entry is not an absent one.
+
+`get` names one exact `id@version`, re-verifies every file against the
+manifest, and returns the store path. A missing package and a tampered package
+are different failures — `template_not_found` and `artifact_modified` — because
+the remedies differ.
+
+`validate` runs the import's format check without writing. It does not consult
+the store, so a package already installed still validates here and is refused
+later by `import`. A malformed package is `invalid_request` with every problem
+in `details.problems`; a directory that cannot be read is `execution_failure`.
+
+`import` validates, scans, and copies. The scan is a bounded locator for
+credential- and PII-shaped content: a finding is reported but does not refuse
+the package, and "no findings" is not "clean". An existing `id@version` is
+refused unless `--replace` is explicit. `--dry-run` writes nothing and reports
+`would_import`, `would_replace`, and, when the real call would be refused,
+`conflict`; that check is a snapshot taken without the store lock.
+
+`export` copies a stored package into a directory that must be absent or empty,
+re-verifying the exported bytes before reporting success. `remove` takes
+`id@version` for one version or a bare `id` for every version; `id@` is a usage
+error, so a typo cannot widen a removal into a whole-id one.
+
+A missing package, a malformed one, or a bad flag exits 2 — the question could
+not be put. A store that is locked, unreadable, or no longer matches its
+manifest exits 1 — the question was asked and the answer is no.
+
 ## `uvp mcp` and `uvp setup`
 
 ```bash

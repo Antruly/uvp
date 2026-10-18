@@ -1322,7 +1322,7 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
-      "returns_target_content": false,
+      "returns_target_content": true,
       "examples": [
         {
           "description": "Find a WebSocket-capable frontend package",
@@ -1717,7 +1717,7 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
-      "returns_target_content": false,
+      "returns_target_content": true,
       "examples": [
         {
           "description": "Read acme-dashboard 1.2.0",
@@ -2097,7 +2097,7 @@
         "idempotentHint": true,
         "openWorldHint": false
       },
-      "returns_target_content": false,
+      "returns_target_content": true,
       "examples": [
         {
           "description": "Validate a package before importing it",
@@ -2133,7 +2133,7 @@
           },
           "dry_run": {
             "default": false,
-            "description": "Validate and scan without writing to the store.",
+            "description": "Validate and scan without writing to the store. A dry run also reports whether the same call would write, replace, or be refused, in `would_import`, `would_replace`, and `conflict`.",
             "type": "boolean"
           }
         },
@@ -2462,6 +2462,18 @@
           "dry_run": {
             "type": "boolean"
           },
+          "would_import": {
+            "description": "Present on a dry run: whether the same call without dry_run would write.",
+            "type": "boolean"
+          },
+          "would_replace": {
+            "description": "Present on a dry run: whether that write would replace an existing id@version.",
+            "type": "boolean"
+          },
+          "conflict": {
+            "description": "Present on a dry run that would be refused, and why.",
+            "type": "string"
+          },
           "retained": {
             "description": "A trash directory whose cleanup failed.",
             "type": "string"
@@ -2609,7 +2621,7 @@
         "idempotentHint": false,
         "openWorldHint": false
       },
-      "returns_target_content": false,
+      "returns_target_content": true,
       "examples": [
         {
           "description": "Check a package without installing it",

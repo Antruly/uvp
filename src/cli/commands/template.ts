@@ -23,21 +23,35 @@ import type { CommandSpec } from "../commandSpec.js";
 
 const splitReference = (
   value: string,
-  options: { readonly requireVersion: boolean },
+  options: { readonly requireVersion: boolean; readonly usage: string },
 ): { readonly id: string; readonly version?: string } => {
-  const parts = value.split("@");
-  if (parts.length > 2 || parts[0] === undefined || parts[0] === "") {
-    flagError(`"${value}" is not an id@version reference.`, {
-      usage: "uvp template get acme-dashboard@1.2.0",
-    });
+  const at = value.indexOf("@");
+  const id = at === -1 ? value : value.slice(0, at);
+  if (id === "") {
+    flagError(`"${value}" is not an id@version reference.`, { usage: options.usage });
   }
-  const [id, version] = parts;
-  if (options.requireVersion && (version === undefined || version === "")) {
-    flagError(`"${value}" has no version; pass id@version.`, {
-      usage: "uvp template get acme-dashboard@1.2.0",
-    });
+  if (at === -1) {
+    if (options.requireVersion) {
+      flagError(`"${value}" has no version; pass id@version.`, { usage: options.usage });
+    }
+    return { id };
   }
-  return { id, ...(version === undefined || version === "" ? {} : { version }) };
+  if (value.indexOf("@", at + 1) !== -1) {
+    flagError(`"${value}" is not an id@version reference.`, { usage: options.usage });
+  }
+  const version = value.slice(at + 1);
+  if (version === "") {
+    // A trailing `@` is not another spelling of "no version". Dropping the
+    // empty segment would turn a typo in `remove` into a whole-id removal, so
+    // the two spellings stay distinct: `id@x.y.z` names one version and a bare
+    // `id` names every version.
+    flagError(
+      `"${value}" has no version after '@'; pass id@version` +
+        (options.requireVersion ? "." : ", or omit the '@' to name every version."),
+      { usage: options.usage },
+    );
+  }
+  return { id, version };
 };
 
 const referencePositional = (
@@ -145,7 +159,12 @@ export const templateGetCommand: CommandSpec = {
       "an id@version reference",
       "uvp template get acme-dashboard@1.2.0",
     );
-    return { ...splitReference(reference, { requireVersion: true }) };
+    return {
+      ...splitReference(reference, {
+        requireVersion: true,
+        usage: "uvp template get acme-dashboard@1.2.0",
+      }),
+    };
   },
 };
 
@@ -242,7 +261,13 @@ export const templateExportCommand: CommandSpec = {
         usage: "uvp template export acme-dashboard@1.2.0 --target ./exported",
       });
     }
-    return { ...splitReference(reference, { requireVersion: true }), target_dir: target };
+    return {
+      ...splitReference(reference, {
+        requireVersion: true,
+        usage: "uvp template export acme-dashboard@1.2.0 --target ./exported",
+      }),
+      target_dir: target,
+    };
   },
 };
 
@@ -265,7 +290,12 @@ export const templateRemoveCommand: CommandSpec = {
       "an id or id@version reference",
       "uvp template remove acme-dashboard@1.2.0",
     );
-    return { ...splitReference(reference, { requireVersion: false }) };
+    return {
+      ...splitReference(reference, {
+        requireVersion: false,
+        usage: "uvp template remove acme-dashboard@1.2.0",
+      }),
+    };
   },
 };
 
