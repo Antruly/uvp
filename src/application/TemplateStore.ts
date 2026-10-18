@@ -163,6 +163,19 @@ export interface InspectTemplatePackageOptions {
  */
 export type InspectedTemplatePackage = Omit<StoredTemplatePackage, "path">;
 
+/** The answer to "what would this import do", without the write. */
+export interface ImportPreview {
+  readonly package: InspectedTemplatePackage;
+  /** True when the store held this id@version at the moment of the preview. */
+  readonly exists: boolean;
+  /** True when the same import without `dryRun` would write the package. */
+  readonly wouldImport: boolean;
+  /** True when that write would replace an existing entry. */
+  readonly wouldReplace: boolean;
+  /** Why the import would be refused, when it would be. */
+  readonly conflict?: string;
+}
+
 const STORE_METADATA_SCHEMA = "uvp.store/1";
 const TOP_LEVEL_DIRECTORY = "files";
 const TOP_LEVEL_FILES = new Set([
@@ -851,8 +864,8 @@ export const getTemplatePackage = async (
  *
  * It answers the format question only. No store is consulted, so a package
  * whose `id@version` the store already holds passes here and the import then
- * refuses it with `template_exists`; that call takes no `storeRoot` because it
- * would promise a duplicate check it does not perform.
+ * refuses it with `template_exists`. `previewTemplateImport` is the call that
+ * adds that duplicate check.
  */
 export const inspectTemplatePackage = async (
   options: InspectTemplatePackageOptions,
@@ -862,6 +875,50 @@ export const inspectTemplatePackage = async (
     allowUnverified: options.allowUnverified === true,
   });
   return storedFields(validated);
+};
+
+export interface ImportPreviewOptions extends InspectTemplatePackageOptions {
+  /** Defaults to `resolveTemplateStoreRoot()`. */
+  readonly storeRoot?: string;
+  /** Whether the caller would pass `replace`; decides what a conflict means. */
+  readonly replace?: boolean;
+}
+
+/**
+ * What an import would do, without doing it.
+ *
+ * `inspectTemplatePackage` answers the format question; this adds the question
+ * it deliberately leaves out — whether the store already holds the id@version —
+ * with the same rule the import applies: an existing entry is a conflict unless
+ * `replace` is explicit, and a source that *is* the store entry is refused
+ * either way.
+ *
+ * The answer is a snapshot. It reads the store without taking the import lock,
+ * so another uvp process can create or remove the entry between this call and
+ * the import it previews; the import remains the operation that decides. That
+ * is why the fields are named `would_*` rather than reporting what happened.
+ */
+export const previewTemplateImport = async (
+  options: ImportPreviewOptions,
+): Promise<ImportPreview> => {
+  const root = options.storeRoot ?? resolveTemplateStoreRoot();
+  const source = path.resolve(options.sourceDir);
+  const inspected = await inspectTemplatePackage(options);
+  const target = path.join(root, inspected.id, inspected.version);
+  const entryExists = await exists(target);
+  const conflict =
+    source === path.resolve(target)
+      ? "the source is already this package's store entry"
+      : entryExists && options.replace !== true
+        ? `${inspected.id}@${inspected.version} is already in the store; pass replace to replace it`
+        : undefined;
+  return {
+    package: inspected,
+    exists: entryExists,
+    wouldImport: conflict === undefined,
+    wouldReplace: entryExists && options.replace === true && conflict === undefined,
+    ...(conflict === undefined ? {} : { conflict }),
+  };
 };
 
 /** Every readable package, plus entries the reader refused. */

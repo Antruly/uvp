@@ -31,10 +31,10 @@ whose results can contain bytes that did not originate with uvp.
 | ----------------------- | --------- | :-: | :-: | :-: | :--: | :-: | :-------: |
 | `uvp_doctor`            | toolchain |  ●  |     |     |  ●   |     |           |
 | `uvp_workspace_create`  | workspace |  ●  |  ●  |     |      |     |           |
-| `uvp_template_search`   | workspace |  ●  |     |     |      |     |           |
-| `uvp_template_get`      | workspace |  ●  |     |     |      |     |           |
-| `uvp_template_validate` | workspace |  ●  |     |     |      |     |           |
-| `uvp_template_import`   | workspace |  ●  |  ●  |     |      |  ●  |           |
+| `uvp_template_search`   | workspace |  ●  |     |     |      |     |     ●     |
+| `uvp_template_get`      | workspace |  ●  |     |     |      |     |     ●     |
+| `uvp_template_validate` | workspace |  ●  |     |     |      |     |     ●     |
+| `uvp_template_import`   | workspace |  ●  |  ●  |     |      |  ●  |     ●     |
 | `uvp_template_export`   | workspace |  ●  |  ●  |     |      |  ●  |           |
 | `uvp_template_remove`   | workspace |  ●  |  ●  |     |      |  ●  |           |
 | `uvp_build`             | build     |  ●  |  ●  |     |  ●   |     |     ●     |
@@ -143,7 +143,10 @@ stores.
   without writing anything. It does not check whether the package is already in
   the store.
 - **`uvp_template_import`** validates, scans, and writes a package. `dry_run`
-  returns the validation and scan without writing; an existing `id@version` is
+  returns the validation and scan without writing, and also reports
+  `would_import`, `would_replace`, and — when the real call would be refused —
+  `conflict`, so a caller previewing the write is told what it would hit; the
+  check is a snapshot taken without the store lock. An existing `id@version` is
   refused unless `replace` is explicit; `allow_unverified` is the only way to
   admit a package whose licence/provenance is missing, and the package is then
   marked `unverified`. The scan reports credential- and PII-shaped findings with
@@ -159,6 +162,18 @@ stores.
 change state outside the uvp workspace (the local store, or a caller-named
 destination). None of the six declares a network request, a process spawn, or a
 credential.
+
+`search`, `get`, `validate`, and `import` are marked `untrusted` because their
+results include manifest text the package author wrote — `name`, `description`,
+`tags`, and `preview` — and a client must render it as data, never as
+instructions. `export` and `remove` return only paths, digests, and counts that
+uvp computed.
+
+Store failures map to one code each: `template_not_found` for a missing
+package, `invalid_request` for a malformed source or an occupied destination,
+`artifact_modified` for a stored tree that no longer matches its manifest,
+`resource_constraint` for a held store lock, and `execution_failure` for an I/O
+error.
 
 ### Build
 

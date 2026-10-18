@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import { UvpFailure } from "../domain/errors.js";
+import { UvpFailure, type UvpErrorCode } from "../domain/errors.js";
 import {
   createRecorder,
   envelopeOf,
@@ -41,7 +41,9 @@ import {
   getTemplatePackage,
   importTemplatePackage,
   inspectTemplatePackage,
+  previewTemplateImport,
   removeTemplatePackage,
+  TemplateStoreError,
   type InspectedTemplatePackage,
   type StoredTemplatePackage,
 } from "../application/TemplateStore.js";
@@ -298,6 +300,80 @@ const templateScanOutput = (scan: TemplateScanResult): Record<string, unknown> =
   limits: { ...scan.limits },
 });
 
+/**
+ * The store's vocabulary projected once, at the composition edge.
+ *
+ * `TemplateStoreError` speaks precisely — `not_found`, `template_exists`,
+ * `invalid_package`, `target_exists`, `store_locked`, `io_error` — but those
+ * codes belong to the application layer. Left alone, every one of them reached
+ * the caller as a plain `execution_failure` distinguishable only by prose,
+ * which defeats the error contract's promise of one code and one remedy.
+ *
+ * `origin` separates the two things `invalid_package` can mean. A source that
+ * does not match `uvp.template/1` is the caller's input (`invalid_request`);
+ * a store entry that no longer matches its manifest is the store's integrity
+ * (`artifact_modified`). The two call for different remedies, so they must not
+ * share a code. The problem list stays in `details.problems` rather than being
+ * flattened into the message: an agent may need to report every problem at once.
+ */
+const templateFailure = (error: unknown, origin: "source" | "stored"): UvpFailure => {
+  if (!(error instanceof TemplateStoreError)) throw error;
+  const details = error.details.length === 0 ? undefined : { problems: [...error.details] };
+  const failure = (code: UvpErrorCode, action: string): UvpFailure =>
+    new UvpFailure({
+      code,
+      message: error.message,
+      remediation: { action },
+      ...(details === undefined ? {} : { details }),
+    });
+  switch (error.code) {
+    case "not_found":
+      return failure(
+        "template_not_found",
+        "Call uvp_template_search to list the stored ids and versions, then retry with one it reports.",
+      );
+    case "store_locked":
+      return failure(
+        "resource_constraint",
+        "Another uvp process holds the template store lock; wait for it to finish, then retry.",
+      );
+    case "io_error":
+      return failure(
+        "execution_failure",
+        "Check that the path exists and that this user can read and write it, then retry.",
+      );
+    case "template_exists":
+      return failure(
+        "invalid_request",
+        "Pass replace to replace the stored id@version, or import the package under a new version.",
+      );
+    case "target_exists":
+      return failure(
+        "invalid_request",
+        "Choose a target directory that is absent or empty, then retry.",
+      );
+    case "invalid_package":
+      return origin === "stored"
+        ? failure(
+            "artifact_modified",
+            "The stored package no longer matches its manifest; remove it and import a known-good copy.",
+          )
+        : failure(
+            "invalid_request",
+            "Fix the problems listed in details.problems in the package directory, then retry.",
+          );
+  }
+};
+
+/** Run a store call, projecting any store failure into the tool contract. */
+const storeCall = async <T>(origin: "source" | "stored", call: () => Promise<T>): Promise<T> => {
+  try {
+    return await call();
+  } catch (error) {
+    throw templateFailure(error, origin);
+  }
+};
+
 export const createToolHandlers = (
   services: UvpServices,
 ): Readonly<Record<string, ToolHandler>> => {
@@ -381,18 +457,20 @@ export const createToolHandlers = (
     [templateSearchContract.name]: handler(
       templateSearchContract.inputSchema,
       async (input, recorder) => {
-        const result = await searchTemplatePackages({
-          ...(input.text === undefined ? {} : { text: input.text }),
-          ...(input.category === undefined ? {} : { category: input.category }),
-          ...(input.framework === undefined ? {} : { framework: input.framework }),
-          ...(input.tags === undefined ? {} : { tags: input.tags }),
-          tagMode: input.tag_mode,
-          ...(input.features === undefined ? {} : { features: input.features }),
-          ...(input.version === undefined ? {} : { version: input.version }),
-          allVersions: input.all_versions,
-          limit: input.limit,
-          offset: input.offset,
-        });
+        const result = await storeCall("source", () =>
+          searchTemplatePackages({
+            ...(input.text === undefined ? {} : { text: input.text }),
+            ...(input.category === undefined ? {} : { category: input.category }),
+            ...(input.framework === undefined ? {} : { framework: input.framework }),
+            ...(input.tags === undefined ? {} : { tags: input.tags }),
+            tagMode: input.tag_mode,
+            ...(input.features === undefined ? {} : { features: input.features }),
+            ...(input.version === undefined ? {} : { version: input.version }),
+            allVersions: input.all_versions,
+            limit: input.limit,
+            offset: input.offset,
+          }),
+        );
 
         return {
           ...envelopeOf(recorder, {
@@ -436,7 +514,7 @@ export const createToolHandlers = (
     [templateGetContract.name]: handler(
       templateGetContract.inputSchema,
       async (input, recorder) => {
-        const pkg = await getTemplatePackage(input.id, input.version);
+        const pkg = await storeCall("stored", () => getTemplatePackage(input.id, input.version));
         return {
           ...envelopeOf(recorder, {
             tool: templateGetContract.name,
@@ -454,10 +532,12 @@ export const createToolHandlers = (
     [templateValidateContract.name]: handler(
       templateValidateContract.inputSchema,
       async (input, recorder) => {
-        const pkg = await inspectTemplatePackage({
-          sourceDir: input.source_dir,
-          allowUnverified: input.allow_unverified,
-        });
+        const pkg = await storeCall("source", () =>
+          inspectTemplatePackage({
+            sourceDir: input.source_dir,
+            allowUnverified: input.allow_unverified,
+          }),
+        );
         return {
           ...envelopeOf(recorder, {
             tool: templateValidateContract.name,
@@ -475,7 +555,7 @@ export const createToolHandlers = (
     [templateImportContract.name]: handler(
       templateImportContract.inputSchema,
       async (input, recorder) => {
-        const scan = await scanTemplatePackage(input.source_dir);
+        const scan = await storeCall("source", () => scanTemplatePackage(input.source_dir));
         const scanOutput = templateScanOutput(scan);
         const limitations = [
           "The scan is a bounded locator for credential- and PII-shaped content, not a guarantee that the package is clean.",
@@ -483,28 +563,43 @@ export const createToolHandlers = (
         ];
 
         if (input.dry_run) {
-          const inspected = await inspectTemplatePackage({
-            sourceDir: input.source_dir,
-            allowUnverified: input.allow_unverified,
-          });
+          const preview = await storeCall("source", () =>
+            previewTemplateImport({
+              sourceDir: input.source_dir,
+              allowUnverified: input.allow_unverified,
+              replace: input.replace,
+            }),
+          );
           return {
             ...envelopeOf(recorder, {
               tool: templateImportContract.name,
               provider: identity,
-              limitations: ["Dry run: nothing was written to the store.", ...limitations],
+              limitations: [
+                "Dry run: nothing was written to the store.",
+                // The preview reads the store without the import lock, so a
+                // concurrent import can change the answer before this one runs.
+                "The conflict check is a snapshot taken without the store lock; another uvp " +
+                  "process can create or remove the entry before the import runs.",
+                ...limitations,
+              ],
             }),
-            ...templatePackageOutput(inspected),
+            ...templatePackageOutput(preview.package),
             dry_run: true,
             replaced: false,
+            would_import: preview.wouldImport,
+            would_replace: preview.wouldReplace,
+            ...(preview.conflict === undefined ? {} : { conflict: preview.conflict }),
             scan: scanOutput,
           };
         }
 
-        const imported = await importTemplatePackage({
-          sourceDir: input.source_dir,
-          replace: input.replace,
-          allowUnverified: input.allow_unverified,
-        });
+        const imported = await storeCall("source", () =>
+          importTemplatePackage({
+            sourceDir: input.source_dir,
+            replace: input.replace,
+            allowUnverified: input.allow_unverified,
+          }),
+        );
         return {
           ...envelopeOf(recorder, {
             tool: templateImportContract.name,
@@ -524,9 +619,11 @@ export const createToolHandlers = (
     [templateExportContract.name]: handler(
       templateExportContract.inputSchema,
       async (input, recorder) => {
-        const exported = await exportTemplatePackage(input.id, input.version, {
-          targetDir: input.target_dir,
-        });
+        const exported = await storeCall("stored", () =>
+          exportTemplatePackage(input.id, input.version, {
+            targetDir: input.target_dir,
+          }),
+        );
         return {
           ...envelopeOf(recorder, {
             tool: templateExportContract.name,
@@ -552,7 +649,9 @@ export const createToolHandlers = (
     [templateRemoveContract.name]: handler(
       templateRemoveContract.inputSchema,
       async (input, recorder) => {
-        const removed = await removeTemplatePackage(input.id, input.version);
+        const removed = await storeCall("source", () =>
+          removeTemplatePackage(input.id, input.version),
+        );
         return {
           ...envelopeOf(recorder, {
             tool: templateRemoveContract.name,

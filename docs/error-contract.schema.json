@@ -32,6 +32,7 @@
             "artifact_modified",
             "capture_listen_failed",
             "capture_not_found",
+            "template_not_found",
             "assertion_failed",
             "execution_failure",
             "cleanup_incomplete"
@@ -151,6 +152,7 @@
                     "artifact_modified",
                     "capture_listen_failed",
                     "capture_not_found",
+                    "template_not_found",
                     "assertion_failed",
                     "execution_failure",
                     "cleanup_incomplete"

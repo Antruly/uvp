@@ -8,10 +8,17 @@ package that disagrees with them is refused rather than repaired.
 
 ## Status
 
-This page documents the **schema and validator** (P1 of #236). The local store,
-the directory/zip reader, search, rendering, and the tool contracts that will
-consume a package are later increments. Until those land, no `uvp` command reads
-a package; the format is published so that authoring one does not have to guess.
+The schema and validator (P1), the directory reader and local store (P2–P4),
+and the CLI/MCP surface (P5) are shipped. `uvp template validate` checks a
+directory without writing, and `uvp template import` copies one into the local
+store under `$UVP_TEMPLATE_HOME` (or `~/.uvp/templates`); `search`, `get`,
+`export`, and `remove` cover the rest. The store never executes a package: the
+source tree is copied into a generated workspace, and building that workspace
+remains the evidence that it works.
+
+`uvp init --template-package id@version` (P6) is not implemented yet; a package
+is imported and exported as data, and generating a workspace from one is a
+separate step.
 
 ## Package layout
 
