@@ -211,6 +211,66 @@ describe("unverified local packages (Q6)", () => {
       ),
     ).toBe("invalid_package");
   });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "names an unreadable store record instead of calling the package invalid",
+    async () => {
+      const storeRoot = await makeStore();
+      const fixture = await makePackage({ overrides: { license: null, provenance: null } });
+      await importTemplatePackage({ sourceDir: fixture.dir, storeRoot, allowUnverified: true });
+      const record = path.join(storeRoot, ".meta", "acme-dashboard", "1.2.0.json");
+      // The package bytes are fine; only the store's record cannot be examined.
+      // Calling the package invalid here would turn "I could not look" into a no.
+      await chmod(record, 0o000);
+
+      let failure: TemplateStoreError | undefined;
+      try {
+        await getTemplatePackage("acme-dashboard", "1.2.0", { storeRoot });
+      } catch (error) {
+        failure = error as TemplateStoreError;
+      }
+      expect(failure?.code).toBe("io_error");
+      expect(failure?.message).toContain(record);
+
+      const listed = await listTemplatePackages({ storeRoot });
+      expect(listed.packages).toEqual([]);
+      expect(listed.corrupt).toHaveLength(1);
+      expect(listed.corrupt[0]?.problems.join("\n")).toContain(record);
+    },
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "still reports a real package problem when the record cannot be read",
+    async () => {
+      const storeRoot = await makeStore();
+      const fixture = await makePackage({ overrides: { license: null, provenance: null } });
+      const imported = await importTemplatePackage({
+        sourceDir: fixture.dir,
+        storeRoot,
+        allowUnverified: true,
+      });
+      await writeFile(path.join(imported.package.path, "files", "src", "main.cc"), "changed\n");
+      await chmod(path.join(storeRoot, ".meta", "acme-dashboard", "1.2.0.json"), 0o000);
+
+      // The digest mismatch is a fact about the package; naming the record
+      // instead would hide it.
+      expect(await codeOf(getTemplatePackage("acme-dashboard", "1.2.0", { storeRoot }))).toBe(
+        "invalid_package",
+      );
+    },
+  );
+
+  it("refuses an unverified package whose record is gone, rather than admitting it", async () => {
+    const storeRoot = await makeStore();
+    const fixture = await makePackage({ overrides: { license: null, provenance: null } });
+    await importTemplatePackage({ sourceDir: fixture.dir, storeRoot, allowUnverified: true });
+    await rm(path.join(storeRoot, ".meta", "acme-dashboard", "1.2.0.json"));
+
+    // Absence is an observation: nothing recorded the package as unverified.
+    expect(await codeOf(getTemplatePackage("acme-dashboard", "1.2.0", { storeRoot }))).toBe(
+      "invalid_package",
+    );
+  });
 });
 
 describe("package shape", () => {
