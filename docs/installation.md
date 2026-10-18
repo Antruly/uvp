@@ -358,6 +358,14 @@ the check could not run; the `reason` field says which one.
 differ. Pin the libuvcpp prefix with `-DCMAKE_PREFIX_PATH=` when configuring, and
 re-run `uvp doctor` there.
 
+**`uvp verify` sends the request to `C:/Program Files/Git/...` and every
+assertion fails.** This is Git Bash/MSYS2 path conversion, not a service defect:
+the shell rewrites an argument that begins with `/` into a Windows path before
+uvp sees it, so `--request GET /healthz` becomes `C:/Program Files/Git/healthz`.
+Set `MSYS_NO_PATHCONV=1` (Git for Windows) or `MSYS2_ARG_CONV_EXCL='*'` (MSYS2)
+and rerun the pass. The same applies to any other argument that is meant to be a
+POSIX path.
+
 ## Next
 
 - [CLI and evidence](cli.md) — the command surface and how to read its output
