@@ -23,7 +23,8 @@ export const workspaceCreateContract = defineTool({
   description:
     "Scaffold a buildable C++ web service project wired against libuvcpp, with the requested " +
     "transport features enabled. Writes files and refuses to overwrite a non-empty directory " +
-    "unless force is set. Returns the file manifest with digests.",
+    "unless force is set. Returns the file manifest with digests and the routes the generated " +
+    "service registers, so the first request can be made without reading the generated source.",
   kind: "workspace",
   inputSchema: z.object({
     path: z.string().min(1).describe("Absolute path to create the workspace at."),
@@ -67,6 +68,14 @@ export const workspaceCreateContract = defineTool({
     path: z.string(),
     template: z.string(),
     files: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),
+    /**
+     * The routes the generated service registers, as `METHOD /path`.
+     *
+     * A first request has to guess otherwise: the smallest template answers
+     * `GET /hello`, not `GET /`, and an unlisted path is a 404 from a service
+     * that is working exactly as generated.
+     */
+    routes: z.array(z.string()),
     /** The exact command that turns this workspace into a running binary. */
     next_steps: z.array(z.string()),
   }),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TEMPLATE_IDS, renderTemplate } from "./templates.js";
+import { TEMPLATE_IDS, renderTemplate, templateRoutes } from "./templates.js";
 import type { TemplateId } from "./templates.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import type { UvpFeature } from "../domain/features.js";
@@ -451,6 +451,88 @@ describe("requesting a feature a web-app template has no code for", () => {
     for (const feature of withoutGuard) {
       expect(render("hello-http", [feature])).not.toContain("#if !UVCPP_");
       expect(manifest("hello-http", [feature])["features"]).toEqual([feature]);
+    }
+  });
+});
+
+describe("the routes `uvp init` reports", () => {
+  it("names the one route of the smallest template", () => {
+    // The first-run failure this table exists for: `hello-http` answers
+    // `GET /hello`, and a natural first request to `GET /` gets a correct 404
+    // from a working service.
+    expect(templateRoutes("hello-http", [])).toEqual(["GET /hello"]);
+  });
+
+  it("reports the db feature's extra route, because the source gains it", () => {
+    expect(templateRoutes("rest-api", [])).toEqual([
+      "GET /healthz",
+      "GET /items",
+      "GET /items/:id",
+    ]);
+    expect(templateRoutes("rest-api", ["db"])).toEqual([
+      "GET /healthz",
+      "GET /items",
+      "GET /items/:id",
+      "POST /items/:id",
+    ]);
+    // The route and the registration move together: one without the other is a
+    // caller told to ask a service for something it does not serve.
+    expect(render("rest-api", [])).not.toContain('app.post("/items/:id"');
+    expect(render("rest-api", ["db"])).toContain('app.post("/items/:id"');
+  });
+
+  it("names every registration in the rendered source, in both directions", () => {
+    // `serve_static` is one call that registers four routes; the four entries in
+    // the table are the four registrations, and this is the call behind them.
+    const STATIC_ROUTES: ReadonlySet<string> = new Set([
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+    const registrationOf = (route: string, template: TemplateId): string => {
+      if (STATIC_ROUTES.has(route)) return 'app.serve_static("/", "./public")';
+      const [method, path] = route.split(" ") as [string, string];
+      const call = method === "WS" ? "websocket" : method.toLowerCase();
+      // `http3-service` is written against `uvcpp_http_server`, so its routes are
+      // registered on `server` rather than on a `uvcpp_web_app`.
+      const receiver = template === "http3-service" ? "server" : "app";
+      return `${receiver}.${call}("${path}"`;
+    };
+    // The registrations the source spells out itself. `serve_static` is the one
+    // call that registers routes without naming them, so it is counted
+    // separately; that is the only place this pair of checks is not mechanical.
+    const explicitCalls = (source: string): readonly string[] =>
+      [...source.matchAll(/(?:app|server)\.(?:get|post|websocket)\(/gu)].map((match) => match[0]);
+
+    const variants: readonly (readonly [TemplateId, readonly UvpFeature[]])[] = [
+      ...TEMPLATE_IDS.map((template): readonly [TemplateId, readonly UvpFeature[]] => [
+        template,
+        template === "http3-service" ? ["tls", "http3"] : [],
+      ]),
+      ["rest-api", ["db"]],
+    ];
+
+    for (const [template, features] of variants) {
+      const source = render(template, features);
+      const routes = templateRoutes(template, features);
+      const registrations = new Set(routes.map((route) => registrationOf(route, template)));
+      for (const registration of registrations) {
+        expect(source, `${template} does not register ${registration}`).toContain(registration);
+      }
+
+      // The reverse direction: a registration in the source that the table omits
+      // would tell the caller about fewer routes than the service answers. A
+      // count catches that even when the extra route has no table entry to
+      // search for.
+      const tableCalls = routes.filter((route) => !STATIC_ROUTES.has(route)).length;
+      expect(
+        explicitCalls(source).length,
+        `${template} registers a route the table does not name`,
+      ).toBe(tableCalls);
+      if (template === "static-files") {
+        expect(source.match(/app\.serve_static\(/gu)?.length ?? 0).toBe(1);
+      }
     }
   });
 });

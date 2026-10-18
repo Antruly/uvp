@@ -1,7 +1,7 @@
 # uvp tool reference
 
 Generated from the tool contracts. 15 tools; catalog digest
-`2efa96a65e873d7e1a23311b4795d1cfb70d6fc4e15d1acc0ca767d82160fe84`.
+`5f45518ddc8841b583bff48a18151722083c50be4ba53325a239ac197f1aca9f`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -41,7 +41,7 @@ Example:
 
 ## `uvp_workspace_create` — Create a libuvcpp workspace
 
-Scaffold a buildable C++ web service project wired against libuvcpp, with the requested transport features enabled. Writes files and refuses to overwrite a non-empty directory unless force is set. Returns the file manifest with digests.
+Scaffold a buildable C++ web service project wired against libuvcpp, with the requested transport features enabled. Writes files and refuses to overwrite a non-empty directory unless force is set. Returns the file manifest with digests and the routes the generated service registers, so the first request can be made without reading the generated source.
 
 - **Kind:** workspace
 - **Effects:** readsFilesystem, writesFilesystem

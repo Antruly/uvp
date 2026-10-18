@@ -96,6 +96,47 @@ export const templateFeatureProblem = (
   return undefined;
 };
 
+/**
+ * The routes a generated service registers, as `METHOD /path`.
+ *
+ * This is a fact about the generated source, exported because two surfaces need
+ * it: `uvp init` prints it, and the first-run documentation names it. Without
+ * it a reader has to open `main.cpp` to learn that `hello-http` answers
+ * `GET /hello` and not `GET /`, and the natural first request returns 404.
+ *
+ * `WS` marks a WebSocket endpoint rather than an HTTP method. `serve_static` contributes
+ * both the prefix and its subtree, for `GET` and `HEAD`, which is why
+ * `static-files` lists four entries for one registration.
+ *
+ * Keep this beside the templates and update it with them; the tests render each
+ * template and look for the registration this table names, so a route that moves
+ * fails here rather than in a user's first request.
+ */
+export const templateRoutes = (
+  template: TemplateId,
+  features: readonly UvpFeature[],
+): readonly string[] => {
+  switch (template) {
+    case "hello-http":
+      return ["GET /hello"];
+    case "rest-api":
+      return [
+        "GET /healthz",
+        "GET /items",
+        "GET /items/:id",
+        ...(features.includes("db") ? ["POST /items/:id"] : []),
+      ];
+    case "websocket-echo":
+      return ["GET /healthz", "WS /echo"];
+    case "soap-service":
+      return ["POST /ws"];
+    case "static-files":
+      return ["GET /healthz", "GET /", "HEAD /", "GET /*path", "HEAD /*path"];
+    case "http3-service":
+      return ["GET /hello", "GET /healthz"];
+  }
+};
+
 export interface TemplateInput {
   readonly name: string;
   readonly port: number;

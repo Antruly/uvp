@@ -350,6 +350,10 @@ describe("workspace creation", () => {
     }
     expect(output["next_steps"]).toBeInstanceOf(Array);
     expect((output["next_steps"] as unknown[]).length).toBeGreaterThan(0);
+    // The routes the caller can actually ask this service for, at the same
+    // boundary that reports the files. Without them the first request is a guess
+    // and an unlisted path reads as a broken service rather than as a 404.
+    expect(output["routes"]).toEqual(["GET /healthz", "GET /items", "GET /items/:id"]);
   });
 
   it("refuses to write into a populated directory, naming the remedy", async () => {

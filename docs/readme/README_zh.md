@@ -88,16 +88,18 @@ uvp init ./svc --name svc --template rest-api --port 8080 --features websocket
 uvp build ./svc
 uvp run ./svc --port 8080
 uvp http GET http://127.0.0.1:8080/items/1 --json
-uvp stop --all
 ```
 
-或者执行一次全程托管、结束后自行清理的流程：
+`uvp run` 默认分离运行：命令返回后服务仍在监听，而之后执行的
+`uvp stop --all` 是一个新的 CLI 进程，注册表为空，看不到之前启动的服务。
+停止 `uvp run` 打印的 pid，加上 `--no-detach` 让命令留在前台，或者使用下面的
+托管流程 —— 它在一次调用中启动、检查并停止服务。
+
+或者执行一次全程托管、结束后自行清理的流程（写成一行，`cmd.exe` 与 POSIX
+shell 都能直接粘贴；双引号在所有 shell 中都保留 JSONPath）：
 
 ```bash
-uvp verify ./svc --port 8080 \
-  --request GET /items/1 \
-  --assert status=200 \
-  --assert 'json:$.value=first'
+uvp verify ./svc --port 8080 --request GET /items/1 --assert status=200 --assert "json:$.value=first"
 ```
 
 ## uvp 如何工作

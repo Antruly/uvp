@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "2efa96a65e873d7e1a23311b4795d1cfb70d6fc4e15d1acc0ca767d82160fe84",
+  "digest": "5f45518ddc8841b583bff48a18151722083c50be4ba53325a239ac197f1aca9f",
   "tool_count": 15,
   "tools": [
     {
@@ -441,7 +441,7 @@
     {
       "name": "uvp_workspace_create",
       "title": "Create a libuvcpp workspace",
-      "description": "Scaffold a buildable C++ web service project wired against libuvcpp, with the requested transport features enabled. Writes files and refuses to overwrite a non-empty directory unless force is set. Returns the file manifest with digests.",
+      "description": "Scaffold a buildable C++ web service project wired against libuvcpp, with the requested transport features enabled. Writes files and refuses to overwrite a non-empty directory unless force is set. Returns the file manifest with digests and the routes the generated service registers, so the first request can be made without reading the generated source.",
       "kind": "workspace",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -709,6 +709,12 @@
               "additionalProperties": false
             }
           },
+          "routes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "next_steps": {
             "type": "array",
             "items": {
@@ -726,6 +732,7 @@
           "path",
           "template",
           "files",
+          "routes",
           "next_steps"
         ],
         "additionalProperties": false
