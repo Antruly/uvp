@@ -2,6 +2,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { UvpFailure } from "../domain/errors.js";
+import {
+  isUvpEventPayloadPolicy,
+  type UvpEventPayloadPolicy,
+} from "../domain/eventPayloadPolicy.js";
 import { isUvpFeature, type UvpFeature } from "../domain/features.js";
 import { isUvpModule, type UvpModule } from "../domain/modules.js";
 import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js";
@@ -59,6 +63,17 @@ export interface WorkspaceManifest {
   readonly modules?: readonly UvpModule[] | undefined;
   /** Module names that were present but not recognised, kept so they can be reported. */
   readonly unrecognisedModules: readonly string[];
+  /**
+   * What the evidence log was compiled to retain, when the workspace records it.
+   *
+   * `uvp init` writes this whenever `evidence-log` is selected, including for the
+   * default `summary` policy, so a reader that finds it has the workspace's own
+   * statement rather than a guess. Absent means the file does not record one — a
+   * hand-written manifest, or one from a version that predates the field — and
+   * the running service's `GET /api/events` is then the authority, not this
+   * reader's default.
+   */
+  readonly evidence?: { readonly payloads: UvpEventPayloadPolicy };
   readonly requiredLibuvcpp?: string;
   /**
    * The toolchain this workspace asks to be built with.
@@ -248,6 +263,30 @@ export const readWorkspaceManifest = async (
     }
   }
 
+  // Like `modules`, a present `evidence` field has to be readable. Answering the
+  // default policy for a file that declared another one would describe
+  // collection that did not happen the way the file says.
+  const evidenceValue = parsed["evidence"];
+  let evidence: { readonly payloads: UvpEventPayloadPolicy } | undefined;
+  if (evidenceValue !== undefined) {
+    if (!isRecord(evidenceValue)) {
+      return {
+        state: "unreadable",
+        problem: `${manifestName} declares \`evidence\` and it is not an object`,
+      };
+    }
+    const payloads = evidenceValue["payloads"];
+    if (typeof payloads !== "string" || !isUvpEventPayloadPolicy(payloads)) {
+      return {
+        state: "unreadable",
+        problem:
+          `${manifestName} declares \`evidence.payloads\` as ${JSON.stringify(payloads)} ` +
+          "rather than one of summary, verbatim",
+      };
+    }
+    evidence = { payloads };
+  }
+
   const requirements = isRecord(parsed["requirements"]) ? parsed["requirements"] : {};
 
   // Each optional field is read once and spread only when it is a non-empty
@@ -275,6 +314,7 @@ export const readWorkspaceManifest = async (
       unrecognisedFeatures: unrecognised,
       ...(modulesValue === undefined ? {} : { modules }),
       unrecognisedModules,
+      ...(evidence === undefined ? {} : { evidence }),
       ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),
       ...(toolchain === undefined ? {} : { toolchain }),
       ...(toolchainProblem === undefined ? {} : { toolchainProblem }),

@@ -1,5 +1,9 @@
 import { FEATURE_REQUIREMENTS } from "./ToolchainProvider.js";
 import { LIBUVCPP_BASELINE } from "../domain/libuvcpp.js";
+import {
+  DEFAULT_EVENT_PAYLOAD_POLICY,
+  type UvpEventPayloadPolicy,
+} from "../domain/eventPayloadPolicy.js";
 import type { UvpFeature } from "../domain/features.js";
 import {
   UVP_MODULE_DEFINITIONS,
@@ -170,7 +174,20 @@ export interface TemplateInput {
    * that name the same modules produce the same file.
    */
   readonly modules?: readonly UvpModule[];
+  /**
+   * What the evidence log keeps of a message payload.
+   *
+   * Absent means `summary`. The value is compiled into the generated source and
+   * recorded in `uvp.json`; it has no meaning without the `evidence-log` module,
+   * and `uvp init` refuses it there rather than accepting an option that would
+   * change nothing.
+   */
+  readonly eventPayloads?: UvpEventPayloadPolicy;
 }
+
+/** The payload policy this input asks for, before the module is checked. */
+const eventPayloadsOf = (input: TemplateInput): UvpEventPayloadPolicy =>
+  input.eventPayloads ?? DEFAULT_EVENT_PAYLOAD_POLICY;
 
 export interface GeneratedFile {
   readonly path: string;
@@ -473,7 +490,7 @@ const webAppSetup = (input: TemplateInput): string => {
     : "";
 
   return `  uvcpp_web_app app;
-  app.set_port(${String(input.port)});${h2c}${tlsSetup(input)}
+  app.set_port(${String(input.port)});${h2c}${tlsSetup(input)}${evidenceMiddleware(input)}
 `;
 };
 
@@ -485,6 +502,16 @@ const selectedModules = (input: TemplateInput): readonly UvpModule[] =>
 const MODULE_INCLUDES: Readonly<Record<UvpModule, readonly string[]>> = {
   health: [],
   "echo-log": [
+    "#include <chrono>",
+    "#include <cstdint>",
+    "#include <deque>",
+    "#include <iomanip>",
+    "#include <mutex>",
+    "#include <sstream>",
+    "#include <utility>",
+    "#include <vector>",
+  ],
+  "evidence-log": [
     "#include <chrono>",
     "#include <cstdint>",
     "#include <deque>",
@@ -610,6 +637,171 @@ void PushLog(LogEntry entry) {
 `;
 
 /**
+ * The evidence log's storage and helpers.
+ *
+ * The names are prefixed rather than shared with the echo log: a workspace may
+ * select both, and two anonymous-namespace definitions of `NowMs` or
+ * `HexSummary` would be a redefinition, not a composition.
+ *
+ * The payload policy is part of the generated source, not a runtime setting.
+ * `summary` stores a length and an FNV-1a hash for text and a hex prefix for
+ * binary; neither copies a peer's bytes into the log by default, and the
+ * endpoint states which policy produced what it returns.
+ */
+const evidenceLogDeclarations = (payloads: UvpEventPayloadPolicy): string => `
+// One event as the service saw it. Fields that do not apply to an event kind
+// carry a stated placeholder: 0 for status, -1 for duration, empty strings for
+// the WebSocket-only fields on an HTTP event.
+struct EvidenceEvent {
+  long long ts;
+  std::string kind;
+  std::string method;
+  std::string path;
+  int status;
+  long long duration_ms;
+  std::string direction;
+  std::string type;
+  std::string payload;
+  size_t bytes;
+  bool ok;
+};
+
+constexpr size_t kMaxEvidenceEvents = 100;
+const char* const kEvidencePayloadPolicy = "${payloads}";
+
+std::mutex g_evidence_mutex;
+std::deque<EvidenceEvent> g_evidence;
+size_t g_evidence_dropped = 0;
+
+long long EvidenceNowMs() {
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+// The same escaping rule the echo log uses, under its own name so both modules
+// can be selected together.
+std::string EvidenceJsonEscape(const std::string& text) {
+  const char quote = static_cast<char>(34);
+  const char backslash = static_cast<char>(92);
+  std::string out;
+  out.reserve(text.size());
+  for (char c : text) {
+    if (c == quote) {
+      out += backslash;
+      out += quote;
+    } else if (c == backslash) {
+      out += backslash;
+      out += backslash;
+    } else if (c == static_cast<char>(10)) {
+      out += backslash;
+      out += 'n';
+    } else if (c == static_cast<char>(13)) {
+      out += backslash;
+      out += 'r';
+    } else if (c == static_cast<char>(9)) {
+      out += backslash;
+      out += 't';
+    } else if (static_cast<unsigned char>(c) < 32) {
+      static const char kHex[] = "0123456789abcdef";
+      const unsigned char byte = static_cast<unsigned char>(c);
+      out += backslash;
+      out += 'u';
+      out += '0';
+      out += '0';
+      out += kHex[(byte >> 4) & 0x0f];
+      out += kHex[byte & 0x0f];
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+void RecordEvidence(EvidenceEvent entry) {
+  std::lock_guard<std::mutex> lock(g_evidence_mutex);
+  g_evidence.push_back(std::move(entry));
+  while (g_evidence.size() > kMaxEvidenceEvents) {
+    g_evidence.pop_front();
+    ++g_evidence_dropped;
+  }
+}
+`;
+
+/**
+ * The message-payload summaries.
+ *
+ * Emitted only when a WebSocket module is also selected: they are the payload
+ * policy in code, and nothing else calls them. Declaring them unconditionally
+ * would leave a service with no message source carrying two unused functions.
+ *
+ * A hash plus the length identifies a text payload for correlation without
+ * retaining bytes that may be sensitive. FNV-1a is written here rather than
+ * pulled from a library so the generated project keeps its only dependency.
+ *
+ * `EvidenceTextSummary` exists only under the `summary` policy: under `verbatim`
+ * the message itself is the payload, and emitting a summary function nothing
+ * calls would be an unused function in a project that compiles with warnings.
+ * The binary summary is emitted under both, because the policy governs text.
+ */
+const evidenceMessageHelpers = (payloads: UvpEventPayloadPolicy): string =>
+  (payloads === "summary"
+    ? `std::string EvidenceTextSummary(const std::string& text) {
+  unsigned long long hash = 1469598103934665603ULL;
+  for (size_t i = 0; i < text.size(); ++i) {
+    hash ^= static_cast<unsigned char>(text[i]);
+    hash *= 1099511628211ULL;
+  }
+  std::ostringstream out;
+  out << "len=" << text.size() << " fnv1a64=" << std::hex << std::setfill('0')
+      << std::setw(16) << hash;
+  return out.str();
+}
+
+`
+    : "") +
+  `std::string EvidenceHexSummary(const uint8_t* data, size_t len) {
+  const size_t shown = len < 32 ? len : 32;
+  std::ostringstream out;
+  out << std::hex << std::setfill('0');
+  for (size_t i = 0; i < shown; ++i) {
+    out << std::setw(2) << static_cast<int>(data[i]);
+    if (i + 1 < shown) out << ' ';
+  }
+  if (len > shown) out << " ...";
+  out << " (" << std::dec << len << " bytes)";
+  return out.str();
+}
+`;
+
+/**
+ * The middleware that observes HTTP requests.
+ *
+ * It reads the final status from `on_sent`, which runs after the handler has
+ * decided it; at middleware time the chain has not run yet, so the response's
+ * status there is only what some earlier middleware set. The snapshot the
+ * endpoint returns is taken when its handler starts, so a `GET /api/events`
+ * response does not contain the event for its own request — the next call does.
+ */
+const EVIDENCE_MIDDLEWARE = `
+  // Registered before the routes: the chain starts here, and on_sent reports
+  // what the handler actually sent.
+  app.use([](uvcpp_web_request& req, uvcpp_web_response& resp, uvcpp_web_next next) {
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    const std::string method = req.method_name();
+    const std::string path = req.path();
+    resp.on_sent([started, method, path](const uvcpp_web_sent_info& sent) {
+      const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started).count();
+      RecordEvidence({EvidenceNowMs(), "http", method, path, sent.status_code, elapsed,
+                      "", "", "", sent.body_bytes, sent.ok});
+    });
+    next();
+  });`;
+
+const evidenceMiddleware = (input: TemplateInput): string =>
+  selectedModules(input).includes("evidence-log") ? EVIDENCE_MIDDLEWARE : "";
+
+/**
  * The declarations a selection puts above `main`, wrapped only when there are
  * any.
  *
@@ -618,7 +810,15 @@ void PushLog(LogEntry entry) {
  * block is omitted instead.
  */
 const moduleNamespaceBlock = (input: TemplateInput): string => {
-  const body = selectedModules(input).includes("echo-log") ? ECHO_LOG_DECLARATIONS : "";
+  const modules = selectedModules(input);
+  const evidence = modules.includes("evidence-log")
+    ? evidenceLogDeclarations(eventPayloadsOf(input)) +
+      (modules.includes("websocket-echo") ? evidenceMessageHelpers(eventPayloadsOf(input)) : "")
+    : "";
+  const body = [
+    ...(modules.includes("echo-log") ? [ECHO_LOG_DECLARATIONS] : []),
+    ...(evidence === "" ? [] : [evidence]),
+  ].join("");
   return body === "" ? "" : `\nnamespace {\n${body}\n}  // namespace\n`;
 };
 
@@ -656,29 +856,98 @@ const echoLogRoute = `
   });
 `;
 
+const evidenceLogRoute = (input: TemplateInput): string => `
+  // The event endpoint reports the schema, the retention window, the payload
+  // policy, and the counters, then the events themselves. It reads a snapshot
+  // under the mutex and writes no state; nothing here is persisted.
+  app.get("/api/events", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+    std::vector<EvidenceEvent> events;
+    size_t dropped = 0;
+    {
+      std::lock_guard<std::mutex> lock(g_evidence_mutex);
+      events.assign(g_evidence.begin(), g_evidence.end());
+      dropped = g_evidence_dropped;
+    }
+
+    // The schema strings use a named raw-string delimiter because the field
+    // descriptions contain a close-parenthesis-then-quote pair, which would
+    // close an unnamed one.
+    std::string body =
+        R"j({"schema":{"version":1,"retention":)j" + std::to_string(kMaxEvidenceEvents) +
+        R"j(,"event":{"ts":"unix epoch milliseconds","kind":["http","message"],)j" +
+        R"j("method":"HTTP method (kind=http; empty otherwise)",)j" +
+        R"j("path":"request path (kind=http; empty otherwise)",)j" +
+        R"j("status":"final status code (kind=http; 0 otherwise)",)j" +
+        R"j("duration_ms":"elapsed milliseconds (kind=http; -1 otherwise)",)j" +
+        R"j("direction":"received (kind=message; empty otherwise)",)j" +
+        R"j("type":["text","binary"],)j" +
+        R"j("payload":"${
+          eventPayloadsOf(input) === "summary"
+            ? "length and FNV-1a hash for text; hex prefix and length for binary"
+            : "the text a peer sent, JSON-escaped; hex prefix and length for binary"
+        }",)j" +
+        R"j("bytes":"payload or response-body byte length","ok":"write succeeded"}},)j" +
+        R"j("payload_policy":")j" + kEvidencePayloadPolicy + R"j(","retained":)j" +
+        std::to_string(events.size()) + R"(,"dropped":)" + std::to_string(dropped) +
+        R"(,"events":[)";
+    bool first = true;
+    for (const auto& event : events) {
+      if (!first) body += ",";
+      first = false;
+      body += R"({"ts":)" + std::to_string(event.ts) + R"(,"kind":")" +
+              EvidenceJsonEscape(event.kind) + R"(","method":")" +
+              EvidenceJsonEscape(event.method) + R"(","path":")" +
+              EvidenceJsonEscape(event.path) + R"(","status":)" +
+              std::to_string(event.status) + R"(,"duration_ms":)" +
+              std::to_string(event.duration_ms) + R"(,"direction":")" +
+              EvidenceJsonEscape(event.direction) + R"(","type":")" +
+              EvidenceJsonEscape(event.type) + R"(","payload":")" +
+              EvidenceJsonEscape(event.payload) + R"(","bytes":)" +
+              std::to_string(event.bytes) + R"(,"ok":)" +
+              (event.ok ? "true" : "false") + "}";
+    }
+    body += "]}";
+    resp.status(200).json_str(body);
+    resp.end();
+  });
+`;
+
 /**
  * The echo endpoint.
  *
  * It records into the log only when the log is selected. The hook is generated
  * rather than always present because `websocket-echo` alone is a supported
  * composition, and a `PushLog` call with no declaration behind it would not
- * compile.
+ * compile. The evidence log gets its own hooks under the same rule: a message
+ * is an event, and its text is summarized under the stated payload policy.
  */
 const websocketEchoRoute = (input: TemplateInput): string => {
-  const logs = selectedModules(input).includes("echo-log");
+  const modules = selectedModules(input);
+  const logs = modules.includes("echo-log");
+  const evidence = modules.includes("evidence-log");
   const recordText = logs ? `      PushLog({NowMs(), "text", message});\n` : "";
   const recordBinary = logs ? `      PushLog({NowMs(), "binary", HexSummary(data, len)});\n` : "";
+  const evidenceTextPayload =
+    eventPayloadsOf(input) === "summary" ? "EvidenceTextSummary(message)" : "message";
+  const evidenceText = evidence
+    ? `      RecordEvidence({EvidenceNowMs(), "message", "", "", 0, -1, "received", "text",\n` +
+      `                      ${evidenceTextPayload}, message.size(), true});\n`
+    : "";
+  const evidenceBinary = evidence
+    ? `      RecordEvidence({EvidenceNowMs(), "message", "", "", 0, -1, "received", "binary",\n` +
+      `                      EvidenceHexSummary(data, len), len, true});\n`
+    : "";
   return `
   app.websocket("/ws", [](uvcpp_web_ws_request& ws) {
     uvcpp_ws_connection* connection = ws.connection();
     if (connection == nullptr) return;
 
     connection->on_text([connection](const std::string& message) {
-${recordText}      connection->send_text(message.data(), message.size());
+${recordText}${evidenceText}      connection->send_text(message.data(), message.size());
     });
 
     connection->on_binary([connection](const uint8_t* data, size_t len) {
-${recordBinary}      connection->send_binary(reinterpret_cast<const char*>(data), len);
+${recordBinary}${evidenceBinary}      connection->send_binary(reinterpret_cast<const char*>(data), len);
     });
 
     connection->on_ping([](const uint8_t* data, size_t len) {
@@ -702,6 +971,7 @@ const staticConsoleRoute = `
 const MODULE_ROUTES: Readonly<Record<UvpModule, (input: TemplateInput) => string>> = {
   health: () => healthRoute,
   "echo-log": () => echoLogRoute,
+  "evidence-log": evidenceLogRoute,
   "websocket-echo": websocketEchoRoute,
   "static-console": () => staticConsoleRoute,
 };
@@ -1462,6 +1732,12 @@ const manifest = (input: TemplateInput, template: TemplateId): string => {
   const recordsModules =
     modules.length !== defaults.length ||
     modules.some((module, index) => module !== defaults[index]);
+  // Always recorded when the evidence log is selected, including when it is the
+  // default policy. Unlike `modules`, this is not a statement about how the
+  // selection differs from a template default: it says what the log retains, and
+  // a reader who found it absent would have to guess whether that meant
+  // `summary` or an older workspace that predates the field.
+  const recordsEvidence = modules.includes("evidence-log");
   return `${JSON.stringify(
     {
       uvp: 1,
@@ -1471,6 +1747,7 @@ const manifest = (input: TemplateInput, template: TemplateId): string => {
       port: input.port,
       features: input.features,
       ...(recordsModules ? { modules } : {}),
+      ...(recordsEvidence ? { evidence: { payloads: eventPayloadsOf(input) } } : {}),
       requirements: { libuvcpp: `>=${LIBUVCPP_BASELINE}` },
     },
     null,

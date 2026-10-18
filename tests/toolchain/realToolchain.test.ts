@@ -396,6 +396,91 @@ const composedService = async (): Promise<void> => {
   expect(await portIsFree(workspace.port)).toBe(true);
 };
 
+/**
+ * The evidence-log module on the real toolchain.
+ *
+ * The module's claim is not only that its generated C++ compiles: it says an
+ * HTTP request and a WebSocket message become events, that a text payload is
+ * summarized rather than copied, and that the endpoint reports the schema and
+ * policy that govern what a reader is looking at. All three are observed here
+ * against a running binary, because a unit test can only see the source text.
+ *
+ * `hello-http` is the template and `websocket-echo` is the second module, so this
+ * also covers the conditional message hook: with no WebSocket module the hook is
+ * absent, and here it must be present and working.
+ */
+const evidenceService = async (): Promise<void> => {
+  const workspace = await createWorkspace(
+    "hello-http",
+    8098,
+    ["websocket"],
+    ["evidence-log", "websocket-echo"],
+  );
+  const built = await buildWorkspace(workspace);
+  const result = resultOrThrow(built);
+  expect(result["succeeded"], `the composed workspace failed to build: ${why(result)}`).toBe(true);
+  expect(existsSync(workspace.binary), `no binary at ${workspace.binary}`).toBe(true);
+
+  const service = await startService(workspace);
+  const port = workspace.port;
+  const base = `http://127.0.0.1:${String(port)}`;
+  try {
+    const hello = await runCli(["http", `${base}/hello`, "--json"]);
+    expect(hello.exit, hello.stderr).toBe(EXIT_OK);
+    expect(resultOrThrow(hello)["status"]).toBe(200);
+
+    const frame = await runCli([
+      "ws",
+      `ws://127.0.0.1:${String(port)}/ws`,
+      "--send",
+      "probe-text",
+      "--json",
+    ]);
+    expect(frame.exit, frame.stderr).toBe(EXIT_OK);
+    expect(resultOrThrow(frame)["upgraded"]).toBe(true);
+
+    const outcome = await runCli(["http", `${base}/api/events`, "--json"]);
+    expect(outcome.exit, outcome.stderr).toBe(EXIT_OK);
+    const response = resultOrThrow(outcome);
+    expect(response["status"]).toBe(200);
+    const text = bodyText(response);
+    const event = JSON.parse(text) as {
+      readonly payload_policy?: unknown;
+      readonly schema?: { readonly retention?: unknown };
+      readonly events?: readonly Record<string, unknown>[];
+    };
+    expect(event.payload_policy).toBe("summary");
+    expect(event.schema?.retention).toBe(100);
+
+    const events = event.events ?? [];
+    const httpEvent = events.find((entry) => entry["kind"] === "http");
+    expect(httpEvent).toMatchObject({
+      kind: "http",
+      method: "GET",
+      path: "/hello",
+      status: 200,
+      ok: true,
+    });
+    const messageEvent = events.find((entry) => entry["kind"] === "message");
+    expect(messageEvent).toMatchObject({
+      kind: "message",
+      direction: "received",
+      type: "text",
+      bytes: 10,
+      ok: true,
+    });
+    expect(String(messageEvent?.["payload"])).toMatch(/^len=10 fnv1a64=[0-9a-f]{16}$/u);
+    // The policy is a promise about what is retained, so the probe's own text
+    // must not appear anywhere in the report.
+    expect(text).not.toContain("probe-text");
+  } finally {
+    await service.stop();
+  }
+
+  expect(isAlive(service.pid)).toBe(false);
+  expect(await portIsFree(port)).toBe(true);
+};
+
 const coveredEveryTemplate = (): void => {
   // The vacuity guard. Six passing tests above are only the documented
   // table if they are the six templates — a lane that quietly stopped
@@ -544,6 +629,8 @@ describe.skipIf(realLibuvcpp === undefined)(
     it("websocket-test: echoes a frame and reports its log on :8096", websocketTestService);
 
     it("composed: hello-http with health and echo-log serves on :8097", composedService);
+
+    it("evidence: request and message events are reported on :8098", evidenceService);
 
     it("soap-service: returns an envelope for a call on :8093", async () => {
       const workspace = await builtTemplate("soap-service");

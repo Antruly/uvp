@@ -30,7 +30,7 @@ export const initCommand: CommandSpec = {
   summary: "Scaffold a buildable libuvcpp C++ project.",
   usage:
     "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] " +
-    "[--modules LIST] [--force] [--json]",
+    "[--modules LIST] [--event-payloads summary|verbatim] [--force] [--json]",
   positionals: [{ name: "PATH", description: "Directory to create the workspace in." }],
   flags: [
     { name: "name", type: "string", value: "NAME", description: "Project and CMake target name." },
@@ -59,7 +59,14 @@ export const initCommand: CommandSpec = {
       type: "list",
       value: "LIST",
       description:
-        "Comma-separated application modules: health, echo-log, websocket-echo, static-console.",
+        "Comma-separated application modules: health, echo-log, evidence-log, websocket-echo, " +
+        "static-console.",
+    },
+    {
+      name: "event-payloads",
+      type: "string",
+      value: "POLICY",
+      description: "What the evidence log keeps of a text message: summary (default) or verbatim.",
     },
     {
       name: "force",
@@ -83,6 +90,10 @@ export const initCommand: CommandSpec = {
     "websocket-echo needs --features websocket, static-console needs websocket-echo and echo-log,",
     "and a module whose route the template already serves is refused before anything is written.",
     "The selection is recorded in uvp.json when it differs from the template's default.",
+    "evidence-log records HTTP requests and WebSocket messages; --event-payloads summary keeps a",
+    "length and a hash of a text message rather than its body, and verbatim keeps the text. The",
+    "policy is recorded in uvp.json and reported by GET /api/events, and is refused without",
+    "evidence-log because it would describe a log the workspace does not have.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp init ./svc --name svc");
@@ -102,6 +113,7 @@ export const initCommand: CommandSpec = {
         .filter((piece) => piece !== ""),
     );
     const modulesGiven = parsed.occurrences.some((occurrence) => occurrence.name === "modules");
+    const eventPayloads = asString(parsed, "event-payloads");
     const force = asBoolean(parsed, "force");
     // `--name` is not optional in practice, but the contract has no default for
     // it. The name defaults to the directory's basename, which is what a caller
@@ -128,6 +140,7 @@ export const initCommand: CommandSpec = {
       ...(port === undefined ? {} : { port }),
       ...(features.length === 0 ? {} : { features }),
       ...(modulesGiven ? { modules } : {}),
+      ...(eventPayloads === undefined ? {} : { event_payloads: eventPayloads }),
       ...(force === undefined ? {} : { force }),
     };
   },

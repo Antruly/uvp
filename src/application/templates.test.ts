@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { TEMPLATE_IDS, renderTemplate, templateRoutes } from "./templates.js";
 import type { TemplateId } from "./templates.js";
+import type { UvpEventPayloadPolicy } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import type { UvpFeature } from "../domain/features.js";
 import type { UvpModule } from "../domain/modules.js";
@@ -615,33 +616,42 @@ describe("the websocket-test template", () => {
   });
 });
 
+/**
+ * Render a composition for the module tests.
+ *
+ * At module scope rather than inside the `describe`: the callback's own line
+ * budget is an error at 150, and the helpers are not part of what these tests
+ * assert.
+ */
+const compose = (
+  template: TemplateId,
+  modules: readonly UvpModule[] | undefined,
+  features: readonly UvpFeature[] = ["websocket"],
+  eventPayloads?: UvpEventPayloadPolicy,
+) =>
+  renderTemplate(template, {
+    name: "svc",
+    port: 8080,
+    features,
+    ...(modules === undefined ? {} : { modules }),
+    ...(eventPayloads === undefined ? {} : { eventPayloads }),
+  });
+
+const mainOf = (files: readonly { path: string; content: string }[]): string => {
+  const main = files.find((file) => file.path === "src/main.cpp");
+  if (main === undefined) throw new Error("no src/main.cpp");
+  return main.content;
+};
+
+const manifestOf = (
+  files: readonly { path: string; content: string }[],
+): Record<string, unknown> => {
+  const file = files.find((entry) => entry.path === "uvp.json");
+  if (file === undefined) throw new Error("no uvp.json");
+  return JSON.parse(file.content) as Record<string, unknown>;
+};
+
 describe("application module composition", () => {
-  const compose = (
-    template: TemplateId,
-    modules: readonly UvpModule[] | undefined,
-    features: readonly UvpFeature[] = ["websocket"],
-  ) =>
-    renderTemplate(template, {
-      name: "svc",
-      port: 8080,
-      features,
-      ...(modules === undefined ? {} : { modules }),
-    });
-
-  const mainOf = (files: readonly { path: string; content: string }[]): string => {
-    const main = files.find((file) => file.path === "src/main.cpp");
-    if (main === undefined) throw new Error("no src/main.cpp");
-    return main.content;
-  };
-
-  const manifestOf = (
-    files: readonly { path: string; content: string }[],
-  ): Record<string, unknown> => {
-    const file = files.find((entry) => entry.path === "uvp.json");
-    if (file === undefined) throw new Error("no uvp.json");
-    return JSON.parse(file.content) as Record<string, unknown>;
-  };
-
   it("composes exactly the selected behaviours, not the template's default", () => {
     const source = mainOf(compose("websocket-test", ["health", "echo-log"]));
 
@@ -709,6 +719,67 @@ describe("application module composition", () => {
     expect(console?.content).toContain("scheme + location.host + '/ws'");
   });
 
+  it("composes the evidence log as a middleware plus a read-only endpoint", () => {
+    const source = mainOf(compose("hello-http", ["evidence-log"], []));
+
+    expect(source).toContain("kMaxEvidenceEvents");
+    expect(source).toContain("app.use([](uvcpp_web_request& req, uvcpp_web_response& resp");
+    expect(source).toContain("resp.on_sent(");
+    expect(source).toContain('app.get("/api/events"');
+    expect(source).toContain('kEvidencePayloadPolicy = "summary"');
+    // No WebSocket module is selected, so there is no message hook to emit, and
+    // the two summary helpers that only a message event calls would be unused
+    // functions — a warning the generated C++ must not provoke.
+    expect(source).not.toContain("EvidenceTextSummary");
+    expect(source).not.toContain("EvidenceHexSummary");
+    expect(source).not.toContain('RecordEvidence({EvidenceNowMs(), "message"');
+  });
+
+  it("records WebSocket messages as events without copying the text payload", () => {
+    const source = mainOf(compose("websocket-test", ["websocket-echo", "evidence-log"]));
+
+    expect(source).toContain('RecordEvidence({EvidenceNowMs(), "message"');
+    expect(source).toContain("EvidenceTextSummary(message)");
+    expect(source).toContain("EvidenceHexSummary(data, len)");
+    // The default policy is what keeps the raw text out of the log: the only
+    // occurrence of the message body is the echo itself.
+    expect(source).not.toContain('"text", message');
+  });
+
+  it("omits the evidence log entirely when it is not selected", () => {
+    const source = mainOf(compose("hello-http", ["health"], []));
+    expect(source).not.toContain("RecordEvidence");
+    expect(source).not.toContain("app.use(");
+    expect(source).not.toContain("/api/events");
+    expect("evidence" in manifestOf(compose("hello-http", ["health"], []))).toBe(false);
+  });
+
+  it("records the default summary policy in the source, the manifest, and the endpoint", () => {
+    const files = compose("hello-http", ["evidence-log", "websocket-echo"], ["websocket"]);
+    const source = mainOf(files);
+    expect(source).toContain('kEvidencePayloadPolicy = "summary"');
+    expect(source).toContain("EvidenceTextSummary(message)");
+    expect(source).toContain('"payload":"length and FNV-1a hash for text');
+    expect(manifestOf(files)["evidence"]).toEqual({ payloads: "summary" });
+  });
+
+  it("keeps the text itself only when verbatim retention is asked for", () => {
+    const files = compose(
+      "hello-http",
+      ["evidence-log", "websocket-echo"],
+      ["websocket"],
+      "verbatim",
+    );
+    const source = mainOf(files);
+    expect(source).toContain('kEvidencePayloadPolicy = "verbatim"');
+    // The summary helper exists only under `summary`; emitting it here would be
+    // an unused function in a workspace that chose to retain the text.
+    expect(source).not.toContain("EvidenceTextSummary");
+    expect(source).toContain("message, message.size(), true");
+    expect(source).toContain('"payload":"the text a peer sent, JSON-escaped');
+    expect(manifestOf(files)["evidence"]).toEqual({ payloads: "verbatim" });
+  });
+
   it("registers every route a composition reports, and no others", () => {
     // The same two-way check the template table gets, for selections the table
     // has no static entry for: what `uvp init` reports is what the source does.
@@ -721,6 +792,7 @@ describe("application module composition", () => {
     for (const modules of [
       ["health"],
       ["echo-log"],
+      ["evidence-log"],
       ["websocket-echo"],
       ["health", "echo-log", "websocket-echo", "static-console"],
     ] as const) {

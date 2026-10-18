@@ -517,17 +517,26 @@
             "maximum": 65535
           },
           "modules": {
-            "description": "Application modules to compose into the generated service. Absent means the template's own default: `websocket-test` composes all four, every other template none. `websocket-echo` needs the `websocket` feature, and `static-console` composes `websocket-echo` and `echo-log`. A module whose exact route the template already serves is refused, as is any module on `http3-service`.",
+            "description": "Application modules to compose into the generated service. Absent means the template's own default: `websocket-test` composes `health`, `echo-log`, `websocket-echo` and `static-console`, and every other template none; `evidence-log` is opt-in everywhere. `websocket-echo` needs the `websocket` feature, and `static-console` composes `websocket-echo` and `echo-log`. A module whose exact route the template already serves is refused, as is any module on `http3-service`.",
             "type": "array",
             "items": {
               "type": "string",
               "enum": [
                 "health",
                 "echo-log",
+                "evidence-log",
                 "websocket-echo",
                 "static-console"
               ]
             }
+          },
+          "event_payloads": {
+            "description": "What the evidence log keeps of a text message payload. `summary` (the default) keeps the length and an FNV-1a hash, so the log can correlate messages without retaining their bodies; `verbatim` keeps the text itself. Recorded in `uvp.json` and reported by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
+            "type": "string",
+            "enum": [
+              "summary",
+              "verbatim"
+            ]
           },
           "force": {
             "default": false,
@@ -725,6 +734,7 @@
               "enum": [
                 "health",
                 "echo-log",
+                "evidence-log",
                 "websocket-echo",
                 "static-console"
               ]

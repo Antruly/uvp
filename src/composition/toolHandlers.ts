@@ -282,6 +282,7 @@ export const createToolHandlers = (
           port: input.port,
           force: input.force,
           ...(input.modules === undefined ? {} : { modules: input.modules }),
+          ...(input.event_payloads === undefined ? {} : { eventPayloads: input.event_payloads }),
         });
 
         record(recorder, {

@@ -18,7 +18,13 @@ import type { UvpFeature } from "./features.js";
  * ignored, because a project whose manifest listed a module with no code behind
  * it would be a claim the source does not support.
  */
-export const UVP_MODULES = ["health", "echo-log", "websocket-echo", "static-console"] as const;
+export const UVP_MODULES = [
+  "health",
+  "echo-log",
+  "evidence-log",
+  "websocket-echo",
+  "static-console",
+] as const;
 
 export type UvpModule = (typeof UVP_MODULES)[number];
 
@@ -63,6 +69,14 @@ export const UVP_MODULE_DEFINITIONS: Readonly<Record<UvpModule, UvpModuleDefinit
     requiresFeatures: [],
     requiresModules: [],
     routes: ["GET /api/echo-log"],
+    assets: [],
+  },
+  "evidence-log": {
+    description:
+      "a bounded in-memory log of request and message events with a GET /api/events route that reports its schema, counters, and payload policy",
+    requiresFeatures: [],
+    requiresModules: [],
+    routes: ["GET /api/events"],
     assets: [],
   },
   "websocket-echo": {
@@ -133,7 +147,12 @@ export const resolveModules = (names: readonly UvpModule[]): readonly UvpModule[
  * registers.
  */
 export const defaultModules = (template: string): readonly UvpModule[] =>
-  template === "websocket-test" ? UVP_MODULES : [];
+  template === "websocket-test"
+    ? // Spelled out rather than `UVP_MODULES`: adding a module to the vocabulary
+      // must not change what an existing template generates. The four here are
+      // the template's previous fixed body, and the evidence log is opt-in.
+      ["health", "echo-log", "websocket-echo", "static-console"]
+    : [];
 
 /**
  * Why the selected modules cannot be used with these features, or `undefined`.
