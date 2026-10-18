@@ -741,11 +741,14 @@ export class WorkspaceService {
     await walk(join(pkg.path, "files"), "");
 
     const manifest = {
+      uvp: 1,
       name: input.name,
+      binary: input.name,
       port: input.port,
-      scheme: features.includes("tls") ? "https" : "http",
-      ...(features.length === 0 ? {} : { features }),
-      ...(pkg.requires?.libuvcpp === undefined ? {} : { requiredLibuvcpp: pkg.requires.libuvcpp }),
+      features,
+      ...(pkg.requires?.libuvcpp === undefined
+        ? {}
+        : { requirements: { libuvcpp: pkg.requires.libuvcpp } }),
       template_package: { id: pkg.id, version: pkg.version, digest: pkg.digest },
     };
     rendered.push({

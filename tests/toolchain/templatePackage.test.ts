@@ -74,6 +74,7 @@ describe.skipIf(guard !== "")("a template package", () => {
         files,
         license: { spdx: "MIT", file: "LICENSE" },
         provenance: { author: "uvp tests", createdAt: "2026-10-18T00:00:00Z" },
+        requires: { libuvcpp: ">=1.7.0" },
         routes: ["GET /hello"],
       }),
     );
@@ -113,6 +114,7 @@ describe.skipIf(guard !== "")("a template package", () => {
       unknown
     >;
     expect(manifest["port"]).toBe(PORT);
+    expect(manifest["requirements"]).toEqual({ libuvcpp: ">=1.7.0" });
     expect(manifest["template_package"]).toMatchObject({
       id: "fixture-package",
       version: "1.0.0",

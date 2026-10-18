@@ -175,7 +175,9 @@ placeholders in UTF-8 text files. The package must be imported first
 exclusive.
 
 `uvp.json` records `template_package: { id, version, digest }` and the package's
-`requires.features`; a package workspace has no `template` field. The result's
+`requires.features`; a package workspace has no `template` field. The package's
+`requires.libuvcpp` is recorded under `requirements`, and `binary` is the project
+name, which is what `uvp run` looks for. The result's
 `routes` comes from the manifest's optional `routes` array, never from the
 source; when the field is absent, the result reports `routes: []` with a
 limitation. `--features`, `--modules`, `--frontends`, and `--event-payloads` are

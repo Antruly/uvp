@@ -123,7 +123,7 @@ describe("the template commands", () => {
       root,
       content: "// {{project.name}} {{project.port}} {{features}}\nint main() { return 0; }\n",
       overrides: {
-        requires: { features: ["websocket"] },
+        requires: { features: ["websocket"], libuvcpp: ">=1.7.0" },
         routes: ["GET /hello"],
       },
     });
@@ -155,7 +155,10 @@ describe("the template commands", () => {
     expect(templatePackage["id"]).toBe("acme-dashboard");
     expect(templatePackage["version"]).toBe("1.2.0");
     expect(manifest["features"]).toEqual(["websocket"]);
-    expect(manifest["scheme"]).toBe("http");
+    expect(manifest["requirements"]).toEqual({ libuvcpp: ">=1.7.0" });
+    expect(manifest["binary"]).toBe("acme");
+    expect(manifest["scheme"]).toBeUndefined();
+    expect(manifest["template"]).toBeUndefined();
   });
 
   it("refuses both a built-in template and a template package", async () => {
