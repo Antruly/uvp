@@ -12,7 +12,14 @@ import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
 import { assignmentOf, wordsOf } from "../../../tests/support/recordedCommand.js";
 import { removeTree } from "../../../tests/support/temporaryTree.js";
-import { LocalToolchainProvider, discoverLibuvcpp } from "./LocalToolchainProvider.js";
+import {
+  LocalToolchainProvider,
+  discoverLibuvcpp,
+  pkgConfigCandidateNames,
+  pkgConfigHelpAccepted,
+  pkgConfigValidatesCandidate,
+  probeInvocation,
+} from "./LocalToolchainProvider.js";
 
 /**
  * What a build tells CMake about the library, and where that answer came from.
@@ -247,6 +254,9 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(found.installPrefix).toBe(installPrefix);
     expect(found.version).toBe("1.7.0");
     expect(found.modules).toEqual(["UVCPP_HTTP_ENABLE", "UVCPP_WS_ENABLE"]);
+    // This prefix carries `lib/cmake/uvcpp/uvcppConfig.cmake`, so the generated
+    // project's first route answers and pkg-config is not a prerequisite.
+    expect(found.cmakePackage).toBe(true);
   });
 
   /** Discovery of `prefix`, with `UVCPP_ROOT` pointed at it for one call. */
@@ -260,6 +270,26 @@ describe("the libuvcpp a build points CMake at", () => {
       else process.env["UVCPP_ROOT"] = saved;
     }
   };
+
+  it("reports an archive with no CMake package, which is the pkg-config route", async () => {
+    // A release archive's shape: the config header and `uvcpp.pc`, and no
+    // `cmake/uvcpp` directory at all. The doctor decides the route from this
+    // observation, so it has to be an observation and not a guess from the
+    // version source.
+    const prefix = join(root, "archive-only");
+    mkdirSync(join(prefix, "lib", "pkgconfig"), { recursive: true });
+    mkdirSync(join(prefix, "include", "uvcpp"), { recursive: true });
+    writeFileSync(
+      join(prefix, "include", "uvcpp", "uvcpp_config.h"),
+      "#define UVCPP_HTTP_ENABLE 1\n",
+    );
+    writeFileSync(join(prefix, "lib", "pkgconfig", "uvcpp.pc"), "Name: uvcpp\nVersion: 1.7.0\n");
+
+    const found = await findUnderRoot(prefix);
+    expect(found.found).toBe(true);
+    expect(found.versionSource).toBe("pkgconfig");
+    expect(found.cmakePackage).toBe(false);
+  });
 
   it("marks a module list it could not read as unknown, not as an empty one", async () => {
     // A prefix can carry the CMake package file without the config header the
@@ -633,6 +663,167 @@ describe("a call whose signal was already aborted", () => {
 
     expect(failure.code).toBe("cancelled");
     expect(failure.message).toContain("cancelled");
+  });
+});
+
+/** Run `body` with `PATH` replaced, restoring it even when the body throws. */
+const withPath = async <T>(path: string, body: () => Promise<T>): Promise<T> => {
+  const saved = process.env["PATH"];
+  process.env["PATH"] = path;
+  try {
+    return await body();
+  } finally {
+    if (saved === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = saved;
+  }
+};
+
+/**
+ * The pkg-config executable, as an observation rather than a requirement.
+ *
+ * Whether a workspace needs pkg-config depends on the libuvcpp route, which is
+ * a fact the doctor has only after discovery. The provider's job is to say
+ * whether it looked and what it saw: an absent field means "not looked", `{}`
+ * means "looked, found nothing", and a path means "found it". Collapsing the
+ * first into the second is how a check that never ran becomes an instruction to
+ * install something.
+ */
+describe("the pkg-config executable", () => {
+  it("reports the executable it found, and does not call it missing", async () => {
+    const bin = join(root, "pkg-config-bin");
+    await installFakeTool(bin, "pkg-config", { module: SUCCEEDS_QUIETLY });
+
+    const availability = await withPath(bin, () => provider.inspectAvailability(signal));
+
+    expect(availability.pkgConfig?.path?.startsWith(bin)).toBe(true);
+    // Discovery decides the requirement, not the inspection: this host may have
+    // a CMake-package libuvcpp, in which case pkg-config is never invoked.
+    expect(availability.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+
+  it("reports that it looked and found nothing, rather than saying nothing", async () => {
+    const empty = join(root, "empty-bin");
+    mkdirSync(empty, { recursive: true });
+
+    const availability = await withPath(empty, () => provider.inspectAvailability(signal));
+
+    expect(availability.pkgConfig).toEqual({});
+    expect(availability.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+
+  it("accepts pkgconf, the other name for the same program", async () => {
+    const bin = join(root, "pkgconf-bin");
+    await installFakeTool(bin, "pkgconf", { module: SUCCEEDS_QUIETLY });
+
+    const availability = await withPath(bin, () => provider.inspectAvailability(signal));
+
+    expect(availability.pkgConfig?.path?.includes("pkgconf")).toBe(true);
+  });
+});
+
+/**
+ * Which names CMake's `FindPkgConfig` would search, and which candidate it would
+ * accept.
+ *
+ * The provider has to ask the question CMake will ask, because the doctor's
+ * verdict and the build's outcome are about the same configure. The details
+ * differ by CMake version and by host, and getting either wrong has a direction:
+ * a host with a working executable reported as missing sends someone to install
+ * a second copy of it. The probe itself cannot be exercised against the
+ * versioning rules — the host running the test has one CMake and one platform —
+ * so the two decisions are exported and tested directly, and the tests above run
+ * the probe around them.
+ */
+describe("what CMake's FindPkgConfig searches", () => {
+  it("searches pkg-config alone before CMake 3.22", () => {
+    // 3.22 is the release that added `pkgconf` to the module's name list; on
+    // 3.20 and 3.21 a host with only pkgconf fails to configure, so counting it
+    // as found would be the same false "it is there" in reverse. The host is
+    // named explicitly so this asserts the Unix list on every lane; the Windows
+    // list has its own test below.
+    expect(pkgConfigCandidateNames("3.20.0", false)).toEqual(["pkg-config"]);
+    expect(pkgConfigCandidateNames("3.21.3", false)).toEqual(["pkg-config"]);
+    expect(pkgConfigCandidateNames("3.22.0", false)).toEqual(["pkg-config", "pkgconf"]);
+  });
+
+  it("searches pkgconf on every later 3.x, and on 4.x", () => {
+    expect(pkgConfigCandidateNames("3.28.3", false)).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("3.31.0", false)).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("4.0.0", false)).toEqual(["pkg-config", "pkgconf"]);
+  });
+
+  it("searches the newer list when the CMake version could not be read", () => {
+    // The version is read from `cmake --version`, which can fail; `undefined`
+    // is "could not look". The conservative answer is the newer search, because
+    // missing a `pkgconf` CMake would have used is the false absence this probe
+    // exists to avoid.
+    expect(pkgConfigCandidateNames(undefined, false)).toEqual(["pkg-config", "pkgconf"]);
+  });
+
+  it("searches pkg-config.bat first on Windows, as the module does", () => {
+    // v3.20's module prepends the `.bat` name on Windows rather than appending
+    // it, and that order decides which path a host with both gets reported.
+    expect(pkgConfigCandidateNames("3.20.0", true)).toEqual(["pkg-config.bat", "pkg-config.exe"]);
+    expect(pkgConfigCandidateNames("3.31.0", true)).toEqual([
+      "pkg-config.bat",
+      "pkg-config.exe",
+      "pkgconf.exe",
+    ]);
+  });
+
+  it("runs the validator from 3.29.1, the release that added it", () => {
+    // 3.29.0 has no validator; 3.29.1 through 3.29.6 and 3.30+ do. The patch
+    // component decides: a whole-minor gate would skip 3.29.1–3.29.6, and there
+    // the probe would search the right names while never applying the check
+    // that decides, reporting a host ready whose configure then fails.
+    expect(pkgConfigValidatesCandidate("3.28.3", true)).toBe(false);
+    expect(pkgConfigValidatesCandidate("3.29.0", true)).toBe(false);
+    expect(pkgConfigValidatesCandidate("3.29.1", true)).toBe(true);
+    expect(pkgConfigValidatesCandidate("3.29.6", true)).toBe(true);
+    expect(pkgConfigValidatesCandidate("3.30.0", true)).toBe(true);
+    expect(pkgConfigValidatesCandidate("4.0.0", true)).toBe(true);
+    // The validator is a Windows-only step of `find_program`; elsewhere the
+    // version alone does not make it apply.
+    expect(pkgConfigValidatesCandidate("3.29.6", false)).toBe(false);
+    // An unreadable version takes the broader branch, as the name list does.
+    expect(pkgConfigValidatesCandidate(undefined, true)).toBe(true);
+  });
+
+  it("accepts a non-.exe candidate only when CMake's 3.29.1 validator would", () => {
+    // From 3.29.1, Windows runs `--help` on a candidate without `.exe` and rejects
+    // it unless that exits 0. Strawberry Perl's shim is the real case: it is
+    // found, answers `--version`, and is rejected by CMake — so the probe must
+    // reject it too rather than promise a configure that then fails.
+    expect(pkgConfigHelpAccepted(0, "Usage: pkg-config [OPTION...]")).toBe(true);
+    expect(pkgConfigHelpAccepted(0, "This is pkg-config (Pure-Perl implementation)")).toBe(false);
+    expect(pkgConfigHelpAccepted(1, "Usage: pkg-config [OPTION...]")).toBe(false);
+    // A probe killed by its timeout reports a null exit code; that is not a
+    // zero exit, and the validator would not have seen one either.
+    expect(pkgConfigHelpAccepted(null, "")).toBe(false);
+  });
+
+  it("starts a batch candidate through the command interpreter", () => {
+    // Node cannot spawn a `.bat` itself: `CreateProcess` refuses it and Node
+    // raises `EINVAL`. The Windows source gate found that when the probe first
+    // started one directly, so a candidate CMake can run is started the way
+    // Windows runs a batch file — through cmd, with the command quoted as `/s`
+    // expects.
+    const bat = probeInvocation("C:\\tools\\pkg-config.bat", "--help", true);
+    expect(bat.command).toMatch(/cmd(?:\.exe)?$/iu);
+    expect(bat.args).toEqual(["/d", "/s", "/c", '"C:\\tools\\pkg-config.bat" --help']);
+
+    // An executable image is started directly, with the flag as its own
+    // argument — no interpreter and no shell quoting in between.
+    expect(probeInvocation("C:\\tools\\pkg-config.exe", "--version", true)).toEqual({
+      command: "C:\\tools\\pkg-config.exe",
+      args: ["--version"],
+    });
+
+    // Off Windows a `.bat` is just a file name; nothing wraps it.
+    expect(probeInvocation("/opt/bin/pkg-config.bat", "--version", false)).toEqual({
+      command: "/opt/bin/pkg-config.bat",
+      args: ["--version"],
+    });
   });
 });
 

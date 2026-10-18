@@ -169,7 +169,16 @@ const diagnosticLine = (diagnostic: unknown): string => {
   const column = num(at(diagnostic, "column"));
   const where = `${file}${line === undefined ? "" : `:${String(line)}`}${column === undefined ? "" : `:${String(column)}`}`;
   const phase = str(at(diagnostic, "phase"));
-  return `${where}: ${str(at(diagnostic, "severity"))}: ${str(at(diagnostic, "message"))} [${phase}]`;
+  const said = `${where}: ${str(at(diagnostic, "severity"))}: ${str(at(diagnostic, "message"))} [${phase}]`;
+
+  // The remedy is printed under the diagnostic rather than instead of any part
+  // of it: the message is the tool's own words, and the remedy is uvp's
+  // interpretation of them. A person debugging needs both.
+  const remediation = at(diagnostic, "remediation");
+  const action = str(at(remediation, "action"));
+  if (action === "") return said;
+  const docs = str(at(remediation, "docs"));
+  return `${said}\n    remedy: ${action}${docs === "" ? "" : `  (${docs})`}`;
 };
 
 export const renderRun = (output: Record<string, unknown>): string[] => {

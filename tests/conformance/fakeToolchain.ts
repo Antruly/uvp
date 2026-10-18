@@ -65,6 +65,16 @@ export interface FakeToolchainOptions {
   readonly compilers?: number;
   readonly buildSystems?: readonly string[];
   readonly missing?: readonly { id: string; requiredFor: string }[];
+  /**
+   * The pkg-config observation this provider reports.
+   *
+   * Omitted means "did not look", `{}` means "looked, found nothing", and
+   * `{ path }` means "found it". The three are what decides whether a
+   * libuvcpp route without a CMake package is blocked by pkg-config, so a
+   * fixture that could only say one of them could not exercise the doctor's
+   * condition.
+   */
+  readonly pkgConfig?: { readonly path?: string };
   readonly libuvcpp?: LibuvcppBuild;
   /**
    * Makes `findLibuvcpp` refuse, with this as the provider's sentence.
@@ -94,6 +104,7 @@ const defaultAvailability = (options: FakeToolchainOptions): ToolchainAvailabili
     buildSystems: buildSystems.map((id) => ({ id, path: `/usr/bin/${id}`, version: "1.0.0" })),
     missing: [...(options.missing ?? [])],
     limitations: [],
+    ...(options.pkgConfig === undefined ? {} : { pkgConfig: options.pkgConfig }),
   };
 };
 

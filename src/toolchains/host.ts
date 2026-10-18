@@ -39,6 +39,34 @@ export const isWindows = process.platform === "win32";
 export const EXE = isWindows ? ".exe" : "";
 
 /**
+ * The absolute path of the first of `names` that is on `PATH`, names in order.
+ *
+ * Unlike `whichOnPath`, the names are taken literally — an extension is part of
+ * the name — and the whole list is tried in each directory before the next one is
+ * opened. That is how CMake's `find_program(... NAMES_PER_DIR)` searches, and it
+ * matters for `pkg-config` on Windows: CMake lists `pkg-config.bat` before the
+ * extensionless name, so the wrapper it would pick is the one this reports, not
+ * whichever `.exe` an extensionless lookup finds later on `PATH`.
+ */
+export const findOnPath = async (names: readonly string[]): Promise<string | undefined> => {
+  const pathValue = process.env["PATH"];
+  if (pathValue === undefined) return undefined;
+  for (const dir of pathValue.split(delimiter)) {
+    if (dir === "") continue;
+    for (const name of names) {
+      const candidate = join(dir, name);
+      try {
+        await access(candidate, constants.X_OK);
+        return candidate;
+      } catch {
+        // Not here; try the next name in this directory.
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
  * The absolute path of `command` on `PATH`, or `undefined` if it is not there.
  *
  * `undefined` rather than a throw, because "not installed" is the ordinary

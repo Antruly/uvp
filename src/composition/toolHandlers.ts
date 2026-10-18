@@ -110,6 +110,7 @@ const buildOutput = (
     ...(diagnostic.column === undefined ? {} : { column: diagnostic.column }),
     message: diagnostic.message,
     phase: diagnostic.phase,
+    ...(diagnostic.remediation === undefined ? {} : { remediation: diagnostic.remediation }),
   })),
   artifacts: outcome.artifacts.map((artifact) => ({
     path: artifact.path,

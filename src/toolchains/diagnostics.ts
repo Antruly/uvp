@@ -1,4 +1,8 @@
-import type { BuildDiagnostic, BuildPhase } from "../application/ToolchainProvider.js";
+import type {
+  BuildDiagnostic,
+  BuildPhase,
+  BuildRemediation,
+} from "../application/ToolchainProvider.js";
 
 /**
  * Reading a build's failures out of the text the tools printed.
@@ -252,6 +256,51 @@ const cmakeHeader = (line: string): CmakeHeader | undefined => {
 };
 
 /**
+ * CMake's failure to find the pkg-config executable, and what to do about it.
+ *
+ * Captured on this host from CMake 3.28 with `PKG_CONFIG_EXECUTABLE` forced to
+ * `NOTFOUND`:
+ *
+ * ```
+ * CMake Error at /usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake:230 (message):
+ *   Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)
+ * ```
+ *
+ * A first-time Windows user meets this sentence when a libuvcpp release archive
+ * is in use and no `pkg-config` CMake can use is on `PATH`. The module has
+ * searched, among other names, `pkg-config.bat` since 3.20 — so the presence of
+ * a `.bat` is not by itself the failure. From CMake 3.29.1 a non-`.exe` candidate
+ * is rejected when `--help` exits nonzero or its output says `Pure-Perl`, which
+ * is Strawberry Perl's shim; on older versions the `--version` probe decides.
+ * The message is CMake's and says none of that, so the remedy is attached beside
+ * it. The message itself is never rewritten — a caller comparing against CMake's
+ * output still finds CMake's words.
+ *
+ * `FindPkgConfig` is matched with a word boundary because the same sentence
+ * could name another module; the missing variable is what makes it this
+ * failure rather than a look-alike.
+ */
+const PKG_CONFIG_EXECUTABLE_MISSING = /^Could NOT find PkgConfig\b.*\bPKG_CONFIG_EXECUTABLE\b/u;
+
+const PKG_CONFIG_REMEDY: BuildRemediation = {
+  action:
+    "Install pkg-config, or pkgconf on CMake 3.22 or newer (on Windows, " +
+    "`choco install pkgconfiglite`), open a new shell, re-apply UVCPP_ROOT, " +
+    "PKG_CONFIG_PATH and PATH, then verify with `pkg-config --modversion uvcpp`.",
+  docs: "docs/installation.md#windows-msvc",
+};
+
+/**
+ * A remedy for a CMake message, when this module knows one.
+ *
+ * Matched against the message CMake printed, not the command it was running:
+ * `pkg_check_modules` can fail for a missing package and for a missing
+ * pkg-config, and only the text says which.
+ */
+const remediationFor = (said: string): BuildRemediation | undefined =>
+  PKG_CONFIG_EXECUTABLE_MISSING.test(said) ? PKG_CONFIG_REMEDY : undefined;
+
+/**
  * One CMake error or warning starting at `lines[at]`, with the lines it consumed.
  *
  * `consumed` is what lets the caller skip the message block. A scanner that did
@@ -282,6 +331,7 @@ export const parseCmakeDiagnostic = (
   // tool's own context, and inventing one would change a published schema for a
   // string.
   const message = place.command === undefined ? said : `${place.command}: ${said}`;
+  const remediation = remediationFor(said);
 
   return {
     diagnostic: {
@@ -290,6 +340,7 @@ export const parseCmakeDiagnostic = (
       ...(place.line === undefined ? {} : { line: place.line }),
       message,
       phase,
+      ...(remediation === undefined ? {} : { remediation }),
     },
     consumed: block.consumed,
   };
