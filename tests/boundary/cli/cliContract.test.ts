@@ -785,6 +785,40 @@ describe("a refused invocation writes nothing", () => {
     expect(error.message).toContain("not valid JSON");
   });
 
+  it("refuses an unknown module before writing anything", async () => {
+    const target = join(tmpdir(), `uvp init modules ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke(["init", target, "--name", "svc", "--modules", "metrics", "--json"]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a module named twice instead of quietly deduplicating it", async () => {
+    // `--features` deduplicates, and copying that behaviour here would make the
+    // contract's duplicate refusal unreachable from the command line. The list
+    // is passed through as typed; the application layer names the repeat.
+    const target = join(tmpdir(), `uvp init duplicate ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--modules",
+      "health,health",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("health");
+    expect(existsSync(target)).toBe(false);
+  });
+
   it("refuses a name it cannot derive from the path, and writes nothing", async () => {
     // A path is not a CMake target. Deriving `my service` from it used to report
     // `build:complete` and leave the caller with a project `cmake` refuses on the

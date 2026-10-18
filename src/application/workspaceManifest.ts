@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { UvpFailure } from "../domain/errors.js";
 import { isUvpFeature, type UvpFeature } from "../domain/features.js";
+import { isUvpModule, type UvpModule } from "../domain/modules.js";
 import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js";
 
 /**
@@ -43,6 +44,21 @@ export interface WorkspaceManifest {
   readonly features: readonly UvpFeature[];
   /** Feature names that were present but not recognised, kept so they can be reported. */
   readonly unrecognisedFeatures: readonly string[];
+  /**
+   * The application modules the workspace records, when it records any.
+   *
+   * Absent means "the template's default set" (`defaultModules`), not "none":
+   * `uvp init --template websocket-test` without `--modules` omits the field
+   * because its generated source composes the full set, and every other
+   * template's default is empty. `uvp init` writes the field only when the
+   * selection differs from that default, so a reader decides the composition
+   * from this field *and* `template`. An explicitly empty list means no modules.
+   * A name this uvp does not know is reported through `unrecognisedModules`
+   * rather than silently dropped.
+   */
+  readonly modules?: readonly UvpModule[] | undefined;
+  /** Module names that were present but not recognised, kept so they can be reported. */
+  readonly unrecognisedModules: readonly string[];
   readonly requiredLibuvcpp?: string;
   /**
    * The toolchain this workspace asks to be built with.
@@ -205,6 +221,33 @@ export const readWorkspaceManifest = async (
     else unrecognised.push(entry);
   }
 
+  // A `modules` field that is present has to be readable: absent means the
+  // template's default, and folding a malformed declaration into "absent" would
+  // answer the default on behalf of a file that said something else. Unknown
+  // names are a different matter — they are reported, like unknown features,
+  // rather than making the whole manifest unusable.
+  const modulesValue = parsed["modules"];
+  const modules: UvpModule[] = [];
+  const unrecognisedModules: string[] = [];
+  if (modulesValue !== undefined) {
+    if (!Array.isArray(modulesValue)) {
+      return {
+        state: "unreadable",
+        problem: `${manifestName} declares \`modules\` and it is not a list`,
+      };
+    }
+    for (const entry of modulesValue) {
+      if (typeof entry !== "string") {
+        return {
+          state: "unreadable",
+          problem: `${manifestName} declares a \`modules\` entry that is not a string`,
+        };
+      }
+      if (isUvpModule(entry)) modules.push(entry);
+      else unrecognisedModules.push(entry);
+    }
+  }
+
   const requirements = isRecord(parsed["requirements"]) ? parsed["requirements"] : {};
 
   // Each optional field is read once and spread only when it is a non-empty
@@ -230,6 +273,8 @@ export const readWorkspaceManifest = async (
       scheme: features.includes("tls") ? "https" : "http",
       features,
       unrecognisedFeatures: unrecognised,
+      ...(modulesValue === undefined ? {} : { modules }),
+      unrecognisedModules,
       ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),
       ...(toolchain === undefined ? {} : { toolchain }),
       ...(toolchainProblem === undefined ? {} : { toolchainProblem }),

@@ -127,9 +127,14 @@ const whereVersionCameFrom = (source: string): string =>
 export const renderWorkspaceCreate = (output: Record<string, unknown>): string[] => {
   const files = list(output["files"]);
   const total = files.reduce<number>((sum, file) => sum + (num(at(file, "bytes")) ?? 0), 0);
+  const modules = strings(output["modules"]);
   return [
     row("workspace", `${str(output["workspace_id"])}  ${str(output["path"])}`),
     row("template", str(output["template"])),
+    // Always shown, because "(none)" is a fact a composed workspace needs: it
+    // is what an explicit empty selection produced, and it is not the same
+    // claim as a template that simply has no default modules.
+    row("modules", modules.length === 0 ? "(none)" : modules.join(", ")),
     row("files", `${String(files.length)} written, ${bytes(total)}`),
     ...rows("route", strings(output["routes"])),
     ...rows("next", strings(output["next_steps"])),

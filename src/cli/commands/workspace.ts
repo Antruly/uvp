@@ -29,7 +29,8 @@ export const initCommand: CommandSpec = {
   tool: "uvp_workspace_create",
   summary: "Scaffold a buildable libuvcpp C++ project.",
   usage:
-    "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] [--force] [--json]",
+    "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] " +
+    "[--modules LIST] [--force] [--json]",
   positionals: [{ name: "PATH", description: "Directory to create the workspace in." }],
   flags: [
     { name: "name", type: "string", value: "NAME", description: "Project and CMake target name." },
@@ -54,6 +55,13 @@ export const initCommand: CommandSpec = {
       description: "Comma-separated: tls, http2, http3, grpc, websocket, soap, db.",
     },
     {
+      name: "modules",
+      type: "list",
+      value: "LIST",
+      description:
+        "Comma-separated application modules: health, echo-log, websocket-echo, static-console.",
+    },
+    {
       name: "force",
       type: "boolean",
       description: "Write into a directory that already contains files.",
@@ -69,6 +77,12 @@ export const initCommand: CommandSpec = {
     "connection pool in place of its in-memory map, reading UVP_DATABASE_URL and defaulting to a",
     "SQLite file in the working directory. The other templates have no store to back, so there it",
     "is a build requirement and nothing more.",
+    "--modules composes application code into the template: a health route, a bounded echo log, a",
+    "WebSocket echo endpoint, a static console. websocket-test is those four by default; every",
+    "other template composes none unless asked, and the code it already serves stays.",
+    "websocket-echo needs --features websocket, static-console needs websocket-echo and echo-log,",
+    "and a module whose route the template already serves is refused before anything is written.",
+    "The selection is recorded in uvp.json when it differs from the template's default.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp init ./svc --name svc");
@@ -76,6 +90,18 @@ export const initCommand: CommandSpec = {
     const template = asString(parsed, "template");
     const port = asNumber(parsed, "port");
     const features = parseCsv(asList(parsed, "features"));
+    // Not `parseCsv`: that helper drops repeats, and a module named twice is a
+    // refusal the caller is owed, not a list to quietly tidy. Whether the flag
+    // appeared at all is kept too, so `--modules ""` means "none" rather than
+    // "the template's default" — that distinction is the contract's, and the
+    // command's job is to pass the words through unchanged.
+    const modules = asList(parsed, "modules").flatMap((entry) =>
+      entry
+        .split(",")
+        .map((piece) => piece.trim())
+        .filter((piece) => piece !== ""),
+    );
+    const modulesGiven = parsed.occurrences.some((occurrence) => occurrence.name === "modules");
     const force = asBoolean(parsed, "force");
     // `--name` is not optional in practice, but the contract has no default for
     // it. The name defaults to the directory's basename, which is what a caller
@@ -101,6 +127,7 @@ export const initCommand: CommandSpec = {
       ...(template === undefined ? {} : { template }),
       ...(port === undefined ? {} : { port }),
       ...(features.length === 0 ? {} : { features }),
+      ...(modulesGiven ? { modules } : {}),
       ...(force === undefined ? {} : { force }),
     };
   },

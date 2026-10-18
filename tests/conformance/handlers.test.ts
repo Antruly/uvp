@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import type { AddressInfo, Socket } from "node:net";
@@ -370,6 +370,147 @@ describe("workspace creation", () => {
     expect(await failureCodeOf("uvp_workspace_create", { path: "", name: "" })).toBe(
       "invalid_request",
     );
+  });
+
+  it("composes the selected modules into the source, the manifest, and the routes", async () => {
+    const path = join(harness.workspace, "..", "composed");
+    temporaryRoots.push(path);
+
+    // Listed out of canonical order on purpose: the generated file is a
+    // deliverable, and two requests naming the same modules must not differ
+    // because one of them typed the list differently.
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "composed",
+      template: "websocket-test",
+      features: ["websocket"],
+      port: 8080,
+      modules: ["echo-log", "health"],
+    });
+    expectConforms("uvp_workspace_create", output);
+    expect(output["modules"]).toEqual(["health", "echo-log"]);
+    expect(output["routes"]).toEqual(["GET /healthz", "GET /api/echo-log"]);
+
+    const source = await readFile(join(path, "src", "main.cpp"), "utf8");
+    expect(source).toContain('app.get("/healthz"');
+    expect(source).toContain('app.get("/api/echo-log"');
+    // Not selected, so not generated: a comment or a route for a module the
+    // caller did not ask for is a claim the source would not support.
+    expect(source).not.toContain('app.websocket("/ws"');
+    expect(source).not.toContain("app.serve_static(");
+
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as {
+      modules?: string[];
+    };
+    expect(manifest.modules).toEqual(["health", "echo-log"]);
+
+    // The console is the static-console module's asset; without that module
+    // there is no page, because nothing would serve one.
+    await expect(access(join(path, "public", "index.html"))).rejects.toThrow();
+  });
+
+  it("records no modules field when the selection is the template's default", async () => {
+    const path = join(harness.workspace, "..", "defaults");
+    temporaryRoots.push(path);
+
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "defaults",
+      template: "websocket-test",
+      features: ["websocket"],
+      port: 8080,
+    });
+    expect(output["modules"]).toEqual(["health", "echo-log", "websocket-echo", "static-console"]);
+
+    // A manifest written with no `--modules` must stay byte-identical to the
+    // one written before the module layer existed; the default is expressed by
+    // the absence of the field, not by restating it.
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect("modules" in manifest).toBe(false);
+  });
+
+  it("refuses a repeated module by name", async () => {
+    const path = join(harness.workspace, "..", "duplicated-module");
+    temporaryRoots.push(path);
+
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "duplicated",
+        template: "websocket-test",
+        features: ["websocket"],
+        modules: ["health", "health"],
+      }),
+    ).toBe("invalid_request");
+    // Refused before any file was written: there is nothing to clean up.
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("refuses a module whose feature is not requested", async () => {
+    const path = join(harness.workspace, "..", "module-feature");
+    temporaryRoots.push(path);
+
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "feature",
+        template: "hello-http",
+        features: [],
+        modules: ["websocket-echo"],
+      }),
+    ).toBe("missing_requirement");
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("refuses a module whose composed modules are not selected", async () => {
+    const path = join(harness.workspace, "..", "module-dependency");
+    temporaryRoots.push(path);
+
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "dependency",
+        template: "hello-http",
+        modules: ["static-console"],
+      }),
+    ).toBe("missing_requirement");
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("refuses a module whose route the template already serves", async () => {
+    const path = join(harness.workspace, "..", "module-conflict");
+    temporaryRoots.push(path);
+
+    // `rest-api` already answers GET /healthz; composing the health module
+    // would register the same exact route twice.
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "conflict",
+        template: "rest-api",
+        modules: ["health"],
+      }),
+    ).toBe("invalid_request");
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("refuses modules on the one template that is not written against uvcpp_web_app", async () => {
+    const path = join(harness.workspace, "..", "module-http3");
+    temporaryRoots.push(path);
+
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "h3",
+        template: "http3-service",
+        features: ["tls", "http3"],
+        modules: ["health"],
+      }),
+    ).toBe("invalid_request");
+    await expect(access(path)).rejects.toThrow();
   });
 });
 
