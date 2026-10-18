@@ -493,7 +493,7 @@
             ]
           },
           "template_package": {
-            "description": "A stored package to render instead of a built-in template. The suite in `files/` is written as the workspace's source after its declared placeholders are substituted; the package's routes are reported, and its `uvp.json` is merged with the `template_package` record. Exactly one selector is used: `template` or `template_package`, not both. `features`, `modules`, `event_payloads`, and `frontends` are refused with it, because they compose the built-in generators rather than the package's source.",
+            "description": "A stored package to render instead of a built-in template. The tree in `files/` is written as the workspace's source after its declared placeholders are substituted; the package's routes are reported, and its `uvp.json` is merged with the `template_package` record. Exactly one selector is used: `template` or `template_package`, not both. `features`, `modules`, `event_payloads`, and `frontends` are refused with it, because they compose the built-in generators rather than the package's source.",
             "type": "object",
             "properties": {
               "id": {

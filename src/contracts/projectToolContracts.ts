@@ -85,7 +85,7 @@ export const workspaceCreateContract = defineTool({
       template_package: storedTemplatePackageSelector
         .optional()
         .describe(
-          "A stored package to render instead of a built-in template. The suite in `files/` is " +
+          "A stored package to render instead of a built-in template. The tree in `files/` is " +
             "written as the workspace's source after its declared placeholders are substituted; " +
             "the package's routes are reported, and its `uvp.json` is merged with the " +
             "`template_package` record. Exactly one selector is used: `template` or " +
