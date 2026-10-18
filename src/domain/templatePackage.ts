@@ -241,6 +241,54 @@ export const parseTemplatePackageVersion = (value: string): TemplatePackageVersi
   };
 };
 
+const comparePrerelease = (left: string, right: string): number => {
+  const leftParts = left.split(".");
+  const rightParts = right.split(".");
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const leftPart = leftParts[index];
+    const rightPart = rightParts[index];
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    const leftNumeric = /^\d+$/u.test(leftPart);
+    const rightNumeric = /^\d+$/u.test(rightPart);
+    if (leftNumeric && rightNumeric) {
+      const difference = Number(leftPart) - Number(rightPart);
+      if (difference !== 0) return difference < 0 ? -1 : 1;
+    } else if (leftNumeric) {
+      return -1;
+    } else if (rightNumeric) {
+      return 1;
+    } else {
+      // SemVer orders non-numeric identifiers by ASCII code unit, not by a
+      // locale's collation: the comparison must not depend on the host locale.
+      if (leftPart !== rightPart) return leftPart < rightPart ? -1 : 1;
+    }
+  }
+  return 0;
+};
+
+/**
+ * SemVer precedence, including prerelease ordering. Build metadata is ignored.
+ *
+ * It lives here rather than in the search module because the registry index
+ * reader also decides whether a `versions` list is ascending; both callers ask
+ * the same question of the same vocabulary.
+ */
+export const compareTemplateVersions = (left: string, right: string): number => {
+  const a = parseTemplatePackageVersion(left);
+  const b = parseTemplatePackageVersion(right);
+  // Callers pass validated versions; the fallback still orders deterministically
+  // by code unit rather than by the host locale's collation.
+  if (a === undefined || b === undefined) return left === right ? 0 : left < right ? -1 : 1;
+  for (const key of ["major", "minor", "patch"] as const) {
+    if (a[key] !== b[key]) return a[key] < b[key] ? -1 : 1;
+  }
+  if (a.prerelease === undefined && b.prerelease === undefined) return 0;
+  if (a.prerelease === undefined) return 1;
+  if (b.prerelease === undefined) return -1;
+  return comparePrerelease(a.prerelease, b.prerelease);
+};
+
 /**
  * Why a requirement range is not one this revision understands.
  *
