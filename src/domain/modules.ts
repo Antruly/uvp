@@ -40,17 +40,11 @@ export interface UvpModuleDefinition {
    *
    * `WS` marks a WebSocket endpoint. Exact-path routes are what conflicts are
    * decided on: `GET /healthz` and `GET /healthz/` are different registrations,
-   * so a prefix that merely overlaps is not a conflict.
+   * so a prefix that merely overlaps is not a conflict. A static subtree is
+   * listed the same way — its prefix and `/*path`, each for `GET` and `HEAD` —
+   * because those are the registrations it actually adds.
    */
   readonly routes: readonly string[];
-  /**
-   * A static subtree it serves, when it serves one.
-   *
-   * Kept apart from `routes` because it is a prefix registration: its subtree
-   * contributes `GET` and `HEAD` for both the prefix and `/*path`, and two
-   * modules serving the same prefix both answer at the same paths.
-   */
-  readonly staticPrefix?: { readonly prefix: string; readonly root: string };
   /** Files it adds to the workspace, beside the generated source and manifest. */
   readonly assets: readonly string[];
 }
@@ -87,7 +81,6 @@ export const UVP_MODULE_DEFINITIONS: Readonly<Record<UvpModule, UvpModuleDefinit
     // whose controls answer 404 or never open.
     requiresModules: ["websocket-echo", "echo-log"],
     routes: ["GET /", "HEAD /", "GET /*path", "HEAD /*path"],
-    staticPrefix: { prefix: "/", root: "./public" },
     assets: ["public/index.html"],
   },
 };
