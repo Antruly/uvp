@@ -222,9 +222,9 @@ const NO_BUILD = "libuvcpp was not found, so no build could be inspected for thi
  */
 const blockedByFor = (id: string): string =>
   id === "pkg-config"
-    ? "Install an executable pkg-config (pkgconf works too), then re-run uvp_doctor. " +
-      "On Windows the release-archive route needs a real .exe rather than a .bat wrapper; " +
-      "see docs/installation.md#windows-msvc."
+    ? "Install pkg-config (pkgconf works too with CMake 3.22 or newer), then re-run uvp_doctor. " +
+      "On Windows the release-archive route also accepts a pkg-config.bat that CMake's own " +
+      "validator passes; see docs/installation.md#windows-msvc."
     : `Install ${id}, then re-run uvp_doctor.`;
 
 /**

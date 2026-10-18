@@ -67,11 +67,11 @@ const CMAKE_MODULE_ERROR = [
  * `pkg-config` executable — captured on this host by forcing
  * `PKG_CONFIG_EXECUTABLE` to `NOTFOUND`.
  *
- * This is the configure failure a Windows host meets when the only pkg-config
- * on `PATH` is a `.bat` wrapper: `FindPkgConfig` uses `find_program`, which
- * accepts an executable image and not a script. The message is CMake's and
- * names neither the wrapper nor the documentation, so the parser attaches the
- * remedy beside it.
+ * This is the configure failure a Windows host meets when `FindPkgConfig` finds
+ * no pkg-config it will use — a `.bat` wrapper included, when the CMake 3.30
+ * validator rejects it or the `--version` probe fails. The message is CMake's
+ * and names neither the candidate nor the documentation, so the parser attaches
+ * the remedy beside it.
  */
 const CMAKE_PKG_CONFIG_MISSING = [
   "CMake Error at /usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake:230 (message):",

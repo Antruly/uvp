@@ -112,9 +112,9 @@ describe("the header probe", () => {
  *
  * A libuvcpp release archive ships only `lib/pkgconfig/uvcpp.pc`, so the
  * generated project's `find_package(uvcpp CONFIG)` fails and its pkg-config
- * fallback runs. On a Windows host whose only `pkg-config` is a `.bat` wrapper
- * that fallback finds no executable, and configure dies in CMake's
- * `FindPkgConfig`. The doctor used to report such a host ready, because
+ * fallback runs. On a host where CMake's `FindPkgConfig` finds no executable it
+ * will use — including a Windows shim its 3.30 validator rejects — configure
+ * dies in that module. The doctor used to report such a host ready, because
  * pkg-config was never part of its inspection.
  *
  * The requirement is conditional on three observations — the library was found,

@@ -18,7 +18,7 @@ import { UvpFailure, cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
 import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
 import { configHeaderPaths, modulesFromConfigHeader } from "../libuvcppConfig.js";
-import { isWindows, versionOf, whichOnPath } from "../host.js";
+import { findOnPath, isWindows, versionOf, whichOnPath } from "../host.js";
 import { runProcess } from "../processRunner.js";
 import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 
@@ -55,22 +55,128 @@ const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[
 ];
 
 /**
- * Whether this host has a pkg-config executable, observed rather than required.
- *
- * Two names for one program: `pkgconf` is the implementation many distributions
- * and the Windows pkgconfiglite shim install, and CMake's `FindPkgConfig`
- * accepts either. `whichOnPath` accepts only an executable image, so a `.bat`
- * wrapper that answers `pkg-config --version` in a shell is reported as absent
- * — which is exactly what CMake will do with it.
- *
- * `{}` means "looked and found nothing"; the caller decides whether that is a
- * problem, because whether a build needs pkg-config depends on the libuvcpp
- * route it resolved to.
+ * From CMake 3.22, `FindPkgConfig` searches `pkgconf` as well as `pkg-config`.
+ * 3.20 and 3.21 list `pkg-config` only.
  */
-const pkgConfigOnPath = async (signal: AbortSignal): Promise<{ readonly path?: string }> => {
+const PKGCONF_CMake_MINOR = 22;
+
+/**
+ * From CMake 3.30, `find_program` on Windows validates a non-`.exe` candidate by
+ * running it with `--help` and rejecting an exit other than 0 or output
+ * containing `Pure-Perl` — Strawberry Perl's shim. Before 3.30 every candidate
+ * `find_program` returned was accepted by the same `--version` check that still
+ * follows it in every version.
+ */
+const BAT_VALIDATOR_CMake_MINOR = 30;
+
+/** The `major.minor` CMake reports, or undefined when the line is not one. */
+const cmakeMinorVersion = (version: string | undefined): readonly [number, number] | undefined => {
+  const match = /(\d+)\.(\d+)/u.exec(version ?? "");
+  return match === null ? undefined : [Number(match[1]), Number(match[2])];
+};
+
+const cmakeAtLeast = (version: string | undefined, minor: number): boolean => {
+  const parsed = cmakeMinorVersion(version);
+  // An unreadable version takes the broader branch on purpose: reporting a tool
+  // CMake may use is a weaker error than requiring one the caller may not need.
+  if (parsed === undefined) return true;
+  const [major, found] = parsed;
+  return major > 3 || (major === 3 && found >= minor);
+};
+
+/**
+ * The names CMake's `FindPkgConfig` searches, in the order it searches them.
+ *
+ * Windows lists `pkg-config.bat` first — both since 3.20, and still in 3.31 —
+ * so that name is tried before the executable image. The list is version-gated
+ * for `pkgconf` because CMake 3.20 and 3.21 do not know it at all: a host with
+ * only `pkgconf` is not ready there, and saying it is would move the failure to
+ * the caller's configure.
+ *
+ * The list is an approximation in one respect: CMake 3.22–3.30 prepends
+ * `pkgconf` ahead of the Windows `.bat`, and 3.31 appends it. That only decides
+ * which path is named when both are installed, not whether a host is ready.
+ */
+export const pkgConfigCandidateNames = (
+  cmakeVersion: string | undefined,
+  windows: boolean = isWindows,
+): readonly string[] => {
+  const names: string[] = [];
+  if (windows) names.push("pkg-config.bat");
+  names.push(windows ? "pkg-config.exe" : "pkg-config");
+  if (cmakeAtLeast(cmakeVersion, PKGCONF_CMake_MINOR)) {
+    names.push(windows ? "pkgconf.exe" : "pkgconf");
+  }
+  return names;
+};
+
+/**
+ * CMake's Windows validator for a non-`.exe` candidate (3.30+), as a predicate.
+ *
+ * `execute_process(COMMAND "${candidate}" --help ...)` and then
+ * `if(NOT _result EQUAL 0 OR _output MATCHES "Pure-Perl")`. The output variable
+ * collects stderr as well, so both streams are searched here.
+ */
+export const pkgConfigHelpAccepted = (exitCode: number | null, output: string): boolean =>
+  exitCode === 0 && !/Pure-Perl/u.test(output);
+
+const answersVersion = async (path: string, signal: AbortSignal): Promise<boolean> => {
+  const probe = await runProcess({
+    command: path,
+    args: ["--version"],
+    timeoutMs: 10_000,
+    signal,
+  });
+  return probe.exitCode === 0;
+};
+
+const helpAccepts = async (path: string, signal: AbortSignal): Promise<boolean> => {
+  const probe = await runProcess({
+    command: path,
+    args: ["--help"],
+    timeoutMs: 10_000,
+    signal,
+  });
+  return pkgConfigHelpAccepted(probe.exitCode, `${probe.stdout}${probe.stderr}`);
+};
+
+/**
+ * The pkg-config executable CMake will actually use, or a negative answer.
+ *
+ * uvp mirrors `FindPkgConfig` rather than approximating it with an `.exe`-only
+ * lookup: on Windows the module searches `pkg-config.bat` first, so a host whose
+ * shim is a working `.bat` is ready even though no `.exe` exists. From 3.30 the
+ * module's validator rejects a non-`.exe` that fails `--help` or identifies as
+ * Pure-Perl, and its search then continues with the rest of the list; older
+ * versions accept any candidate `find_program` returns and decide with
+ * `--version`, which every version still runs afterwards and which clears the
+ * result on a nonzero exit.
+ *
+ * `{}` means "looked and found nothing CMake would use"; the caller decides
+ * whether that is a problem, because whether a build needs pkg-config depends on
+ * the libuvcpp route it resolved to.
+ */
+const pkgConfigOnPath = async (
+  signal: AbortSignal,
+  cmakeVersion: string | undefined,
+): Promise<{ readonly path?: string }> => {
   if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
-  const path = (await whichOnPath("pkg-config")) ?? (await whichOnPath("pkgconf"));
-  return path === undefined ? {} : { path };
+  const names = pkgConfigCandidateNames(cmakeVersion);
+  let candidate = await findOnPath(names);
+  if (
+    candidate !== undefined &&
+    isWindows &&
+    cmakeAtLeast(cmakeVersion, BAT_VALIDATOR_CMake_MINOR) &&
+    !candidate.toLowerCase().endsWith(".exe") &&
+    !(await helpAccepts(candidate, signal))
+  ) {
+    // The validator rejected this candidate, and `find_program` keeps looking
+    // through the rest of the list rather than failing the package lookup.
+    candidate = await findOnPath(names.slice(names.indexOf("pkg-config.bat") + 1));
+  }
+  if (candidate === undefined) return {};
+  if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
+  return (await answersVersion(candidate, signal)) ? { path: candidate } : {};
 };
 
 /**
@@ -363,10 +469,12 @@ export class LocalToolchainProvider implements ToolchainProvider {
     // Looked for, not required. Whether a build needs pkg-config depends on the
     // libuvcpp route — an install with a CMake package never reaches the
     // fallback — and that is a fact about the library, decided by the caller
-    // once discovery has answered.
-    const pkgConfig = await pkgConfigOnPath(signal);
-
-    const cmakeVersion = await versionOf("cmake", ["--version"]).catch(() => undefined);
+    // once discovery has answered. The CMake version is read from the descriptor
+    // above rather than probed again: the names and validator CMake's own module
+    // uses are version-dependent, so the probe has to search what that version
+    // searches.
+    const cmakeVersion = buildSystems.find((system) => system.id === "cmake")?.version;
+    const pkgConfig = await pkgConfigOnPath(signal, cmakeVersion);
     return {
       id: "local",
       available: compilers.length > 0 && buildSystems.some((s) => s.id === "cmake"),

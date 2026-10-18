@@ -56,10 +56,11 @@ export interface ToolchainAvailability {
    * the same thing in JSON — and collapsing "not looked" into "not there" is
    * how a check that never ran becomes an instruction to install something.
    *
-   * Only an executable image counts. CMake's `FindPkgConfig` uses
-   * `find_program`, and a `.bat` wrapper that answers `pkg-config --version` in
-   * a shell is not one — so a provider that accepted the wrapper would report a
-   * host ready that configure then refuses.
+   * What counts is what CMake's `FindPkgConfig` would use, not a narrower rule
+   * of uvp's: on Windows that module searches `pkg-config.bat` too, and from
+   * 3.30 it validates a non-`.exe` candidate. A provider that reported only
+   * `.exe` files would send a host with a working shim to install a second
+   * pkg-config it does not need.
    */
   readonly pkgConfig?: { readonly path?: string };
 }

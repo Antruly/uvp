@@ -12,7 +12,12 @@ import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
 import { assignmentOf, wordsOf } from "../../../tests/support/recordedCommand.js";
 import { removeTree } from "../../../tests/support/temporaryTree.js";
-import { LocalToolchainProvider, discoverLibuvcpp } from "./LocalToolchainProvider.js";
+import {
+  LocalToolchainProvider,
+  discoverLibuvcpp,
+  pkgConfigCandidateNames,
+  pkgConfigHelpAccepted,
+} from "./LocalToolchainProvider.js";
 
 /**
  * What a build tells CMake about the library, and where that answer came from.
@@ -711,6 +716,68 @@ describe("the pkg-config executable", () => {
     const availability = await withPath(bin, () => provider.inspectAvailability(signal));
 
     expect(availability.pkgConfig?.path?.includes("pkgconf")).toBe(true);
+  });
+});
+
+/**
+ * Which names CMake's `FindPkgConfig` would search, and which candidate it would
+ * accept.
+ *
+ * The provider has to ask the question CMake will ask, because the doctor's
+ * verdict and the build's outcome are about the same configure. The details
+ * differ by CMake version and by host, and getting either wrong has a direction:
+ * a host with a working executable reported as missing sends someone to install
+ * a second copy of it. The probe itself cannot be exercised against the
+ * versioning rules — the host running the test has one CMake and one platform —
+ * so the two decisions are exported and tested directly, and the tests above run
+ * the probe around them.
+ */
+describe("what CMake's FindPkgConfig searches", () => {
+  it("searches pkg-config alone before CMake 3.22", () => {
+    // 3.22 is the release that added `pkgconf` to the module's name list; on
+    // 3.20 and 3.21 a host with only pkgconf fails to configure, so counting it
+    // as found would be the same false "it is there" in reverse.
+    expect(pkgConfigCandidateNames("3.20.0")).toEqual(["pkg-config"]);
+    expect(pkgConfigCandidateNames("3.21.3")).toEqual(["pkg-config"]);
+    expect(pkgConfigCandidateNames("3.22.0")).toEqual(["pkg-config", "pkgconf"]);
+  });
+
+  it("searches pkgconf on every later 3.x, and on 4.x", () => {
+    expect(pkgConfigCandidateNames("3.28.3")).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("3.31.0")).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("4.0.0")).toEqual(["pkg-config", "pkgconf"]);
+  });
+
+  it("searches the newer list when the CMake version could not be read", () => {
+    // The version is read from `cmake --version`, which can fail; `undefined`
+    // is "could not look". The conservative answer is the newer search, because
+    // missing a `pkgconf` CMake would have used is the false absence this probe
+    // exists to avoid.
+    expect(pkgConfigCandidateNames(undefined)).toEqual(["pkg-config", "pkgconf"]);
+  });
+
+  it("searches pkg-config.bat first on Windows, as the module does", () => {
+    // v3.20's module prepends the `.bat` name on Windows rather than appending
+    // it, and that order decides which path a host with both gets reported.
+    expect(pkgConfigCandidateNames("3.20.0", true)).toEqual(["pkg-config.bat", "pkg-config.exe"]);
+    expect(pkgConfigCandidateNames("3.31.0", true)).toEqual([
+      "pkg-config.bat",
+      "pkg-config.exe",
+      "pkgconf.exe",
+    ]);
+  });
+
+  it("accepts a non-.exe candidate only when CMake's 3.30 validator would", () => {
+    // From 3.30, Windows runs `--help` on a candidate without `.exe` and rejects
+    // it unless that exits 0. Strawberry Perl's shim is the real case: it is
+    // found, answers `--version`, and is rejected by CMake — so the probe must
+    // reject it too rather than promise a configure that then fails.
+    expect(pkgConfigHelpAccepted(0, "Usage: pkg-config [OPTION...]")).toBe(true);
+    expect(pkgConfigHelpAccepted(0, "This is pkg-config (Pure-Perl implementation)")).toBe(false);
+    expect(pkgConfigHelpAccepted(1, "Usage: pkg-config [OPTION...]")).toBe(false);
+    // A probe killed by its timeout reports a null exit code; that is not a
+    // zero exit, and the validator would not have seen one either.
+    expect(pkgConfigHelpAccepted(null, "")).toBe(false);
   });
 });
 

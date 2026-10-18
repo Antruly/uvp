@@ -49,15 +49,18 @@ can walk away from uvp and keep the project.
   exercised Visual Studio 2026 / MSVC 14.51 only) and CMake 3.20+
 - [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 or newer**, either
   `cmake --install`ed or unpacked from a release archive
-- An executable `pkg-config` (or `pkgconf`) when libuvcpp comes from a release
-  archive. Those ship only `lib/pkgconfig/uvcpp.pc` and no CMake package, so the
-  generated project's pkg-config fallback is the route that runs; an install
-  made with `cmake --install` answers `find_package(uvcpp CONFIG)` instead and
-  does not need it.
+- `pkg-config` (or `pkgconf`, which CMake 3.22 and newer search) when libuvcpp
+  comes from a release archive. Those ship only `lib/pkgconfig/uvcpp.pc` and no
+  CMake package, so the generated project's pkg-config fallback is the route
+  that runs; an install made with `cmake --install` answers
+  `find_package(uvcpp CONFIG)` instead and does not need it.
 
-On Windows the archive route needs a real `pkg-config.exe` or `pkgconf.exe` — a
-`.bat` wrapper is not accepted — and a Release build;
-[installation.md](docs/installation.md#windows-msvc) has the exact steps.
+On Windows the archive route uses the same `pkg-config` lookup CMake does:
+`pkg-config.bat` is one of the names CMake searches, and from CMake 3.30 a
+non-`.exe` is skipped when `--help` fails or its output says `Pure-Perl`
+(Strawberry Perl's shim). `uvp doctor` applies that rule too. The archive needs
+a Release build; [installation.md](docs/installation.md#windows-msvc) has the
+exact steps.
 
 Run the doctor first. It reports what is present, what is missing, and which
 capabilities each gap actually blocks — rather than failing as one monolith:

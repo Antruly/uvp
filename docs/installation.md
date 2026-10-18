@@ -176,24 +176,24 @@ $env:Path = "$prefix\bin;$env:Path"
 ```
 
 The archive ships `lib/pkgconfig/uvcpp.pc` and no CMake config, so the generated
-project's pkg-config fallback is the route that runs. That fallback needs a real
-executable: CMake's `FindPkgConfig` looks for `pkg-config.exe` or `pkgconf.exe`
-and does not accept a `.bat` wrapper. Check it in the same shell, after the
-settings above:
+project's pkg-config fallback is the route that runs. CMake's `FindPkgConfig`
+searches for `pkg-config` — with `pkg-config.bat` first on Windows — and
+`pkgconf` as well from CMake 3.22; from 3.30 it skips a non-`.exe` candidate
+whose `--help` fails or whose output says `Pure-Perl`, which is Strawberry
+Perl's shim. `uvp doctor` applies the same checks. Verify the install in the
+same shell, after the settings above:
 
 ```powershell
-(Get-Command pkg-config -ErrorAction SilentlyContinue).Source   # must end in .exe
-pkg-config --modversion uvcpp                                   # should print 1.7.0
+pkg-config --modversion uvcpp     # should print 1.7.0
 ```
 
 If `pkg-config --version` answers but `uvp build` fails during configure with
-CMake's `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`, the
-`pkg-config` on
-`PATH` is a script — the Windows runner has Strawberry Perl's
-`pkg-config.bat`, which is exactly that case. Install an executable one, for
-example with `choco install pkgconfiglite`. The installer adds its shim to the
-machine `PATH`, which a shell opened before the install does not see. Open a new
-shell and re-apply the three session settings from above — they were `$env:`
+CMake's `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`, CMake does
+not accept what it found — on a Windows runner that is Strawberry Perl's
+`pkg-config.bat`, which the 3.30 validator rejects. Install one CMake accepts,
+for example with `choco install pkgconfiglite`. The installer adds its shim to
+the machine `PATH`, which a shell opened before the install does not see. Open a
+new shell and re-apply the three session settings from above — they were `$env:`
 values and do not survive the reopen — then verify:
 
 ```powershell
@@ -201,7 +201,6 @@ $prefix = "$HOME\libuvcpp\libuvcpp-1.7.0-msvc-x64"
 $env:UVCPP_ROOT = $prefix
 $env:PKG_CONFIG_PATH = "$prefix\lib\pkgconfig"
 $env:Path = "$prefix\bin;$env:Path"
-(Get-Command pkg-config).Source   # must end in .exe
 pkg-config --modversion uvcpp     # should print 1.7.0
 ```
 
