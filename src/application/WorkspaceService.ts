@@ -12,7 +12,12 @@ import type {
 import { newId, sha256 } from "../domain/identity.js";
 import type { SupervisedRun } from "./sessionStore.js";
 import { SessionStore } from "./sessionStore.js";
-import { renderTemplate, templateFeatureProblem, type TemplateId } from "./templates.js";
+import {
+  renderTemplate,
+  templateFeatureProblem,
+  templateRoutes,
+  type TemplateId,
+} from "./templates.js";
 import type { UvpFeature } from "../domain/features.js";
 import { describeStop } from "./ProcessSupervisor.js";
 import { tailWithin } from "./evidenceHelpers.js";
@@ -31,6 +36,7 @@ export interface CreateWorkspaceResult {
   readonly path: string;
   readonly template: string;
   readonly files: readonly CreatedFile[];
+  readonly routes: readonly string[];
   readonly nextSteps: readonly string[];
 }
 
@@ -303,6 +309,7 @@ export class WorkspaceService {
       path: root,
       template: input.template,
       files: created,
+      routes: templateRoutes(input.template, input.features),
       nextSteps: [
         `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
         `cmake --build ${join(root, "build")}`,

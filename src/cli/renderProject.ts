@@ -123,6 +123,7 @@ export const renderWorkspaceCreate = (output: Record<string, unknown>): string[]
     row("workspace", `${str(output["workspace_id"])}  ${str(output["path"])}`),
     row("template", str(output["template"])),
     row("files", `${String(files.length)} written, ${bytes(total)}`),
+    ...rows("route", strings(output["routes"])),
     ...rows("next", strings(output["next_steps"])),
   ];
 };

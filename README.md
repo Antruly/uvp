@@ -96,16 +96,19 @@ uvp init ./svc --name svc --template rest-api --port 8080 --features websocket
 uvp build ./svc
 uvp run ./svc --port 8080
 uvp http GET http://127.0.0.1:8080/items/1 --json
-uvp stop --all
 ```
 
-Or as one supervised pass that cleans up after itself:
+`uvp run` detaches by default: the service is still listening after the command
+returns, and a later `uvp stop --all` starts a new CLI process whose registry is
+empty, so it cannot see it. Stop the pid `uvp run` printed, or use the supervised
+pass below, which starts, checks, and stops the service in one call.
+
+Or as one supervised pass that cleans up after itself (one line, so it is
+copy-pasteable in `cmd.exe` as well as a POSIX shell; double quotes keep the
+JSONPath intact in every shell):
 
 ```bash
-uvp verify ./svc --port 8080 \
-  --request GET /items/1 \
-  --assert status=200 \
-  --assert 'json:$.value=first'
+uvp verify ./svc --port 8080 --request GET /items/1 --assert status=200 --assert "json:$.value=first"
 ```
 
 ## How uvp works

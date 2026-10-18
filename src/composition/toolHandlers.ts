@@ -313,6 +313,7 @@ export const createToolHandlers = (
             bytes: file.bytes,
             digest: file.digest,
           })),
+          routes: [...created.routes],
           next_steps: [...created.nextSteps],
         };
       },

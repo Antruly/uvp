@@ -102,13 +102,19 @@ uvp init ./svc --name svc --template rest-api --port 8080 --features websocket,t
 
 Scaffolds a CMake project. Writes files; starts nothing; builds nothing.
 
-| Template         | What it produces                                        |
-| ---------------- | ------------------------------------------------------- |
-| `hello-http`     | One route returning JSON. The smallest thing that runs. |
-| `rest-api`       | A collection with `GET`/`POST` and JSON in and out.     |
-| `websocket-echo` | An upgrade endpoint that echoes frames back.            |
-| `soap-service`   | A SOAP endpoint with a hand-written envelope.           |
-| `static-files`   | Serves a directory over HTTP.                           |
+| Template         | What it produces                                             |
+| ---------------- | ------------------------------------------------------------ |
+| `hello-http`     | One route, `GET /hello`, returning JSON. The smallest thing. |
+| `rest-api`       | A collection with `GET`/`POST` and JSON in and out.          |
+| `websocket-echo` | An upgrade endpoint that echoes frames back.                 |
+| `soap-service`   | A SOAP endpoint with a hand-written envelope.                |
+| `static-files`   | Serves a directory over HTTP.                                |
+
+`uvp init` prints one `route` line per route the template registers, so the
+first request to try is in its output — `route GET /hello` for `hello-http`. The
+same list is the `routes` field of `uvp_workspace_create`. A path that is not in
+it is a 404 from a service that is working exactly as generated, not a failure
+to diagnose.
 
 `rest-api` and `websocket-echo` need `UVCPP_BUILD_WEBAPP=ON` in the libuvcpp you
 built against. `uvp init` does not check that — `uvp doctor` does, and the
@@ -265,6 +271,27 @@ uvp verify ./svc --port 8080 \
   --assert status=200 \
   --assert 'json:$.value=first'
 ```
+
+The `\` continuation is POSIX shell syntax. On `cmd.exe` (and in PowerShell,
+where single quotes are fine too) use one line; double quotes keep the JSONPath
+intact in every shell:
+
+```bat
+uvp verify ./svc --port 8080 --request GET /items/1 --assert status=200 --assert "json:$.value=first"
+```
+
+Ask for a route the template actually registers — `uvp init` printed them as
+`route` lines. `GET /` against `hello-http` is answered 404 and that is the
+correct answer, because `/` is not a route; `GET /hello` is.
+
+If the service was started earlier with `uvp run`, it may still be listening: a
+detached run (the default) leaves the process running after the CLI exits, and a
+later `uvp stop --all` is a new process whose registry is empty, so it cannot
+stop it. A verify on that port then talks to the older listener — the report's
+limitation says listeners on the loopback interface were assumed to be this
+workspace's service. Stop the pid `uvp run` printed, or verify on a fresh port;
+`--no-detach`, described under `uvp run` below, keeps the service in the
+foreground so an interrupt stops it.
 
 `--http-version` applies to the `--request` before it, defaulting to `auto`, so
 one pass can put the same question to the same service over two protocols:

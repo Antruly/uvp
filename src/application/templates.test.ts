@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TEMPLATE_IDS, renderTemplate } from "./templates.js";
+import { TEMPLATE_IDS, renderTemplate, templateRoutes } from "./templates.js";
 import type { TemplateId } from "./templates.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import type { UvpFeature } from "../domain/features.js";
@@ -451,6 +451,68 @@ describe("requesting a feature a web-app template has no code for", () => {
     for (const feature of withoutGuard) {
       expect(render("hello-http", [feature])).not.toContain("#if !UVCPP_");
       expect(manifest("hello-http", [feature])["features"]).toEqual([feature]);
+    }
+  });
+});
+
+describe("the routes `uvp init` reports", () => {
+  it("names the one route of the smallest template", () => {
+    // The first-run failure this table exists for: `hello-http` answers
+    // `GET /hello`, and a natural first request to `GET /` gets a correct 404
+    // from a working service.
+    expect(templateRoutes("hello-http", [])).toEqual(["GET /hello"]);
+  });
+
+  it("reports the db feature's extra route, because the source gains it", () => {
+    expect(templateRoutes("rest-api", [])).toEqual([
+      "GET /healthz",
+      "GET /items",
+      "GET /items/:id",
+    ]);
+    expect(templateRoutes("rest-api", ["db"])).toEqual([
+      "GET /healthz",
+      "GET /items",
+      "GET /items/:id",
+      "POST /items/:id",
+    ]);
+    // The route and the registration move together: one without the other is a
+    // caller told to ask a service for something it does not serve.
+    expect(render("rest-api", [])).not.toContain('app.post("/items/:id"');
+    expect(render("rest-api", ["db"])).toContain('app.post("/items/:id"');
+  });
+
+  it("names every registration in the rendered source", () => {
+    const featuresFor = (template: TemplateId): readonly UvpFeature[] =>
+      template === "http3-service" ? ["tls", "http3"] : [];
+
+    // `serve_static` is one call that registers four routes; the four entries in
+    // the table are the four registrations, and this is the call behind them.
+    const registrationOf = (route: string, template: TemplateId): string => {
+      if (
+        route === "GET /" ||
+        route === "HEAD /" ||
+        route === "GET /*path" ||
+        route === "HEAD /*path"
+      ) {
+        return 'app.serve_static("/", "./public")';
+      }
+      const [method, path] = route.split(" ") as [string, string];
+      const call = method === "WS" ? "websocket" : method.toLowerCase();
+      // `http3-service` is written against `uvcpp_http_server`, so its routes are
+      // registered on `server` rather than on a `uvcpp_web_app`.
+      const receiver = template === "http3-service" ? "server" : "app";
+      return `${receiver}.${call}("${path}"`;
+    };
+
+    for (const template of TEMPLATE_IDS) {
+      const features = featuresFor(template);
+      const source = render(template, features);
+      const registrations = new Set(
+        templateRoutes(template, features).map((route) => registrationOf(route, template)),
+      );
+      for (const registration of registrations) {
+        expect(source, `${template} does not register ${registration}`).toContain(registration);
+      }
     }
   });
 });
