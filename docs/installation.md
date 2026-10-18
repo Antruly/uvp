@@ -203,6 +203,36 @@ uvp run .\svc --port 8090
 `uvp doctor --json` should report the prefix, the version, and the modules the
 archive's `uvcpp_config.h` defines.
 
+### Route 3 — install a distribution package (RPM, deb)
+
+The 1.7.4 release page also publishes RPM and deb packages, split the way
+distribution packages usually are. **uvp needs the development package.** The
+runtime package carries the shared library and nothing to compile against:
+
+| Package                             | Carries                                                          | Enough for uvp |
+| ----------------------------------- | ---------------------------------------------------------------- | -------------- |
+| `libuvcpp1-1.7.4-1.x86_64.rpm`      | `libuvcpp.so.1` and `libuvcpp.so.1.7.4`                          | no             |
+| `libuvcpp-devel-1.7.4-1.x86_64.rpm` | `uvcpp_config.h`, `uvcppConfig.cmake`, `uvcpp.pc`, `libuvcpp.so` | yes            |
+| `libuvcpp1_1.7.4-1_amd64.deb`       | the same two shared-library files                                | no             |
+| `libuvcpp-dev_1.7.4-1_amd64.deb`    | the development files, under `/usr/lib`                          | yes            |
+
+`uvp doctor` reads `uvcpp_config.h` for the module list, and a generated project
+needs the CMake package or the `.pc` file. Installing only the runtime package
+is a natural mistake because its name looks like the library's; `uvp doctor`
+reports `found: false` in that state and names the shared library it found,
+along with the development package to install.
+
+Install the development package with your distribution's package manager:
+
+```bash
+sudo dnf install ./libuvcpp-devel-1.7.4-1.x86_64.rpm
+sudo apt install ./libuvcpp-dev_1.7.4-1_amd64.deb
+```
+
+The files land under `/usr`, which is one of the roots uvp searches by default,
+so no `UVCPP_ROOT` or `CMAKE_PREFIX_PATH` is needed. `uvp doctor --json` reports
+the prefix, the version, and the modules the installed `uvcpp_config.h` defines.
+
 ### Confirm it worked
 
 ```bash
@@ -291,6 +321,12 @@ to be on `PATH`.
 
 **`libuvcpp not found` at configure time.** Neither discovery route answered.
 `CMAKE_PREFIX_PATH` for a CMake install, `PKG_CONFIG_PATH` for a release archive.
+
+**`uvp doctor` names a shared library and still reports `found: false`.** The
+runtime package is installed without the development one — `libuvcpp1` rather
+than `libuvcpp-devel` on RPM distributions, `libuvcpp1` rather than
+`libuvcpp-dev` on Debian and Ubuntu. Install the development package; Route 3
+above has the contents of each.
 
 **A feature is reported `unmet`.** The build genuinely lacks it. The gap record
 names the exact CMake switches, and they have to be applied to a libuvcpp

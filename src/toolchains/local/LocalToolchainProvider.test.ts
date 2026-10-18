@@ -12,7 +12,7 @@ import type { ProcessOutcome, RunProcessOptions } from "../processRunner.js";
 import { installFakeTool } from "../../../tests/support/fakeExecutable.js";
 import { assignmentOf, wordsOf } from "../../../tests/support/recordedCommand.js";
 import { removeTree } from "../../../tests/support/temporaryTree.js";
-import { LocalToolchainProvider } from "./LocalToolchainProvider.js";
+import { LocalToolchainProvider, discoverLibuvcpp } from "./LocalToolchainProvider.js";
 
 /**
  * What a build tells CMake about the library, and where that answer came from.
@@ -430,6 +430,91 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(words).toContain(buildDir);
     expect(words.slice(-2)).toEqual(["--config", "Debug"]);
     expect(outcome.succeeded).toBe(true);
+  });
+});
+
+describe("the answer when a prefix has only half of an install", () => {
+  /**
+   * A fresh root, removed by the test that made it. The discovery function is
+   * handed the roots explicitly rather than reading the environment, because
+   * the found-nothing branch is only reached when no root has an install — and
+   * whether this host has one under `/usr` is not something the test may depend
+   * on (#210 was the same lesson in a different place).
+   */
+  const freshRoot = (): string => mkdtempSync(join(realpathSync(tmpdir()), "uvp-half-"));
+
+  it("names a shared library it found, and the package that carries the rest", async () => {
+    // The shape `libuvcpp1-1.7.4-1.x86_64.rpm` installs: the versioned library
+    // and its `.so.1` link, and nothing else. "No installation found" is
+    // misleading advice to someone in exactly that state, and #213 is that
+    // report: the runtime package was installed and the development one was not.
+    const root = freshRoot();
+    try {
+      mkdirSync(join(root, "lib64"), { recursive: true });
+      writeFileSync(join(root, "lib64", "libuvcpp.so.1"), "");
+      writeFileSync(join(root, "lib64", "libuvcpp.so.1.7.4"), "");
+
+      const found = await discoverLibuvcpp([root], signal);
+      expect(found.found).toBe(false);
+      expect(found.note).toContain(join(root, "lib64", "libuvcpp.so.1"));
+      expect(found.note).toContain("libuvcpp-devel");
+      expect(found.note).toContain("libuvcpp-dev");
+    } finally {
+      await removeTree(root);
+    }
+  });
+
+  it("keeps the generic note when the prefixes hold nothing at all", async () => {
+    const root = freshRoot();
+    try {
+      const found = await discoverLibuvcpp([root], signal);
+      expect(found.found).toBe(false);
+      expect(found.note).toContain("No libuvcpp installation found");
+      expect(found.note).not.toContain("shared library");
+    } finally {
+      await removeTree(root);
+    }
+  });
+
+  it("accepts a CMake package under lib64 as a route", async () => {
+    // VERSION_SOURCES already reads lib64; discovery did not. A distribution
+    // that installs into lib64 puts the package file there, and the prefix was
+    // reported as missing whenever no config header was readable.
+    const root = freshRoot();
+    try {
+      mkdirSync(join(root, "lib64", "cmake", "uvcpp"), { recursive: true });
+      writeFileSync(join(root, "lib64", "cmake", "uvcpp", "uvcppConfig.cmake"), "");
+
+      const found = await discoverLibuvcpp([root], signal);
+      expect(found.found).toBe(true);
+      expect(found.installPrefix).toBe(root);
+      // No header, so the module list is unknown rather than empty — the same
+      // distinction the lib/ route makes.
+      expect(found.modules).toEqual([]);
+      expect(found.modulesUnknown).toBe(true);
+    } finally {
+      await removeTree(root);
+    }
+  });
+
+  it("does not call a prefix incomplete when its config header was read", async () => {
+    // A header that defines nothing is a readable answer, not a missing file.
+    // The note must not send that caller to install a development package they
+    // already have.
+    const root = freshRoot();
+    try {
+      mkdirSync(join(root, "include", "uvcpp"), { recursive: true });
+      mkdirSync(join(root, "lib64"), { recursive: true });
+      writeFileSync(join(root, "include", "uvcpp", "uvcpp_config.h"), "\n");
+      writeFileSync(join(root, "lib64", "libuvcpp.so.1"), "");
+
+      const found = await discoverLibuvcpp([root], signal);
+      expect(found.found).toBe(false);
+      expect(found.note).not.toContain("shared library");
+      expect(found.note).toContain("No libuvcpp installation found");
+    } finally {
+      await removeTree(root);
+    }
   });
 });
 
