@@ -17,6 +17,7 @@ import {
   discoverLibuvcpp,
   pkgConfigCandidateNames,
   pkgConfigHelpAccepted,
+  probeInvocation,
 } from "./LocalToolchainProvider.js";
 
 /**
@@ -736,16 +737,18 @@ describe("what CMake's FindPkgConfig searches", () => {
   it("searches pkg-config alone before CMake 3.22", () => {
     // 3.22 is the release that added `pkgconf` to the module's name list; on
     // 3.20 and 3.21 a host with only pkgconf fails to configure, so counting it
-    // as found would be the same false "it is there" in reverse.
-    expect(pkgConfigCandidateNames("3.20.0")).toEqual(["pkg-config"]);
-    expect(pkgConfigCandidateNames("3.21.3")).toEqual(["pkg-config"]);
-    expect(pkgConfigCandidateNames("3.22.0")).toEqual(["pkg-config", "pkgconf"]);
+    // as found would be the same false "it is there" in reverse. The host is
+    // named explicitly so this asserts the Unix list on every lane; the Windows
+    // list has its own test below.
+    expect(pkgConfigCandidateNames("3.20.0", false)).toEqual(["pkg-config"]);
+    expect(pkgConfigCandidateNames("3.21.3", false)).toEqual(["pkg-config"]);
+    expect(pkgConfigCandidateNames("3.22.0", false)).toEqual(["pkg-config", "pkgconf"]);
   });
 
   it("searches pkgconf on every later 3.x, and on 4.x", () => {
-    expect(pkgConfigCandidateNames("3.28.3")).toEqual(["pkg-config", "pkgconf"]);
-    expect(pkgConfigCandidateNames("3.31.0")).toEqual(["pkg-config", "pkgconf"]);
-    expect(pkgConfigCandidateNames("4.0.0")).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("3.28.3", false)).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("3.31.0", false)).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames("4.0.0", false)).toEqual(["pkg-config", "pkgconf"]);
   });
 
   it("searches the newer list when the CMake version could not be read", () => {
@@ -753,7 +756,7 @@ describe("what CMake's FindPkgConfig searches", () => {
     // is "could not look". The conservative answer is the newer search, because
     // missing a `pkgconf` CMake would have used is the false absence this probe
     // exists to avoid.
-    expect(pkgConfigCandidateNames(undefined)).toEqual(["pkg-config", "pkgconf"]);
+    expect(pkgConfigCandidateNames(undefined, false)).toEqual(["pkg-config", "pkgconf"]);
   });
 
   it("searches pkg-config.bat first on Windows, as the module does", () => {
@@ -778,6 +781,30 @@ describe("what CMake's FindPkgConfig searches", () => {
     // A probe killed by its timeout reports a null exit code; that is not a
     // zero exit, and the validator would not have seen one either.
     expect(pkgConfigHelpAccepted(null, "")).toBe(false);
+  });
+
+  it("starts a batch candidate through the command interpreter", () => {
+    // Node cannot spawn a `.bat` itself: `CreateProcess` refuses it and Node
+    // raises `EINVAL`. The Windows source gate found that when the probe first
+    // started one directly, so a candidate CMake can run is started the way
+    // Windows runs a batch file — through cmd, with the command quoted as `/s`
+    // expects.
+    const bat = probeInvocation("C:\\tools\\pkg-config.bat", "--help", true);
+    expect(bat.command).toMatch(/cmd(?:\.exe)?$/iu);
+    expect(bat.args).toEqual(["/d", "/s", "/c", '"C:\\tools\\pkg-config.bat" --help']);
+
+    // An executable image is started directly, with the flag as its own
+    // argument — no interpreter and no shell quoting in between.
+    expect(probeInvocation("C:\\tools\\pkg-config.exe", "--version", true)).toEqual({
+      command: "C:\\tools\\pkg-config.exe",
+      args: ["--version"],
+    });
+
+    // Off Windows a `.bat` is just a file name; nothing wraps it.
+    expect(probeInvocation("/opt/bin/pkg-config.bat", "--version", false)).toEqual({
+      command: "/opt/bin/pkg-config.bat",
+      args: ["--version"],
+    });
   });
 });
 

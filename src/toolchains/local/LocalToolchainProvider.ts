@@ -120,10 +120,31 @@ export const pkgConfigCandidateNames = (
 export const pkgConfigHelpAccepted = (exitCode: number | null, output: string): boolean =>
   exitCode === 0 && !/Pure-Perl/u.test(output);
 
+/**
+ * How to start `path` for a probe.
+ *
+ * A `.bat` is a script for the command interpreter, not an executable image:
+ * `CreateProcess` refuses it and Node reports `EINVAL`, so a shim CMake's
+ * module can run is not automatically one this probe can. Windows starts a
+ * batch file through `cmd /d /s /c` with the path quoted; everything else is
+ * started directly. `/s` makes cmd strip the outer quotes of the single `/c`
+ * argument, which is why the command is one string.
+ */
+export const probeInvocation = (
+  path: string,
+  flag: string,
+  windows: boolean = isWindows,
+): { readonly command: string; readonly args: readonly string[] } =>
+  windows && /\.(?:bat|cmd)$/iu.test(path)
+    ? {
+        command: process.env["ComSpec"] ?? "cmd.exe",
+        args: ["/d", "/s", "/c", `"${path}" ${flag}`],
+      }
+    : { command: path, args: [flag] };
+
 const answersVersion = async (path: string, signal: AbortSignal): Promise<boolean> => {
   const probe = await runProcess({
-    command: path,
-    args: ["--version"],
+    ...probeInvocation(path, "--version"),
     timeoutMs: 10_000,
     signal,
   });
@@ -132,8 +153,7 @@ const answersVersion = async (path: string, signal: AbortSignal): Promise<boolea
 
 const helpAccepts = async (path: string, signal: AbortSignal): Promise<boolean> => {
   const probe = await runProcess({
-    command: path,
-    args: ["--help"],
+    ...probeInvocation(path, "--help"),
     timeoutMs: 10_000,
     signal,
   });
@@ -172,7 +192,7 @@ const pkgConfigOnPath = async (
   ) {
     // The validator rejected this candidate, and `find_program` keeps looking
     // through the rest of the list rather than failing the package lookup.
-    candidate = await findOnPath(names.slice(names.indexOf("pkg-config.bat") + 1));
+    candidate = await findOnPath(names.slice(names[0] === "pkg-config.bat" ? 1 : 0));
   }
   if (candidate === undefined) return {};
   if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
