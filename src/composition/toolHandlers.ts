@@ -283,6 +283,7 @@ export const createToolHandlers = (
           force: input.force,
           ...(input.modules === undefined ? {} : { modules: input.modules }),
           ...(input.event_payloads === undefined ? {} : { eventPayloads: input.event_payloads }),
+          ...(input.frontends === undefined ? {} : { frontends: input.frontends }),
         });
 
         record(recorder, {
@@ -312,6 +313,7 @@ export const createToolHandlers = (
           path: created.path,
           template: created.template,
           modules: [...created.modules],
+          frontends: [...created.frontends],
           files: created.files.map((file) => ({
             path: file.path,
             bytes: file.bytes,

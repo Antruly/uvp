@@ -6,6 +6,7 @@ import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_EVENT_PAYLOAD_POLICIES } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
+import { UVP_FRONTENDS } from "../domain/frontends.js";
 import { UVP_MODULES } from "../domain/modules.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
@@ -82,6 +83,19 @@ export const workspaceCreateContract = defineTool({
           "their bodies; `verbatim` keeps the text itself. Recorded in `uvp.json` and reported " +
           "by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
       ),
+    frontends: z
+      .array(z.enum(UVP_FRONTENDS))
+      .optional()
+      .describe(
+        "Build-free static skins to write under `public/<skin>/` and serve from the workspace's " +
+          "document root: `h5-minimal`, `h5-dashboard`, `h5-tech`. Absent or empty means no skin; " +
+          "a template with its own page (the `static-files` placeholder or the `websocket-test` " +
+          "console) keeps that page either way. A selected skin is served at `/<skin>/`, and the " +
+          "page at `/` lists the skins unless the template's own page already owns `/`. Refused " +
+          "on `http3-service`, whose generated source registers no static document root. These " +
+          "skins use only local assets: no CDN, external font, or remote script. Node-based " +
+          "frameworks are a separate, later capability and are not selectable here.",
+      ),
     force: z
       .boolean()
       .default(false)
@@ -98,6 +112,8 @@ export const workspaceCreateContract = defineTool({
      * checked. This is the set the generated source and `uvp.json` agree on.
      */
     modules: z.array(z.enum(UVP_MODULES)),
+    /** The static skins the workspace carries, in canonical order. */
+    frontends: z.array(z.enum(UVP_FRONTENDS)),
     files: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),
     /**
      * The routes the generated service registers, as `METHOD /path`.

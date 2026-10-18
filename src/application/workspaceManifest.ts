@@ -7,6 +7,7 @@ import {
   type UvpEventPayloadPolicy,
 } from "../domain/eventPayloadPolicy.js";
 import { isUvpFeature, type UvpFeature } from "../domain/features.js";
+import { isUvpFrontend, type UvpFrontend } from "../domain/frontends.js";
 import { isUvpModule, type UvpModule } from "../domain/modules.js";
 import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js";
 
@@ -63,6 +64,16 @@ export interface WorkspaceManifest {
   readonly modules?: readonly UvpModule[] | undefined;
   /** Module names that were present but not recognised, kept so they can be reported. */
   readonly unrecognisedModules: readonly string[];
+  /**
+   * The static skins the workspace was generated with, when it records any.
+   *
+   * Absent means the workspace carries no skin; unlike `modules`, there is no
+   * template default to fall back to. A name this uvp does not know is reported
+   * through `unrecognisedFrontends` rather than silently dropped.
+   */
+  readonly frontends?: readonly UvpFrontend[] | undefined;
+  /** Frontend names that were present but not recognised, kept so they can be reported. */
+  readonly unrecognisedFrontends: readonly string[];
   /**
    * What the evidence log was compiled to retain, when the workspace records it.
    *
@@ -263,6 +274,31 @@ export const readWorkspaceManifest = async (
     }
   }
 
+  // Like `modules`, a present `frontends` field has to be readable: absent means
+  // no skin, and folding a malformed declaration into "absent" would answer
+  // "no skin" on behalf of a file that said something else.
+  const frontendsValue = parsed["frontends"];
+  const frontends: UvpFrontend[] = [];
+  const unrecognisedFrontends: string[] = [];
+  if (frontendsValue !== undefined) {
+    if (!Array.isArray(frontendsValue)) {
+      return {
+        state: "unreadable",
+        problem: `${manifestName} declares \`frontends\` and it is not a list`,
+      };
+    }
+    for (const entry of frontendsValue) {
+      if (typeof entry !== "string") {
+        return {
+          state: "unreadable",
+          problem: `${manifestName} declares a \`frontends\` entry that is not a string`,
+        };
+      }
+      if (isUvpFrontend(entry)) frontends.push(entry);
+      else unrecognisedFrontends.push(entry);
+    }
+  }
+
   // Like `modules`, a present `evidence` field has to be readable. Answering the
   // default policy for a file that declared another one would describe
   // collection that did not happen the way the file says.
@@ -314,6 +350,8 @@ export const readWorkspaceManifest = async (
       unrecognisedFeatures: unrecognised,
       ...(modulesValue === undefined ? {} : { modules }),
       unrecognisedModules,
+      ...(frontendsValue === undefined ? {} : { frontends }),
+      unrecognisedFrontends,
       ...(evidence === undefined ? {} : { evidence }),
       ...(requiredLibuvcpp === undefined ? {} : { requiredLibuvcpp }),
       ...(toolchain === undefined ? {} : { toolchain }),

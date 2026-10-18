@@ -606,6 +606,115 @@ describe("workspace creation", () => {
   });
 });
 
+describe("the static frontend selection at the boundary", () => {
+  it("writes the selected skins, records them, and reports the routes they add", async () => {
+    const path = join(harness.workspace, "..", "with-skins");
+    temporaryRoots.push(path);
+
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "skins",
+      template: "hello-http",
+      features: [],
+      port: 8080,
+      frontends: ["h5-tech", "h5-minimal"],
+    });
+    expectConforms("uvp_workspace_create", output);
+    // Canonical order, not request order: the workspace is a deliverable and
+    // two requests naming the same skins must produce the same file set.
+    expect(output["frontends"]).toEqual(["h5-minimal", "h5-tech"]);
+    expect(output["routes"]).toEqual([
+      "GET /hello",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+
+    for (const frontend of ["h5-minimal", "h5-tech"]) {
+      for (const asset of ["index.html", "app.css", "app.js"]) {
+        await expect(
+          access(join(path, "public", frontend, asset)),
+          `${frontend}/${asset}`,
+        ).resolves.toBeUndefined();
+      }
+    }
+    // The selector is the page at `/` on a template that had none.
+    const selector = await readFile(join(path, "public", "index.html"), "utf8");
+    expect(selector).toContain('href="./h5-minimal/"');
+    expect(selector).toContain('href="./h5-tech/"');
+
+    const source = await readFile(join(path, "src", "main.cpp"), "utf8");
+    expect(source).toContain('app.serve_static("/", "./public")');
+
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as {
+      frontends?: string[];
+    };
+    expect(manifest.frontends).toEqual(["h5-minimal", "h5-tech"]);
+  });
+
+  it("writes no page and records no field when no skin is selected", async () => {
+    const path = join(harness.workspace, "..", "no-skins");
+    temporaryRoots.push(path);
+
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "plain",
+      template: "hello-http",
+      features: [],
+      port: 8080,
+    });
+    expect(output["frontends"]).toEqual([]);
+    expect(output["routes"]).toEqual(["GET /hello"]);
+    // Absent, not an empty directory: a backend workspace that serves no files
+    // should not carry a document root that promises otherwise.
+    await expect(access(join(path, "public"))).rejects.toThrow();
+
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect("frontends" in manifest).toBe(false);
+  });
+
+  it("refuses a repeated or unknown skin before writing anything", async () => {
+    for (const [name, frontends] of [
+      ["repeated", ["h5-tech", "h5-tech"]],
+      ["unknown", ["vue"]],
+    ] as const) {
+      const path = join(harness.workspace, "..", `frontend-${name}`);
+      temporaryRoots.push(path);
+      expect(
+        await failureCodeOf("uvp_workspace_create", {
+          path,
+          name,
+          template: "hello-http",
+          features: [],
+          frontends: [...frontends],
+        }),
+        name,
+      ).toBe("invalid_request");
+      await expect(access(path)).rejects.toThrow();
+    }
+  });
+
+  it("refuses a skin on the template whose source registers no document root", async () => {
+    const path = join(harness.workspace, "..", "frontend-http3");
+    temporaryRoots.push(path);
+
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "h3",
+        template: "http3-service",
+        features: ["tls", "http3"],
+        frontends: ["h5-tech"],
+      }),
+    ).toBe("invalid_request");
+    await expect(access(path)).rejects.toThrow();
+  });
+});
+
 describe("the evidence payload policy at the boundary", () => {
   it("compiles the requested policy into the source and the manifest", async () => {
     const path = join(harness.workspace, "..", "evidence-verbatim");

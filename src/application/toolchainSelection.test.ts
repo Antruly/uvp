@@ -21,6 +21,7 @@ const base = {
   features: [],
   unrecognisedFeatures: [],
   unrecognisedModules: [],
+  unrecognisedFrontends: [],
   path: "/w/svc/uvp.json",
 } as const satisfies Omit<WorkspaceManifest, "toolchain" | "toolchainProblem">;
 

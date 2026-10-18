@@ -30,7 +30,8 @@ export const initCommand: CommandSpec = {
   summary: "Scaffold a buildable libuvcpp C++ project.",
   usage:
     "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] " +
-    "[--modules LIST] [--event-payloads summary|verbatim] [--force] [--json]",
+    "[--modules LIST] [--event-payloads summary|verbatim] [--frontend SKIN|none] " +
+    "[--frontends LIST] [--force] [--json]",
   positionals: [{ name: "PATH", description: "Directory to create the workspace in." }],
   flags: [
     { name: "name", type: "string", value: "NAME", description: "Project and CMake target name." },
@@ -69,6 +70,18 @@ export const initCommand: CommandSpec = {
       description: "What the evidence log keeps of a text message: summary (default) or verbatim.",
     },
     {
+      name: "frontend",
+      type: "string",
+      value: "SKIN",
+      description: "One static skin to generate: h5-minimal, h5-dashboard, h5-tech, or none.",
+    },
+    {
+      name: "frontends",
+      type: "list",
+      value: "LIST",
+      description: "Comma-separated static skins to generate together; none means no skin.",
+    },
+    {
       name: "force",
       type: "boolean",
       description: "Write into a directory that already contains files.",
@@ -94,6 +107,11 @@ export const initCommand: CommandSpec = {
     "length and a hash of a text message rather than its body, and verbatim keeps the text. The",
     "policy is recorded in uvp.json and reported by GET /api/events, and is refused without",
     "evidence-log because it would describe a log the workspace does not have.",
+    "--frontend writes one build-free static skin under public/<skin>/; --frontends writes several,",
+    "and each is served at /<skin>/. The page at / lists the skins, except where the template's",
+    "own page owns / (the static-files placeholder, or the websocket-test console, which links",
+    "them). The skins use local assets only, and the selection is recorded in uvp.json.",
+    "http3-service refuses a frontend: its generated source registers no static document root.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp init ./svc --name svc");
@@ -115,6 +133,39 @@ export const initCommand: CommandSpec = {
     const modulesGiven = parsed.occurrences.some((occurrence) => occurrence.name === "modules");
     const eventPayloads = asString(parsed, "event-payloads");
     const force = asBoolean(parsed, "force");
+    // `none` is a CLI word, not a skin: the contract's list names skins only,
+    // and an explicit empty list means the same thing as omitting the flag. The
+    // two flags are refused together rather than merged, because a caller who
+    // typed both wanted a selection and would not be able to tell which one
+    // won.
+    const frontend = asString(parsed, "frontend");
+    const frontendsFlag = parsed.occurrences.some((occurrence) => occurrence.name === "frontends");
+    if (frontend !== undefined && frontendsFlag) {
+      flagError("--frontend and --frontends both name a skin selection; pass one of them.", {
+        usage: "uvp init PATH --name NAME --frontend h5-tech",
+      });
+    }
+    const frontendEntries = asList(parsed, "frontends").flatMap((entry) =>
+      entry
+        .split(",")
+        .map((piece) => piece.trim())
+        .filter((piece) => piece !== ""),
+    );
+    if (frontendEntries.includes("none") && frontendEntries.length > 1) {
+      flagError(
+        `--frontends names none together with ${frontendEntries
+          .filter((entry) => entry !== "none")
+          .join(", ")}; none means no skin.`,
+        { usage: "uvp init PATH --name NAME --frontends h5-tech,h5-dashboard" },
+      );
+    }
+    const frontends =
+      frontend !== undefined
+        ? frontend === "none"
+          ? []
+          : [frontend]
+        : frontendEntries.filter((entry) => entry !== "none");
+    const frontendsGiven = frontend !== undefined || frontendsFlag;
     // `--name` is not optional in practice, but the contract has no default for
     // it. The name defaults to the directory's basename, which is what a caller
     // who typed only a path meant — read with `node:path` so that a Windows
@@ -141,6 +192,7 @@ export const initCommand: CommandSpec = {
       ...(features.length === 0 ? {} : { features }),
       ...(modulesGiven ? { modules } : {}),
       ...(eventPayloads === undefined ? {} : { event_payloads: eventPayloads }),
+      ...(frontendsGiven ? { frontends } : {}),
       ...(force === undefined ? {} : { force }),
     };
   },
