@@ -968,6 +968,79 @@ describe("a static frontend selection", () => {
   });
 });
 
+describe("a Node frontend selection", () => {
+  it("writes a standalone frontend project and records the app", async () => {
+    const target = join(tmpdir(), `uvp init app frontend ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--template",
+      "hello-http",
+      "--frontend",
+      "vue3",
+      "--json",
+    ]);
+    expect(init.exit, init.stderr).toBe(EXIT_OK);
+    const output = JSON.parse(init.stdout) as { frontends?: string[]; routes?: string[] };
+    expect(output.frontends).toEqual(["vue3"]);
+    expect(output.routes).toContain("GET /");
+    expect(existsSync(join(target, "frontend", "package.json"))).toBe(true);
+    expect(existsSync(join(target, "frontend", "package-lock.json"))).toBe(true);
+    // The app's output directory does not exist until the Vite build runs, and
+    // the CLI must not create a document root it cannot serve.
+    expect(existsSync(join(target, "public"))).toBe(false);
+    const manifest = JSON.parse(readFileSync(join(target, "uvp.json"), "utf8")) as {
+      frontends?: string[];
+    };
+    expect(manifest.frontends).toEqual(["vue3"]);
+  });
+
+  it("refuses two apps in one workspace", async () => {
+    const target = join(tmpdir(), `uvp init two apps ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--frontends",
+      "vue3,react",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("one frontend app");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses an app on a template that already owns the document root", async () => {
+    const target = join(tmpdir(), `uvp init app static files ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--template",
+      "static-files",
+      "--frontend",
+      "svelte",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("document root");
+    expect(existsSync(target)).toBe(false);
+  });
+});
+
 describe("a load invocation the contract cannot put", () => {
   it("refuses a method uvp load does not offer, naming the method and the usage", async () => {
     // `OPTIONS` is a valid one-off request (`uvp http`) but not a method the load

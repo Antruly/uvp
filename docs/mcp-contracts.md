@@ -107,6 +107,18 @@ recorded in `uvp.json` in canonical order. An unknown or repeated skin, and any
 skin on `http3-service` (whose source registers no document root), are refused
 before any file is written.
 
+The same field also accepts one Node frontend app — `vue3`, `react`, `svelte` —
+which is a different kind of selection: it writes a pinned Vite project under
+`frontend/` (exact dependency versions plus a committed lockfile, no remote
+assets, no build step run by uvp) instead of a page set under `public/`. The
+generated service registers `frontend/dist` as a static root, with SPA
+fallback, only when `frontend/dist/index.html` exists at startup, and answers
+`GET /` with `503` and a build instruction until the caller runs `npm ci && npm
+run build` in `frontend/`. One app per workspace; an app and a skin, a second
+app, and an app on `static-files`, `websocket-test`, `static-console`, or
+`http3-service` are refused before any file is written. The selection is
+recorded in `uvp.json` and reported beside `routes`.
+
 ### Build
 
 **`uvp_build`** — Build a workspace.

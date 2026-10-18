@@ -6,9 +6,13 @@ import {
 } from "../domain/eventPayloadPolicy.js";
 import type { UvpFeature } from "../domain/features.js";
 import {
+  UVP_FRONTEND_APP_DEFINITIONS,
   UVP_FRONTEND_DEFINITIONS,
-  resolveFrontends,
+  resolveFrontendSelection,
+  type FrontendSelection,
   type UvpFrontend,
+  type UvpFrontendApp,
+  type UvpFrontendSelection,
 } from "../domain/frontends.js";
 import {
   UVP_MODULE_DEFINITIONS,
@@ -16,6 +20,7 @@ import {
   resolveModules,
   type UvpModule,
 } from "../domain/modules.js";
+import { frontendAppFiles } from "./frontendApps.js";
 import { frontendFiles, frontendSelector } from "./frontends.js";
 
 /**
@@ -134,7 +139,7 @@ export const templateRoutes = (
   template: TemplateId,
   features: readonly UvpFeature[],
   modules: readonly UvpModule[] = defaultModules(template),
-  frontends: readonly UvpFrontend[] = [],
+  frontends: readonly UvpFrontendSelection[] = [],
 ): readonly string[] => {
   const base: readonly string[] = (() => {
     switch (template) {
@@ -166,10 +171,12 @@ export const templateRoutes = (
   return [
     ...base,
     ...resolveModules(modules).flatMap((module) => UVP_MODULE_DEFINITIONS[module].routes),
-    // A selected skin adds the document root the source gains below. Where the
-    // template or a module already registers one, the routes above already name
-    // it, and listing it twice would be a table that disagrees with itself.
-    ...(frontendStaticRouteNeeded(template, modules, frontends) ? STATIC_ROOT_ROUTES : []),
+    // A selected frontend adds the document root the source gains below. Where
+    // the template or a module already registers one, the routes above already
+    // name it, and listing it twice would be a table that disagrees with itself.
+    ...(frontendStaticRouteNeeded(template, modules, resolveFrontendSelection(frontends))
+      ? STATIC_ROOT_ROUTES
+      : []),
   ];
 };
 
@@ -194,12 +201,20 @@ const STATIC_ROOT_ROUTES = ["GET /", "HEAD /", "GET /*path", "HEAD /*path"] as c
 const frontendStaticRouteNeeded = (
   template: TemplateId,
   modules: readonly UvpModule[],
-  frontends: readonly UvpFrontend[],
+  selection: FrontendSelection,
 ): boolean =>
-  frontends.length > 0 &&
-  template !== "http3-service" &&
-  template !== "static-files" &&
-  !resolveModules(modules).includes("static-console");
+  selection.app === undefined
+    ? selection.pages.length > 0 &&
+      template !== "http3-service" &&
+      template !== "static-files" &&
+      !resolveModules(modules).includes("static-console")
+    : // A frontend app owns the document root itself, so the templates that
+      // already register one are refused in `WorkspaceService`; this guard is
+      // the second half of the same rule, not a different one.
+      template !== "http3-service" &&
+      template !== "static-files" &&
+      template !== "websocket-test" &&
+      !resolveModules(modules).includes("static-console");
 
 export interface TemplateInput {
   readonly name: string;
@@ -223,20 +238,36 @@ export interface TemplateInput {
    */
   readonly eventPayloads?: UvpEventPayloadPolicy;
   /**
-   * The static frontends to generate.
+   * The frontend selection to generate.
    *
-   * Absent means no skin. The template's own page — the `static-files`
-   * placeholder or the `websocket-test` console — is not a skin and is kept
-   * whether or not one is selected. Resolved in the vocabulary's order before
-   * it is rendered, so two requests that name the same skins produce the same
-   * files.
+   * Absent means none. The template's own page — the `static-files`
+   * placeholder or the `websocket-test` console — is not a selection and is
+   * kept whether or not one is made. Resolved in the vocabulary's order before
+   * it is rendered, so two requests that name the same selection produce the
+   * same files.
+   *
+   * A selection of static page sets is served from `public/`; a frontend app
+   * writes a `frontend/` project whose build output the generated service
+   * serves. The two cannot be combined — both claim the document root — and
+   * `WorkspaceService` refuses that request before rendering.
    */
-  readonly frontends?: readonly UvpFrontend[];
+  readonly frontends?: readonly UvpFrontendSelection[];
+  /**
+   * The frontend app the selection resolved to.
+   *
+   * Written by `renderTemplate` from `frontends`; fragments read it rather than
+   * parsing the selection again, so one boundary owns the interpretation.
+   */
+  readonly frontendApp?: UvpFrontendApp;
 }
 
-/** The skins this render composes, in the vocabulary's canonical order. */
+/** The static page sets this render composes, in the vocabulary's canonical order. */
 const selectedFrontends = (input: TemplateInput): readonly UvpFrontend[] =>
-  resolveFrontends(input.frontends ?? []);
+  resolveFrontendSelection(input.frontends ?? []).pages;
+
+/** The frontend app this render composes, if the selection named one. */
+const selectedFrontendApp = (input: TemplateInput): UvpFrontendApp | undefined =>
+  input.frontendApp ?? resolveFrontendSelection(input.frontends ?? []).app;
 
 /** The payload policy this input asks for, before the module is checked. */
 const eventPayloadsOf = (input: TemplateInput): UvpEventPayloadPolicy =>
@@ -577,6 +608,17 @@ const MODULE_INCLUDES: Readonly<Record<UvpModule, readonly string[]>> = {
   "websocket-echo": ["#include <web/uvcpp_ws_connection.h>"],
   "static-console": [],
 };
+
+/**
+ * What a frontend app needs at the top of the generated file.
+ *
+ * The service tests for the build output before registering the document root,
+ * and the generated C++ standard is C++14, so `<filesystem>` is not available;
+ * `<fstream>` is. Emitted only for an app, so a workspace without one carries
+ * no include it cannot explain.
+ */
+const frontendAppIncludes = (input: TemplateInput): readonly string[] =>
+  selectedFrontendApp(input) === undefined ? [] : ["#include <fstream>"];
 
 const moduleIncludes = (
   input: TemplateInput,
@@ -1024,18 +1066,64 @@ const staticConsoleRoute = `
 `;
 
 /**
- * The document-root registration a selected skin needs, or nothing.
+ * The document root a frontend app needs, or nothing.
+ *
+ * `uvp build` never runs Node, so a freshly generated workspace has no
+ * `frontend/dist`. `serve_static` treats a missing document root as a
+ * deployment error and answers every request with 500, so the root is
+ * registered only once the build wrote its entry file. Before that, `/` says
+ * what is missing instead of pretending the frontend is broken.
+ *
+ * `spa_fallback` makes a client-side route such as `/items/42` answer with the
+ * app's `index.html` rather than 404. It applies only to a path that does not
+ * exist; a path that is refused by the static server's safety rules is still
+ * refused, so the fallback does not turn a probe into a 200.
+ */
+const frontendAppRoute = (input: TemplateInput): string => {
+  const app = selectedFrontendApp(input);
+  if (app === undefined) return "";
+  const output = UVP_FRONTEND_APP_DEFINITIONS[app].output;
+  return `
+  // The frontend is optional: \`uvp build\` never runs Node, so this workspace
+  // is generated before \`${output}\` exists. serve_static treats a missing
+  // document root as a deployment error, so register it only when the build
+  // wrote its entry file; until then, say what is missing rather than 500.
+  std::ifstream frontend_entry("./${output}/index.html");
+  if (frontend_entry.good()) {
+    uvcpp_web_static_options frontend_options;
+    frontend_options.spa_fallback = true;
+    app.serve_static("/", "./${output}", frontend_options);
+  } else {
+    app.get("/", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+      resp.status(503).body(
+          "The frontend has not been built. Run \\"npm ci && npm run build\\" in "
+          "frontend/, then restart this service.\\n",
+          "text/plain; charset=utf-8");
+      resp.end();
+    });
+  }
+`;
+};
+
+/**
+ * The document-root registration a frontend selection needs, or nothing.
  *
  * A frontend template's own page registers its root itself; this fragment is
- * for the backend templates, which serve no files until a skin asks them to.
- * The registration is emitted after every route, because `serve_static` is a
- * fallback that answers every request it sees — registered earlier, it would
+ * for the backend templates, which serve no files until a selection asks them
+ * to. The registration is emitted after every route, because `serve_static` is
+ * a fallback that answers every request it sees — registered earlier, it would
  * win over the exact routes that should.
  */
-const frontendStaticRoute = (template: TemplateId, input: TemplateInput): string =>
-  frontendStaticRouteNeeded(template, selectedModules(input), selectedFrontends(input))
+const frontendStaticRoute = (template: TemplateId, input: TemplateInput): string => {
+  if (selectedFrontendApp(input) !== undefined) return frontendAppRoute(input);
+  return frontendStaticRouteNeeded(
+    template,
+    selectedModules(input),
+    resolveFrontendSelection(selectedFrontends(input)),
+  )
     ? staticConsoleRoute
     : "";
+};
 
 const MODULE_ROUTES: Readonly<Record<UvpModule, (input: TemplateInput) => string>> = {
   health: () => healthRoute,
@@ -1052,7 +1140,7 @@ const moduleRouteBlock = (input: TemplateInput): string =>
     .join("");
 
 const helloHttpMain = (input: TemplateInput): string =>
-  `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
+  `${webPreamble(input, [...moduleIncludes(input), ...frontendAppIncludes(input)])}${moduleNamespaceBlock(input)}
 // A single route, wired by hand. Everything uvp generates ends up looking like
 // this: ordinary libuvcpp code that a C++ developer would recognise.
 //
@@ -1097,7 +1185,7 @@ const restApiMain = (input: TemplateInput): string =>
  * visible: the same requests against the same routes answer from a file instead.
  */
 const restApiMemoryMain = (input: TemplateInput): string =>
-  `${webPreamble(input, ["#include <unordered_map>", ...moduleIncludes(input)])}${moduleNamespaceBlock(input)}
+  `${webPreamble(input, ["#include <unordered_map>", ...moduleIncludes(input), ...frontendAppIncludes(input)])}${moduleNamespaceBlock(input)}
 namespace {
 
 // An in-memory store, so the template is runnable with no database. Replace it
@@ -1185,7 +1273,7 @@ const DATABASE_INCLUDES = [
  * at yet.
  */
 const restApiDatabaseMain = (input: TemplateInput): string =>
-  `${webPreamble(input, [...DATABASE_INCLUDES, ...moduleIncludes(input)])}${moduleNamespaceBlock(input)}
+  `${webPreamble(input, [...DATABASE_INCLUDES, ...moduleIncludes(input), ...frontendAppIncludes(input)])}${moduleNamespaceBlock(input)}
 namespace {
 
 // The schema, created at startup and idempotently, so a deployed service needs
@@ -1407,7 +1495,7 @@ const websocketEchoMain = (input: TemplateInput): string => {
   const recordText = selectedModules(input).includes("echo-log")
     ? `      PushLog({NowMs(), "text", message});\n`
     : "";
-  return `${webPreamble(input, extras)}${moduleNamespaceBlock(input)}
+  return `${webPreamble(input, [...extras, ...frontendAppIncludes(input)])}${moduleNamespaceBlock(input)}
 // Registering a WebSocket route implicitly enables WS support, so there is no
 // separate enable call. The connection outlives this handler, and the framework
 // owns it — never delete it.
@@ -1533,7 +1621,7 @@ ${skins}<textarea id="message">hello</textarea>
 };
 
 const soapServiceMain = (input: TemplateInput): string =>
-  `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
+  `${webPreamble(input, [...moduleIncludes(input), ...frontendAppIncludes(input)])}${moduleNamespaceBlock(input)}
 namespace {
 
 // A hand-written envelope. The wsdl module can generate this from a real WSDL;
@@ -1821,11 +1909,16 @@ const manifest = (input: TemplateInput, template: TemplateId): string => {
   // a reader who found it absent would have to guess whether that meant
   // `summary` or an older workspace that predates the field.
   const recordsEvidence = modules.includes("evidence-log");
-  // Recorded whenever a skin was selected: unlike `modules`, there is no
+  // Recorded whenever a frontend was selected: unlike `modules`, there is no
   // template default to stay silent about. The template's own page is not a
-  // skin and is not recorded — a reader that found a name here can rely on the
-  // files existing under `public/<name>/`.
-  const frontends = selectedFrontends(input);
+  // selection and is not recorded — a reader that found a page-set name here
+  // can rely on the files existing under `public/<name>/`, and one that found
+  // an app name can rely on `frontend/` being generated.
+  const frontendApp = selectedFrontendApp(input);
+  const frontends =
+    frontendApp === undefined
+      ? selectedFrontends(input)
+      : [...selectedFrontends(input), frontendApp];
   return `${JSON.stringify(
     {
       uvp: 1,
@@ -2007,6 +2100,32 @@ ${recorded}`
  * would look broken rather than static.
  */
 const frontendReadme = (template: TemplateId, input: TemplateInput): string => {
+  const app = selectedFrontendApp(input);
+  if (app !== undefined) {
+    const output = UVP_FRONTEND_APP_DEFINITIONS[app].output;
+    return `
+## Frontend
+
+The workspace includes a \`${app}\` single-page app in \`frontend/\`, built by Vite.
+It is not part of the CMake project: \`uvp build\` never runs Node and the service
+starts whether or not the frontend has been built.
+
+\`\`\`bash
+cd frontend
+npm ci
+npm run build
+\`\`\`
+
+The build writes \`${output}\`, which the service serves at \`/\`. The generated
+\`src/main.cpp\` checks for \`${output}/index.html\` at startup, so build before
+starting the service, or restart it after a build. Until that file exists, \`/\`
+answers \`503\` with the instruction to build. A client-side route that does not
+exist answers with the app's \`index.html\`.
+
+Node 22.19 or newer is a prerequisite for \`frontend/\` only. Nothing in the
+generated C++ project, \`uvp build\`, or \`uvp run\` needs it.
+`;
+  }
   const frontends = selectedFrontends(input);
   if (frontends.length === 0) return "";
   const list = frontends
@@ -2085,8 +2204,14 @@ export const renderTemplate = (
   // the same order. `selectedModules` is the reader for the fragments; this is
   // the writer of the input they read.
   const modules = resolveModules(input.modules ?? defaultModules(template));
-  const frontends = resolveFrontends(input.frontends ?? []);
-  const composed: TemplateInput = { ...input, modules, frontends };
+  const selection = resolveFrontendSelection(input.frontends ?? []);
+  const frontends = selection.pages;
+  const composed: TemplateInput = {
+    ...input,
+    modules,
+    frontends,
+    ...(selection.app === undefined ? {} : { frontendApp: selection.app }),
+  };
   const files: GeneratedFile[] = [
     { path: "CMakeLists.txt", content: cmakeLists(composed) },
     { path: "src/main.cpp", content: MAIN_BY_TEMPLATE[template](composed) },
@@ -2139,6 +2264,9 @@ export const renderTemplate = (
     for (const frontend of frontends) {
       files.push(...frontendFiles(frontend, composed.name));
     }
+  }
+  if (selection.app !== undefined) {
+    files.push(...frontendAppFiles(selection.app, composed.name));
   }
   return files;
 };

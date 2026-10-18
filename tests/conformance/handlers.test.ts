@@ -715,6 +715,116 @@ describe("the static frontend selection at the boundary", () => {
   });
 });
 
+describe("the frontend app selection at the boundary", () => {
+  it("writes a frontend project and the conditional document root, and records it", async () => {
+    const path = join(harness.workspace, "..", "with-app");
+    temporaryRoots.push(path);
+
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "app",
+      template: "hello-http",
+      features: [],
+      port: 8080,
+      frontends: ["vue3"],
+    });
+    expectConforms("uvp_workspace_create", output);
+    expect(output["frontends"]).toEqual(["vue3"]);
+    expect(output["routes"]).toEqual([
+      "GET /hello",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+
+    for (const file of [
+      "frontend/package.json",
+      "frontend/package-lock.json",
+      "frontend/vite.config.js",
+      "frontend/index.html",
+      "frontend/src/main.js",
+      "frontend/src/App.vue",
+    ]) {
+      await expect(access(join(path, ...file.split("/"))), file).resolves.toBeUndefined();
+    }
+    // The app is not a document root under public/: its output is the Vite
+    // build directory, which does not exist until someone runs that build.
+    await expect(access(join(path, "public"))).rejects.toThrow();
+
+    const source = await readFile(join(path, "src", "main.cpp"), "utf8");
+    expect(source).toContain('std::ifstream frontend_entry("./frontend/dist/index.html");');
+    expect(source).toContain('app.serve_static("/", "./frontend/dist", frontend_options);');
+
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as {
+      frontends?: string[];
+    };
+    expect(manifest.frontends).toEqual(["vue3"]);
+  });
+
+  it("refuses every combination that would give one workspace two document roots", async () => {
+    const cases = [
+      { label: "two apps", frontends: ["vue3", "react"], template: "hello-http" as const },
+      { label: "app and skin", frontends: ["vue3", "h5-tech"], template: "hello-http" as const },
+      { label: "static-files", frontends: ["svelte"], template: "static-files" as const },
+      { label: "websocket-test", frontends: ["react"], template: "websocket-test" as const },
+    ];
+    for (const { label, frontends, template } of cases) {
+      const path = join(harness.workspace, "..", `app-refused-${label.replace(/ /gu, "-")}`);
+      temporaryRoots.push(path);
+      expect(
+        await failureCodeOf("uvp_workspace_create", {
+          path,
+          name: "app",
+          template,
+          features: template === "websocket-test" ? ["websocket"] : [],
+          frontends: [...frontends],
+        }),
+        label,
+      ).toBe("invalid_request");
+      await expect(access(path), label).rejects.toThrow();
+    }
+  });
+
+  it("refuses a frontend app on a module that already registers the document root", async () => {
+    const path = join(harness.workspace, "..", "app-refused-console");
+    temporaryRoots.push(path);
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "console",
+        template: "hello-http",
+        features: ["websocket"],
+        modules: ["static-console", "echo-log", "websocket-echo"],
+        frontends: ["react"],
+      }),
+    ).toBe("invalid_request");
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("refuses an app on http3-service and names outside the vocabulary", async () => {
+    for (const [label, frontends, template] of [
+      ["http3", ["vue3"], "http3-service"],
+      ["alpine", ["alpine"], "hello-http"],
+      ["h5", ["h5"], "hello-http"],
+    ] as const) {
+      const path = join(harness.workspace, "..", `app-refused-${label}`);
+      temporaryRoots.push(path);
+      expect(
+        await failureCodeOf("uvp_workspace_create", {
+          path,
+          name: label,
+          template,
+          features: template === "http3-service" ? ["tls", "http3"] : [],
+          frontends: [...frontends],
+        }),
+        label,
+      ).toBe("invalid_request");
+      await expect(access(path), label).rejects.toThrow();
+    }
+  });
+});
+
 describe("the evidence payload policy at the boundary", () => {
   it("compiles the requested policy into the source and the manifest", async () => {
     const path = join(harness.workspace, "..", "evidence-verbatim");

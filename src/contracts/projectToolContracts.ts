@@ -6,7 +6,7 @@ import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_EVENT_PAYLOAD_POLICIES } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
-import { UVP_FRONTENDS } from "../domain/frontends.js";
+import { UVP_FRONTEND_SELECTIONS } from "../domain/frontends.js";
 import { UVP_MODULES } from "../domain/modules.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
@@ -84,17 +84,21 @@ export const workspaceCreateContract = defineTool({
           "by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
       ),
     frontends: z
-      .array(z.enum(UVP_FRONTENDS))
+      .array(z.enum(UVP_FRONTEND_SELECTIONS))
       .optional()
       .describe(
-        "Build-free static skins to write under `public/<skin>/` and serve from the workspace's " +
-          "document root: `h5-minimal`, `h5-dashboard`, `h5-tech`. Absent or empty means no skin; " +
-          "a template with its own page (the `static-files` placeholder or the `websocket-test` " +
-          "console) keeps that page either way. A selected skin is served at `/<skin>/`, and the " +
-          "page at `/` lists the skins unless the template's own page already owns `/`. Refused " +
-          "on `http3-service`, whose generated source registers no static document root. These " +
-          "skins use only local assets: no CDN, external font, or remote script. Node-based " +
-          "frameworks are a separate, later capability and are not selectable here.",
+        "Frontends to generate. Static page sets (`h5-minimal`, `h5-dashboard`, `h5-tech`) are " +
+          "written under `public/<name>/` and served from the workspace's document root; the page " +
+          "at `/` lists them unless the template's own page already owns `/`. Frontend apps " +
+          "(`vue3`, `react`, `svelte`) write a standalone `frontend/` Vite project instead: it is " +
+          "not part of `uvp build`, Node is never required to generate, build, or run the C++ " +
+          "workspace, and the service serves `frontend/dist` at `/` when that build output exists " +
+          "at startup. Until then `/` answers 503 with the build instruction. At most one app per " +
+          "workspace, and an app cannot be combined with static page sets or with a template that " +
+          "already owns the document root. Absent or empty means no frontend; a template with its " +
+          "own page keeps that page either way. Refused on `http3-service`, whose generated source " +
+          "registers no static document root. Every generated page uses local assets only: no CDN, " +
+          "external font, or remote script.",
       ),
     force: z
       .boolean()
@@ -112,8 +116,8 @@ export const workspaceCreateContract = defineTool({
      * checked. This is the set the generated source and `uvp.json` agree on.
      */
     modules: z.array(z.enum(UVP_MODULES)),
-    /** The static skins the workspace carries, in canonical order. */
-    frontends: z.array(z.enum(UVP_FRONTENDS)),
+    /** The frontends the workspace carries, in canonical order. */
+    frontends: z.array(z.enum(UVP_FRONTEND_SELECTIONS)),
     files: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),
     /**
      * The routes the generated service registers, as `METHOD /path`.

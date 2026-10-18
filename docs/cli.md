@@ -239,6 +239,43 @@ registers the document root once — `GET /`, `HEAD /`, `GET /*path`, `HEAD
 Refused before a file is written: an unknown or repeated skin, `--frontend`
 together with `--frontends`, and `none` listed beside a skin in `--frontends`.
 
+### Frontend apps
+
+The same flags also select one Node frontend app — `vue3`, `react`, or
+`svelte` — which writes a separate Vite project under `frontend/` instead of a
+page set under `public/`:
+
+```bash
+uvp init ./svc --name svc --template rest-api --frontend vue3
+```
+
+The generated project is pinned, not ranged: `package.json` names exact
+versions, and a `package-lock.json` generated from those versions is written
+beside it, so `npm ci` installs the same tree without contacting a registry for
+resolution. It contains `vite.config.js`, `index.html`, `src/main.*`,
+`src/App.*`, `src/style.css`, a `.gitignore`, and a README. The page loads
+nothing remote — no CDN, no external font, no network call — and needs Node
+22.19 or newer, but only inside `frontend/`.
+
+`uvp build` still never runs Node, and the generated `CMakeLists.txt` is
+unchanged. At startup the service checks for `frontend/dist/index.html` and,
+only when it exists, registers the built output with
+`app.serve_static("/", "./frontend/dist", options)` and SPA fallback. Until
+then `GET /` answers `503` with the instruction to run `npm ci && npm run
+build` in `frontend/` and restart; the template's exact routes answer
+normally either way, because the static root is registered after them.
+
+```bash
+cd frontend && npm ci && npm run build   # writes frontend/dist/
+```
+
+A workspace selects at most one frontend app, and an app and a static skin
+cannot be combined: both own the document root. Those refusals, and the
+`http3-service` refusal, happen before a file is written. So do the refusals on
+`static-files`, `websocket-test`, and the `static-console` module, whose pages
+already answer `/`. The selection is recorded in `uvp.json` as the app id and
+reported beside `routes`; `--frontend none` means no frontend at all.
+
 `uvp init` refuses to write into a non-empty directory without `--force`.
 
 ## `uvp build`

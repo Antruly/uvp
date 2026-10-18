@@ -30,7 +30,7 @@ export const initCommand: CommandSpec = {
   summary: "Scaffold a buildable libuvcpp C++ project.",
   usage:
     "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] " +
-    "[--modules LIST] [--event-payloads summary|verbatim] [--frontend SKIN|none] " +
+    "[--modules LIST] [--event-payloads summary|verbatim] [--frontend ID|none] " +
     "[--frontends LIST] [--force] [--json]",
   positionals: [{ name: "PATH", description: "Directory to create the workspace in." }],
   flags: [
@@ -72,14 +72,15 @@ export const initCommand: CommandSpec = {
     {
       name: "frontend",
       type: "string",
-      value: "SKIN",
-      description: "One static skin to generate: h5-minimal, h5-dashboard, h5-tech, or none.",
+      value: "ID",
+      description:
+        "One frontend to generate: h5-minimal, h5-dashboard, h5-tech, vue3, react, svelte, or none.",
     },
     {
       name: "frontends",
       type: "list",
       value: "LIST",
-      description: "Comma-separated static skins to generate together; none means no skin.",
+      description: "Comma-separated static page sets to generate together; none means no frontend.",
     },
     {
       name: "force",
@@ -107,10 +108,15 @@ export const initCommand: CommandSpec = {
     "length and a hash of a text message rather than its body, and verbatim keeps the text. The",
     "policy is recorded in uvp.json and reported by GET /api/events, and is refused without",
     "evidence-log because it would describe a log the workspace does not have.",
-    "--frontend writes one build-free static skin under public/<skin>/; --frontends writes several,",
-    "and each is served at /<skin>/. The page at / lists the skins, except where the template's",
+    "--frontend h5-* writes one build-free static skin under public/<skin>/; --frontends writes",
+    "several, and each is served at /<skin>/. The page at / lists them, except where the template's",
     "own page owns / (the static-files placeholder, or the websocket-test console, which links",
     "them). The skins use local assets only, and the selection is recorded in uvp.json.",
+    "--frontend vue3|react|svelte writes a frontend/ project built by Vite. It is not part of uvp",
+    "build and does not require Node to generate, build, or run the C++ workspace; build it with",
+    "npm ci && npm run build in frontend/, and the service then serves frontend/dist at /. Until",
+    "then / answers 503 with that instruction. One app per workspace, and it cannot be combined",
+    "with static skins or with a template that already owns the document root.",
     "http3-service refuses a frontend: its generated source registers no static document root.",
   ],
   input: (parsed) => {
@@ -141,7 +147,7 @@ export const initCommand: CommandSpec = {
     const frontend = asString(parsed, "frontend");
     const frontendsFlag = parsed.occurrences.some((occurrence) => occurrence.name === "frontends");
     if (frontend !== undefined && frontendsFlag) {
-      flagError("--frontend and --frontends both name a skin selection; pass one of them.", {
+      flagError("--frontend and --frontends both name a frontend selection; pass one of them.", {
         usage: "uvp init PATH --name NAME --frontend h5-tech",
       });
     }
@@ -155,7 +161,7 @@ export const initCommand: CommandSpec = {
       flagError(
         `--frontends names none together with ${frontendEntries
           .filter((entry) => entry !== "none")
-          .join(", ")}; none means no skin.`,
+          .join(", ")}; none means no frontend.`,
         { usage: "uvp init PATH --name NAME --frontends h5-tech,h5-dashboard" },
       );
     }
