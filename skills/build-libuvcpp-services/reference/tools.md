@@ -1,7 +1,7 @@
 # uvp tool reference
 
-Generated from the tool contracts. 16 tools; catalog digest
-`955f7d848694e9e5a40f8aa29e462bfe40f8c18e06d73ffbe5acba3eb3657b75`.
+Generated from the tool contracts. 22 tools; catalog digest
+`da60a49ef9a10d5a9ecdbda13449298980c8f5a03e8c991fb577aa6356365524`.
 
 Every tool returns the same envelope: `provider`, `evidence`, `unknowns`, and
 `limitations`. Read `unknowns` and `limitations` before drawing a conclusion —
@@ -11,6 +11,12 @@ they are where an unanswerable question and a truncation are declared.
 | --- | --- | --- | --- |
 | `uvp_doctor` | toolchain | readsFilesystem, spawnsProcess | no |
 | `uvp_workspace_create` | workspace | readsFilesystem, writesFilesystem | no |
+| `uvp_template_search` | workspace | readsFilesystem | no |
+| `uvp_template_get` | workspace | readsFilesystem | no |
+| `uvp_template_validate` | workspace | readsFilesystem | no |
+| `uvp_template_import` | workspace | readsFilesystem, writesFilesystem, mutatesTarget | no |
+| `uvp_template_export` | workspace | readsFilesystem, writesFilesystem, mutatesTarget | no |
+| `uvp_template_remove` | workspace | readsFilesystem, writesFilesystem, mutatesTarget | no |
 | `uvp_build` | build | readsFilesystem, writesFilesystem, spawnsProcess | yes |
 | `uvp_frontend_build` | build | readsFilesystem, writesFilesystem, network, spawnsProcess | yes |
 | `uvp_run` | runtime | readsFilesystem, writesFilesystem, network, spawnsProcess, mutatesTarget | yes |
@@ -56,6 +62,111 @@ Example:
   "name": "svc",
   "template": "rest-api",
   "port": 8080
+}
+```
+
+## `uvp_template_search` — Search the local template store
+
+Search the locally installed `uvp.template/1` packages by category, framework, tags, required libuvcpp features, exact version, or free text. Returns every matching package up to a page with the metadata needed to choose between them, what matched, and a deterministic score. By default only the latest version of each id is returned. Metadata only: no file bytes, no network, and no model call.
+
+- **Kind:** workspace
+- **Effects:** readsFilesystem
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "category": "fullstack",
+  "features": [
+    "websocket"
+  ],
+  "limit": 10
+}
+```
+
+## `uvp_template_get` — Read a stored template package
+
+Read one exact `id@version` from the local template store. Re-verifies every file against the manifest, then returns the manifest fields, the file list with digests and byte counts, the store path, and whether the package was admitted as unverified. A missing package and a corrupt package are different failures.
+
+- **Kind:** workspace
+- **Effects:** readsFilesystem
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "id": "acme-dashboard",
+  "version": "1.2.0"
+}
+```
+
+## `uvp_template_validate` — Validate a template package directory
+
+Validate a package directory against `uvp.template/1` exactly as an import would, without writing anything. Returns the manifest, the observed file list, and the package digest. A package whose only problems are licence/provenance is admitted only when allow_unverified is set. It does not check whether the package is already installed.
+
+- **Kind:** workspace
+- **Effects:** readsFilesystem
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "source_dir": "/home/dev/acme-dashboard"
+}
+```
+
+## `uvp_template_import` — Import a template package
+
+Validate, scan, and import a package directory into the local store. `dry_run` returns the validation and scan without writing. An existing id@version is refused unless `replace` is explicit. `allow_unverified` admits a package whose only problems are licence/provenance, marks it unverified, and is never the default. The scan is a bounded locator for credential- and PII-shaped content, not a guarantee that the package is clean.
+
+- **Kind:** workspace
+- **Effects:** readsFilesystem, writesFilesystem, mutatesTarget
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "source_dir": "/home/dev/acme-dashboard",
+  "dry_run": true
+}
+```
+
+## `uvp_template_export` — Export a stored template package
+
+Copy one stored id@version to a directory. The target must be absent or empty; a non-empty target is refused. The copy is staged and every exported file is re-verified against the manifest before success is reported, so a failed export leaves no partial package at the target.
+
+- **Kind:** workspace
+- **Effects:** readsFilesystem, writesFilesystem, mutatesTarget
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "id": "acme-dashboard",
+  "version": "1.2.0",
+  "target_dir": "/home/dev/exported"
+}
+```
+
+## `uvp_template_remove` — Remove a stored template package
+
+Remove one id@version, or every version of an id when version is omitted, from the local store. The tree moves through quarantine; a failed cleanup is reported as `retained` rather than treated as success. This does not touch any generated workspace.
+
+- **Kind:** workspace
+- **Effects:** readsFilesystem, writesFilesystem, mutatesTarget
+- **Returns target content:** no
+
+Example:
+
+```json
+{
+  "id": "acme-dashboard",
+  "version": "1.2.0"
 }
 ```
 

@@ -11,6 +11,14 @@ import {
   renderWorkspaceCreate,
 } from "./renderProject.js";
 import { webRenderers } from "./renderWeb.js";
+import {
+  renderTemplateExport,
+  renderTemplateGet,
+  renderTemplateImport,
+  renderTemplateRemove,
+  renderTemplateSearch,
+  renderTemplateValidate,
+} from "./renderTemplate.js";
 
 /**
  * Result output.
@@ -37,6 +45,12 @@ const RENDERERS: Readonly<Record<string, Renderer>> = {
   uvp_run_stop: renderRunStop,
   uvp_verify: renderVerify,
   uvp_bundle_diff: renderBundleDiff,
+  uvp_template_search: renderTemplateSearch,
+  uvp_template_get: renderTemplateGet,
+  uvp_template_validate: renderTemplateValidate,
+  uvp_template_import: renderTemplateImport,
+  uvp_template_export: renderTemplateExport,
+  uvp_template_remove: renderTemplateRemove,
   ...webRenderers,
 };
 

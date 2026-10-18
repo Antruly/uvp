@@ -29,6 +29,25 @@ import {
   soapCallContract,
   websocketProbeContract,
 } from "../contracts/webToolContracts.js";
+import {
+  templateExportContract,
+  templateGetContract,
+  templateImportContract,
+  templateRemoveContract,
+  templateSearchContract,
+  templateValidateContract,
+} from "../contracts/templateToolContracts.js";
+import {
+  getTemplatePackage,
+  importTemplatePackage,
+  inspectTemplatePackage,
+  removeTemplatePackage,
+  type InspectedTemplatePackage,
+  type StoredTemplatePackage,
+} from "../application/TemplateStore.js";
+import { searchTemplatePackages } from "../application/TemplateSearch.js";
+import { exportTemplatePackage } from "../application/TemplateExport.js";
+import { scanTemplatePackage, type TemplateScanResult } from "../application/TemplateScan.js";
 import { toolNames } from "../contracts/toolContracts.js";
 import { unevaluatedQuestion } from "../application/assertions.js";
 import { selectToolchain } from "../application/toolchainSelection.js";
@@ -246,6 +265,39 @@ const recordBuild = (
   });
 };
 
+const templatePackageOutput = (
+  pkg: StoredTemplatePackage | InspectedTemplatePackage,
+): Record<string, unknown> => ({
+  id: pkg.id,
+  version: pkg.version,
+  name: pkg.name,
+  ...(pkg.description === undefined ? {} : { description: pkg.description }),
+  category: pkg.category,
+  ...(pkg.framework === undefined ? {} : { framework: pkg.framework }),
+  ...(pkg.tags === undefined ? {} : { tags: [...pkg.tags] }),
+  ...(pkg.requires === undefined ? {} : { requires: pkg.requires }),
+  ...(pkg.license === undefined ? {} : { license: pkg.license }),
+  ...(pkg.provenance === undefined ? {} : { provenance: pkg.provenance }),
+  digest: pkg.digest,
+  files: pkg.files.map((file) => ({ path: file.path, bytes: file.bytes, digest: file.digest })),
+  ...(pkg.preview === undefined ? {} : { preview: pkg.preview }),
+  unverified: pkg.unverified,
+});
+
+const templateScanOutput = (scan: TemplateScanResult): Record<string, unknown> => ({
+  findings: scan.findings.map((finding) => ({
+    path: finding.path,
+    line: finding.line,
+    rule: finding.rule,
+    kind: finding.kind,
+    redacted: finding.redacted,
+  })),
+  scanned: [...scan.scanned],
+  skipped: scan.skipped.map((entry) => ({ path: entry.path, reason: entry.reason })),
+  truncated: scan.truncated,
+  limits: { ...scan.limits },
+});
+
 export const createToolHandlers = (
   services: UvpServices,
 ): Readonly<Record<string, ToolHandler>> => {
@@ -322,6 +374,193 @@ export const createToolHandlers = (
           })),
           routes: [...created.routes],
           next_steps: [...created.nextSteps],
+        };
+      },
+    ),
+
+    [templateSearchContract.name]: handler(
+      templateSearchContract.inputSchema,
+      async (input, recorder) => {
+        const result = await searchTemplatePackages({
+          ...(input.text === undefined ? {} : { text: input.text }),
+          ...(input.category === undefined ? {} : { category: input.category }),
+          ...(input.framework === undefined ? {} : { framework: input.framework }),
+          ...(input.tags === undefined ? {} : { tags: input.tags }),
+          tagMode: input.tag_mode,
+          ...(input.features === undefined ? {} : { features: input.features }),
+          ...(input.version === undefined ? {} : { version: input.version }),
+          allVersions: input.all_versions,
+          limit: input.limit,
+          offset: input.offset,
+        });
+
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateSearchContract.name,
+            provider: identity,
+            limitations: [
+              "Search reads the local store only; it does not contact a registry.",
+              "Scores are a deterministic ordering aid, not a claim about the best package.",
+            ],
+          }),
+          matches: result.matches.map((match) => ({
+            id: match.id,
+            version: match.version,
+            name: match.name,
+            ...(match.description === undefined ? {} : { description: match.description }),
+            category: match.category,
+            ...(match.framework === undefined ? {} : { framework: match.framework }),
+            ...(match.tags === undefined ? {} : { tags: [...match.tags] }),
+            ...(match.requires === undefined ? {} : { requires: match.requires }),
+            ...(match.license === undefined ? {} : { license: match.license }),
+            ...(match.provenance === undefined ? {} : { provenance: match.provenance }),
+            ...(match.preview === undefined ? {} : { preview: match.preview }),
+            unverified: match.unverified,
+            digest: match.digest,
+            file_count: match.file_count,
+            score: match.score,
+            matched_on: [...match.matched_on],
+          })),
+          total: result.total,
+          offset: result.offset,
+          limit: result.limit,
+          truncated: result.truncated,
+          corrupt: result.corrupt.map((entry) => ({
+            path: entry.path,
+            problems: [...entry.problems],
+          })),
+        };
+      },
+    ),
+
+    [templateGetContract.name]: handler(
+      templateGetContract.inputSchema,
+      async (input, recorder) => {
+        const pkg = await getTemplatePackage(input.id, input.version);
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateGetContract.name,
+            provider: identity,
+            limitations: [
+              "The package's own files are not compiled; its generated workspace is the build evidence.",
+            ],
+          }),
+          ...templatePackageOutput(pkg),
+          path: pkg.path,
+        };
+      },
+    ),
+
+    [templateValidateContract.name]: handler(
+      templateValidateContract.inputSchema,
+      async (input, recorder) => {
+        const pkg = await inspectTemplatePackage({
+          sourceDir: input.source_dir,
+          allowUnverified: input.allow_unverified,
+        });
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateValidateContract.name,
+            provider: identity,
+            limitations: [
+              "Validation establishes the package format only; it does not compile the package.",
+            ],
+          }),
+          ...templatePackageOutput(pkg),
+          source_dir: input.source_dir,
+        };
+      },
+    ),
+
+    [templateImportContract.name]: handler(
+      templateImportContract.inputSchema,
+      async (input, recorder) => {
+        const scan = await scanTemplatePackage(input.source_dir);
+        const scanOutput = templateScanOutput(scan);
+        const limitations = [
+          "The scan is a bounded locator for credential- and PII-shaped content, not a guarantee that the package is clean.",
+          "The package is not compiled; the generated workspace's build is the evidence.",
+        ];
+
+        if (input.dry_run) {
+          const inspected = await inspectTemplatePackage({
+            sourceDir: input.source_dir,
+            allowUnverified: input.allow_unverified,
+          });
+          return {
+            ...envelopeOf(recorder, {
+              tool: templateImportContract.name,
+              provider: identity,
+              limitations: ["Dry run: nothing was written to the store.", ...limitations],
+            }),
+            ...templatePackageOutput(inspected),
+            dry_run: true,
+            replaced: false,
+            scan: scanOutput,
+          };
+        }
+
+        const imported = await importTemplatePackage({
+          sourceDir: input.source_dir,
+          replace: input.replace,
+          allowUnverified: input.allow_unverified,
+        });
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateImportContract.name,
+            provider: identity,
+            limitations,
+          }),
+          ...templatePackageOutput(imported.package),
+          path: imported.package.path,
+          replaced: imported.replaced,
+          dry_run: false,
+          ...(imported.retained === undefined ? {} : { retained: imported.retained }),
+          scan: scanOutput,
+        };
+      },
+    ),
+
+    [templateExportContract.name]: handler(
+      templateExportContract.inputSchema,
+      async (input, recorder) => {
+        const exported = await exportTemplatePackage(input.id, input.version, {
+          targetDir: input.target_dir,
+        });
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateExportContract.name,
+            provider: identity,
+            limitations: [
+              "The export re-verifies the stored package; it does not compile the exported copy.",
+            ],
+          }),
+          path: exported.path,
+          id: exported.id,
+          version: exported.version,
+          digest: exported.digest,
+          files: exported.files.map((file) => ({
+            path: file.path,
+            bytes: file.bytes,
+            digest: file.digest,
+          })),
+          bytes: exported.bytes,
+        };
+      },
+    ),
+
+    [templateRemoveContract.name]: handler(
+      templateRemoveContract.inputSchema,
+      async (input, recorder) => {
+        const removed = await removeTemplatePackage(input.id, input.version);
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateRemoveContract.name,
+            provider: identity,
+            limitations: ["This removes the store entry only; generated workspaces are untouched."],
+          }),
+          removed: removed.removed,
+          ...(removed.retained === undefined ? {} : { retained: removed.retained }),
         };
       },
     ),

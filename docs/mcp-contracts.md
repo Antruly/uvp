@@ -1,6 +1,6 @@
 # MCP contracts
 
-uvp exposes 16 tools over MCP, from the same contracts that back the CLI. This
+uvp exposes 22 tools over MCP, from the same contracts that back the CLI. This
 page is the reference: what each tool does, what it touches, and what a result
 contains.
 
@@ -27,24 +27,30 @@ The registry entry is `io.github.Antruly/uvp`; the npm package is
 process · `mut` can change state outside the workspace. `untrusted` marks a tool
 whose results can contain bytes that did not originate with uvp.
 
-| Tool                   | Kind      |  R  |  W  | net | proc | mut | untrusted |
-| ---------------------- | --------- | :-: | :-: | :-: | :--: | :-: | :-------: |
-| `uvp_doctor`           | toolchain |  ●  |     |     |  ●   |     |           |
-| `uvp_workspace_create` | workspace |  ●  |  ●  |     |      |     |           |
-| `uvp_build`            | build     |  ●  |  ●  |     |  ●   |     |     ●     |
-| `uvp_frontend_build`   | build     |  ●  |  ●  |  ●  |  ●   |     |     ●     |
-| `uvp_run`              | runtime   |  ●  |  ●  |  ●  |  ●   |  ●  |     ●     |
-| `uvp_run_stop`         | runtime   |     |     |     |  ●   |  ●  |           |
-| `uvp_verify`           | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
-| `uvp_bundle_diff`      | workflow  |  ●  |     |     |      |     |           |
-| `uvp_http_request`     | web       |     |     |  ●  |  ●   |     |     ●     |
-| `uvp_websocket_probe`  | web       |     |     |  ●  |  ●   |     |     ●     |
-| `uvp_soap_call`        | web       |     |     |  ●  |      |     |     ●     |
-| `uvp_load_test`        | web       |     |     |  ●  |      |  ●  |           |
-| `uvp_capture_start`    | web       |     |     |  ●  |      |  ●  |           |
-| `uvp_capture_read`     | web       |  ●  |     |     |      |     |     ●     |
-| `uvp_capture_replay`   | web       |  ●  |     |  ●  |      |     |           |
-| `uvp_assert_exchange`  | web       |  ●  |     |     |      |     |           |
+| Tool                    | Kind      |  R  |  W  | net | proc | mut | untrusted |
+| ----------------------- | --------- | :-: | :-: | :-: | :--: | :-: | :-------: |
+| `uvp_doctor`            | toolchain |  ●  |     |     |  ●   |     |           |
+| `uvp_workspace_create`  | workspace |  ●  |  ●  |     |      |     |           |
+| `uvp_template_search`   | workspace |  ●  |     |     |      |     |           |
+| `uvp_template_get`      | workspace |  ●  |     |     |      |     |           |
+| `uvp_template_validate` | workspace |  ●  |     |     |      |     |           |
+| `uvp_template_import`   | workspace |  ●  |  ●  |     |      |  ●  |           |
+| `uvp_template_export`   | workspace |  ●  |  ●  |     |      |  ●  |           |
+| `uvp_template_remove`   | workspace |  ●  |  ●  |     |      |  ●  |           |
+| `uvp_build`             | build     |  ●  |  ●  |     |  ●   |     |     ●     |
+| `uvp_frontend_build`    | build     |  ●  |  ●  |  ●  |  ●   |     |     ●     |
+| `uvp_run`               | runtime   |  ●  |  ●  |  ●  |  ●   |  ●  |     ●     |
+| `uvp_run_stop`          | runtime   |     |     |     |  ●   |  ●  |           |
+| `uvp_verify`            | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
+| `uvp_bundle_diff`       | workflow  |  ●  |     |     |      |     |           |
+| `uvp_http_request`      | web       |     |     |  ●  |  ●   |     |     ●     |
+| `uvp_websocket_probe`   | web       |     |     |  ●  |  ●   |     |     ●     |
+| `uvp_soap_call`         | web       |     |     |  ●  |      |     |     ●     |
+| `uvp_load_test`         | web       |     |     |  ●  |      |  ●  |           |
+| `uvp_capture_start`     | web       |     |     |  ●  |      |  ●  |           |
+| `uvp_capture_read`      | web       |  ●  |     |     |      |     |     ●     |
+| `uvp_capture_replay`    | web       |  ●  |     |  ●  |      |     |           |
+| `uvp_assert_exchange`   | web       |  ●  |     |     |      |     |           |
 
 Read the table before granting a tool. `uvp_run_stop` reports no filesystem
 access at all: it signals a process this session started and nothing else.
@@ -119,6 +125,40 @@ run build` in `frontend/`. One app per workspace; an app and a skin, a second
 app, and an app on `static-files`, `websocket-test`, `static-console`, or
 `http3-service` are refused before any file is written. The selection is
 recorded in `uvp.json` and reported beside `routes`.
+
+### Template packages
+
+The six `uvp_template_*` tools read and write the local template store. The
+store root is resolved from `UVP_TEMPLATE_HOME`, or `~/.uvp/templates` when it
+is unset; it is not a tool input, so two callers cannot silently use different
+stores.
+
+- **`uvp_template_search`** filters by category, framework, tags (`all`/`any`),
+  required libuvcpp features, exact version, and free text. It returns metadata
+  only — no file bytes — with a deterministic score and `matched_on`. The
+  default is the latest version per id; `all_versions` returns every version.
+- **`uvp_template_get`** reads one exact `id@version`, re-verifying every file
+  against the manifest before it returns the file list and store path.
+- **`uvp_template_validate`** applies the import's format verdict to a directory
+  without writing anything. It does not check whether the package is already in
+  the store.
+- **`uvp_template_import`** validates, scans, and writes a package. `dry_run`
+  returns the validation and scan without writing; an existing `id@version` is
+  refused unless `replace` is explicit; `allow_unverified` is the only way to
+  admit a package whose licence/provenance is missing, and the package is then
+  marked `unverified`. The scan reports credential- and PII-shaped findings with
+  its own coverage; it is a bounded locator, not a guarantee that the package is
+  clean.
+- **`uvp_template_export`** copies a stored package to a caller-named directory
+  that must be absent or empty. The copy is staged and re-verified against the
+  manifest before success is reported.
+- **`uvp_template_remove`** removes one version, or every version of an id,
+  through quarantine. A failed cleanup is reported as `retained`.
+
+`import`, `export`, and `remove` declare `mutatesTarget: true` because they
+change state outside the uvp workspace (the local store, or a caller-named
+destination). None of the six declares a network request, a process spawn, or a
+credential.
 
 ### Build
 
