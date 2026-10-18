@@ -93,6 +93,7 @@ export interface StoredTemplatePackage {
   readonly id: string;
   readonly version: string;
   readonly name: string;
+  readonly description?: string;
   readonly category: TemplatePackageManifest["category"];
   readonly framework?: TemplatePackageManifest["framework"];
   readonly tags?: readonly string[];
@@ -459,6 +460,7 @@ const toStored = (validated: ValidatedPackage, packagePath: string): StoredTempl
     id: manifest.id,
     version: manifest.version,
     name: manifest.name,
+    ...(manifest.description === undefined ? {} : { description: manifest.description }),
     category: manifest.category,
     ...(manifest.framework === undefined ? {} : { framework: manifest.framework }),
     ...(manifest.tags === undefined ? {} : { tags: manifest.tags }),
