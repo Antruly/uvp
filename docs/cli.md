@@ -284,6 +284,14 @@ Ask for a route the template actually registers — `uvp init` printed them as
 `route` lines. `GET /` against `hello-http` is answered 404 and that is the
 correct answer, because `/` is not a route; `GET /hello` is.
 
+On Git Bash (Git for Windows) and MSYS2, the shell rewrites an argument that
+begins with `/` into a Windows path before `uvp` runs: `--request GET /healthz`
+arrives as `C:/Program Files/Git/healthz`, the pass asks for a path the service
+does not answer, and every assertion fails even though the service is ready. The
+request is built from the argument uvp received, so the report is accurate about
+what was sent. Turn the conversion off for the command: `export
+MSYS_NO_PATHCONV=1` in Git Bash, or `export MSYS2_ARG_CONV_EXCL='*'` in MSYS2.
+
 If the service was started earlier with `uvp run`, it may still be listening: a
 detached run (the default) leaves the process running after the CLI exits, and a
 later `uvp stop --all` is a new process whose registry is empty, so it cannot
