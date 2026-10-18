@@ -22,9 +22,10 @@ export class Problems {
     record: Record<string, unknown>,
     prefix: string,
     allowed: ReadonlySet<string>,
+    schema: string = "uvp.template/1",
   ): void {
     for (const key of Object.keys(record)) {
-      if (!allowed.has(key)) this.add(`${prefix}${key}`, "is not a field of uvp.template/1");
+      if (!allowed.has(key)) this.add(`${prefix}${key}`, `is not a field of ${schema}`);
     }
   }
 }

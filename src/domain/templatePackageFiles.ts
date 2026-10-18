@@ -27,6 +27,15 @@ import { Problems, asInteger, asString, isRecord } from "./templatePackageProble
  */
 
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
+
+/**
+ * The rule for a `sha256:` digest, exported so the registry index reader checks
+ * a package digest with the same expression rather than a second copy of it.
+ */
+export const templatePackageDigestProblem = (value: string): string | undefined =>
+  DIGEST_PATTERN.test(value)
+    ? undefined
+    : "must be 'sha256:' followed by 64 lowercase hex characters";
 const ARCHIVE_EXTENSIONS = new Set(["7z", "gz", "rar", "tar", "tgz", "xz", "zip"]);
 const EXECUTABLE_EXTENSIONS = new Set([
   "a",
@@ -77,8 +86,9 @@ function readFileEntry(
     }
   }
   if (digest === undefined) problems.add(`${location}.digest`, "must be a string");
-  else if (!DIGEST_PATTERN.test(digest)) {
-    problems.add(`${location}.digest`, "must be 'sha256:' followed by 64 lowercase hex characters");
+  else {
+    const problem = templatePackageDigestProblem(digest);
+    if (problem !== undefined) problems.add(`${location}.digest`, problem);
   }
   if (bytes === undefined) problems.add(`${location}.bytes`, "must be an integer");
   else if (bytes < 0 || bytes > limits.maxFileBytes) {
