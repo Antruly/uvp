@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_TEMPLATE_PACKAGE_LIMITS } from "../domain/templatePackage.js";
 import {
   TemplateStoreError,
   getTemplatePackage,
@@ -245,6 +246,31 @@ describe("package shape", () => {
       "invalid_package",
     );
   });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "decides a file is too large from its size, before it reads the bytes",
+    async () => {
+      const storeRoot = await makeStore();
+      const fixture = await makePackage({ content: "0123456789abcdef\n" });
+      const file = path.join(fixture.dir, "files", "src", "main.cc");
+      // The size alone is over the limit; the read would fail, so an import that
+      // reports a read error proves it tried to load the bytes first.
+      await chmod(file, 0o000);
+      let failure: TemplateStoreError | undefined;
+      try {
+        await importTemplatePackage({
+          sourceDir: fixture.dir,
+          storeRoot,
+          limits: { ...DEFAULT_TEMPLATE_PACKAGE_LIMITS, maxFileBytes: 8 },
+        });
+      } catch (error) {
+        failure = error as TemplateStoreError;
+      }
+      expect(failure?.code).toBe("invalid_package");
+      expect(failure?.message).toContain("larger than 8 bytes");
+      expect(failure?.message).not.toContain("EACCES");
+    },
+  );
 });
 
 describe("the store's failure paths", () => {

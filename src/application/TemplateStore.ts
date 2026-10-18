@@ -56,6 +56,10 @@ import { isRecord } from "../domain/templatePackageProblems.js";
  * Reads are not locked. A read that races a replace can see `not_found` for one
  * call; that is reported rather than retried into a stale answer.
  *
+ * Each package file is `stat`ed before it is read, so `maxFileBytes` bounds the
+ * buffer the reader allocates, not only the answer it returns. The bytes read
+ * are compared again afterwards, because a file can grow between the two calls.
+ *
  * ## Q6: unverified local imports
  *
  * A strict import requires the manifest's licence and provenance. With
@@ -308,12 +312,25 @@ const walkFiles = async (
     if (!entry.isFile()) {
       throw invalid(`'${childRelative}' is not a regular file`);
     }
+    // Decide from the size before reading, so the per-file limit bounds the
+    // buffer this walk allocates rather than only the answer it returns.
+    let info;
+    try {
+      info = await stat(child);
+    } catch (error) {
+      throw ioError(`could not stat ${child}`, error);
+    }
+    if (info.size > limits.maxFileBytes) {
+      throw invalid(`'${childRelative}' is larger than ${limits.maxFileBytes} bytes`);
+    }
     let content: Buffer;
     try {
       content = await readFile(child);
     } catch (error) {
       throw ioError(`could not read ${child}`, error);
     }
+    // A file that grew between the stat and the read is refused here; the stat
+    // above is what makes the allocation bounded.
     if (content.byteLength > limits.maxFileBytes) {
       throw invalid(`'${childRelative}' is larger than ${limits.maxFileBytes} bytes`);
     }
