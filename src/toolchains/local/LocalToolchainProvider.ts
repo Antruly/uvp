@@ -1,4 +1,5 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
+import { constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -47,6 +48,181 @@ const COMPILER_CANDIDATES: readonly { id: string; commands: readonly string[] }[
       { id: "gcc", commands: ["g++", "gcc"] },
       { id: "cc", commands: ["c++", "cc"] },
     ];
+
+/**
+ * Where Visual Studio's own locator lives, in the order to try it.
+ *
+ * `vswhere.exe` is installed by the Visual Studio installer and answers "which
+ * C++ toolset is installed" without a Developer Command Prompt — the one
+ * question a `PATH` probe cannot answer for MSVC, because `cl.exe` is only on
+ * `PATH` after `vcvarsall.bat` has run. The 32-bit installer puts it under
+ * `ProgramFiles(x86)` even on a 64-bit-only install, so both roots are tried.
+ *
+ * Pure, so the list can be pinned without a Windows host.
+ */
+export const vsWhereCandidates = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): readonly string[] => {
+  const roots = [env["ProgramFiles(x86)"], env["ProgramFiles"]];
+  const paths = roots.flatMap((root) =>
+    root === undefined || root === ""
+      ? []
+      : [join(root, "Microsoft Visual Studio", "Installer", "vswhere.exe")],
+  );
+  return [...new Set(paths)];
+};
+
+/**
+ * One toolset `vswhere -find` named, with the parts that decide which wins.
+ *
+ * Matched rather than trusted line by line: vswhere prints a banner on stdout,
+ * and a parser that took the first line would hand back "Visual Studio Locator
+ * version 3.1.7" as a compiler path.
+ */
+const MSVC_TOOLSET =
+  /[\\/]VC[\\/]Tools[\\/]MSVC[\\/](\d+(?:\.\d+)*)[\\/]bin[\\/](Host[A-Za-z0-9]+)[\\/]([A-Za-z0-9]+)[\\/]cl\.exe$/iu;
+
+const versionParts = (version: string): readonly number[] => version.split(".").map(Number);
+
+const compareVersionParts = (left: readonly number[], right: readonly number[]): number => {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+};
+
+/**
+ * The toolset to report when the locator named several.
+ *
+ * A host-x64 compiler producing x64 code is what CMake's Visual Studio generator
+ * uses by default, so it wins; the highest `MSVC\<version>` wins next, because
+ * an install keeps the previous toolset beside the current one; the path is the
+ * last tie-break so the answer is stable rather than dependent on output order.
+ *
+ * Pure: the ranking is the part that can be wrong, and it is testable on any
+ * host even though the command that produces the lines needs Windows.
+ */
+export const chooseMsvcToolset = (stdout: string): string | undefined => {
+  const found = stdout.split(/\r?\n/u).flatMap((line) => {
+    const path = line.trim();
+    const match = MSVC_TOOLSET.exec(path);
+    return match === null
+      ? []
+      : [
+          {
+            path,
+            version: versionParts(match[1] ?? "0"),
+            host: (match[2] ?? "").toLowerCase(),
+            target: (match[3] ?? "").toLowerCase(),
+          },
+        ];
+  });
+  const rank = (entry: (typeof found)[number]): number =>
+    entry.target === "x64" ? (entry.host === "hostx64" ? 2 : 1) : 0;
+  const [best] = [...found].sort(
+    (left, right) =>
+      rank(right) - rank(left) ||
+      compareVersionParts(right.version, left.version) ||
+      (left.path < right.path ? -1 : left.path > right.path ? 1 : 0),
+  );
+  return best?.path;
+};
+
+/**
+ * How long the locator may take before the probe gives up.
+ *
+ * Ten seconds was not enough on a cold GitHub-hosted Windows runner: the first
+ * .NET start of `vswhere` there was killed at exactly 10 000 ms, and the
+ * Windows source lane read that as a host with no compiler ([PR
+ * #229](https://github.com/Antruly/uvp/pull/229)). Thirty seconds keeps the
+ * wait bounded while leaving a cold, virus-scanned first start room to finish;
+ * a warm answer takes milliseconds.
+ */
+const VSWHERE_TIMEOUT_MS = 30_000;
+
+/** Why the locator did not name a toolset. */
+export type MsvcLocatorProblem =
+  | "no-locator"
+  | "named-nothing"
+  | "timed-out"
+  | "could-not-start"
+  | "failed";
+
+/**
+ * What asking the Visual Studio locator established.
+ *
+ * `no-locator` and `named-nothing` are observations that no MSVC was found: the
+ * installer put no locator at either root, or the locator answered and named
+ * none. The other three are the locator not answering, which is a different
+ * fact — "I could not look" must not become `missing: compiler`.
+ */
+export type MsvcLocatorResult =
+  | { readonly path: string }
+  | { readonly problem: MsvcLocatorProblem };
+
+/** How `locateMsvcToolset` starts `vswhere`; a seam for tests without a locator. */
+export type VsWhereRunner = (
+  executable: string,
+  args: readonly string[],
+) => Promise<
+  { readonly stdout: string } | { readonly problem: "timed-out" | "could-not-start" | "failed" }
+>;
+
+const runVsWhere: VsWhereRunner = async (executable, args) => {
+  let outcome: ProcessOutcome;
+  try {
+    outcome = await runProcess({ command: executable, args, timeoutMs: VSWHERE_TIMEOUT_MS });
+  } catch {
+    return { problem: "could-not-start" };
+  }
+  if (outcome.timedOut) return { problem: "timed-out" };
+  if (outcome.exitCode !== 0) return { problem: "failed" };
+  return { stdout: outcome.stdout };
+};
+
+/**
+ * Ask Visual Studio where its C++ toolset is, without a Developer Command Prompt.
+ *
+ * `-latest` asks the newest install and `-find` makes vswhere do the directory
+ * walk, so this does not encode where Microsoft keeps toolsets. Nothing beyond
+ * those long-standing options is passed: a flag an older vswhere does not know
+ * makes it print usage instead of paths. That is also why the banner it prints
+ * by default is filtered by shape rather than suppressed with `-nologo`.
+ */
+const VS_WHERE_ARGS: readonly string[] = [
+  "-latest",
+  "-products",
+  "*",
+  "-requires",
+  "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+  "-find",
+  "VC\\Tools\\MSVC\\**\\bin\\Host*\\*\\cl.exe",
+];
+
+export const locateMsvcToolset = async (
+  windows: boolean,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  run: VsWhereRunner = runVsWhere,
+): Promise<MsvcLocatorResult> => {
+  if (!windows) return { problem: "no-locator" };
+  for (const candidate of vsWhereCandidates(env)) {
+    try {
+      await access(candidate, constants.X_OK);
+    } catch {
+      // No installer locator at this root; try the other one.
+      continue;
+    }
+    // This root has the locator, so this is the installer that would know. A
+    // second root would ask the same installer again and, after a timeout,
+    // spend the whole budget twice.
+    const answer = await run(candidate, VS_WHERE_ARGS);
+    if ("problem" in answer) return { problem: answer.problem };
+    const chosen = chooseMsvcToolset(answer.stdout);
+    return chosen === undefined ? { problem: "named-nothing" } : { path: chosen };
+  }
+  return { problem: "no-locator" };
+};
 
 const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[] }[] = [
   { id: "cmake", commands: ["cmake"] },
@@ -433,6 +609,14 @@ export type LocalRunSlot = (options: RunProcessOptions) => Promise<ProcessOutcom
 export interface LocalProviderOptions {
   /** Replaces the process runner; the default is `runProcess`. */
   readonly run?: LocalRunSlot;
+  /**
+   * Replaces the Visual Studio locator query; the default asks `vswhere`.
+   *
+   * A seam like `run`, for the same reason: what the provider does with each
+   * answer is the part that can be wrong, and a host without Visual Studio
+   * cannot produce a timeout, a refused start, or a locator that names nothing.
+   */
+  readonly locateMsvc?: (windows: boolean) => Promise<MsvcLocatorResult>;
 }
 
 /**
@@ -467,12 +651,45 @@ export class LocalToolchainProvider implements ToolchainProvider {
         compilers.push({
           id: candidate.id,
           path,
+          onPath: true,
           ...(version === undefined ? {} : { version }),
         });
         break;
       }
     }
-    if (compilers.length === 0) {
+    // A PATH-only probe cannot see an MSVC that is installed and reachable from
+    // a Developer Command Prompt but not from here. On Windows, ask Visual
+    // Studio's locator before turning "the probe found nothing" into "this host
+    // has no compiler" — [#224](https://github.com/Antruly/uvp/issues/224).
+    // Off Windows the platform has no such split to model: a compiler that is
+    // not on PATH is not one `cmake` can find either. A locator that could not
+    // answer is a third state: it is a limitation saying the question is open,
+    // not a `missing` entry claiming the compiler is absent.
+    let msvcOffPath: string | undefined;
+    let locatorUnanswered: MsvcLocatorProblem | undefined;
+    if (compilers.length === 0 && isWindows) {
+      if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
+      const locateMsvc = this.options.locateMsvc ?? locateMsvcToolset;
+      const located = await locateMsvc(isWindows);
+      if ("path" in located) {
+        msvcOffPath = located.path;
+        // Located, not assumed runnable. The version is asked for separately and
+        // may stay unknown; what `onPath: false` records is where the file is.
+        const version = await versionOf(msvcOffPath, []);
+        compilers.push({
+          id: "msvc",
+          path: msvcOffPath,
+          onPath: false,
+          ...(version === undefined ? {} : { version }),
+        });
+      } else if (located.problem !== "no-locator" && located.problem !== "named-nothing") {
+        // The locator exists but did not answer. Whether an MSVC is installed is
+        // therefore unknown, not absent: `missing: compiler` would turn "I could
+        // not look" into "this host cannot compile".
+        locatorUnanswered = located.problem;
+      }
+    }
+    if (compilers.length === 0 && locatorUnanswered === undefined) {
       missing.push({ id: "compiler", requiredFor: "building any C++ target" });
     }
 
@@ -507,6 +724,26 @@ export class LocalToolchainProvider implements ToolchainProvider {
     }
     if (compilers.length > 0 && compilers[0] !== undefined) {
       limitations.push(`Default compiler is ${compilers[0].id}; pass a generator to override.`);
+    }
+    if (msvcOffPath !== undefined) {
+      limitations.push(
+        `MSVC is installed at ${msvcOffPath} but is not on PATH, because Visual Studio only ` +
+          "puts it there in a Developer Command Prompt. CMake's Visual Studio generator builds " +
+          "with it; a generator that runs the compiler directly needs a Developer Command " +
+          "Prompt (run vcvarsall.bat) or a shell that has already run it.",
+      );
+    }
+    if (locatorUnanswered !== undefined) {
+      limitations.push(
+        locatorUnanswered === "timed-out"
+          ? "Visual Studio's locator did not answer in time, so whether an MSVC toolset is " +
+              "installed is unknown; a Developer Command Prompt has cl.exe on PATH."
+          : locatorUnanswered === "could-not-start"
+            ? "Visual Studio's locator could not be started, so whether an MSVC toolset is " +
+              "installed is unknown."
+            : "Visual Studio's locator exited without naming a toolset, so whether an MSVC " +
+              "toolset is installed is unknown.",
+      );
     }
 
     // Looked for, not required. Whether a build needs pkg-config depends on the

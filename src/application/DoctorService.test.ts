@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DoctorService, headerProbeAt } from "./DoctorService.js";
 import { createRecorder } from "./evidenceHelpers.js";
-import type { LibuvcppBuild } from "./ToolchainProvider.js";
+import type { CompilerDescriptor, LibuvcppBuild, ToolchainProvider } from "./ToolchainProvider.js";
 import { createFakeToolchain } from "../../tests/conformance/fakeToolchain.js";
 
 /**
@@ -206,5 +206,75 @@ describe("the pkg-config requirement on a libuvcpp route", () => {
     const { report } = await reportWith({ found: false, cmakePackage: false, pkgConfig: {} });
 
     expect(report.toolchains[0]?.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+});
+
+/**
+ * Where a compiler was seen, as the report carries it.
+ *
+ * The provider decides this; the doctor only hands it on. What matters here is
+ * the difference between the two observed answers and the absent one — a
+ * container's compilers are not on this host's PATH, and printing `false` for
+ * them would be a claim about a path that does not exist.
+ */
+const providerWith = (compilers: readonly CompilerDescriptor[]): ToolchainProvider => ({
+  identity: () => ({ id: "local", platform: "test-host" }),
+  inspectAvailability: async () => ({
+    id: "local",
+    available: true,
+    compilers,
+    buildSystems: [{ id: "cmake", path: "cmake" }],
+    missing: [],
+    limitations: [],
+  }),
+  findLibuvcpp: async () => ({ found: false, modules: [] }),
+  createClient: () => {
+    throw new Error("the doctor never builds");
+  },
+});
+
+type ReportedCompiler = {
+  id: string;
+  path: string;
+  version?: string;
+  target?: string;
+  on_path?: boolean;
+};
+
+const compilersOf = async (
+  compilers: readonly CompilerDescriptor[],
+): Promise<readonly ReportedCompiler[]> => {
+  const provider = providerWith(compilers);
+  const report = await new DoctorService({
+    providers: [provider],
+    toolchainFor: () => provider,
+  }).doctor({}, createRecorder(), new AbortController().signal);
+  return report.toolchains[0]?.compilers ?? [];
+};
+
+describe("the report's account of where a compiler was found", () => {
+  it("says a compiler found on PATH was on PATH", async () => {
+    expect(await compilersOf([{ id: "gcc", path: "/usr/bin/g++", onPath: true }])).toEqual([
+      { id: "gcc", path: "/usr/bin/g++", on_path: true },
+    ]);
+  });
+
+  it("carries an MSVC located off PATH as found, not as a missing compiler", async () => {
+    const [compiler] = await compilersOf([
+      {
+        id: "msvc",
+        path: "C:\\VS\\VC\\Tools\\MSVC\\14.44\\bin\\Hostx64\\x64\\cl.exe",
+        onPath: false,
+      },
+    ]);
+
+    expect(compiler).toMatchObject({ id: "msvc", on_path: false });
+    // No version was read, and none is invented to fill the field.
+    expect(compiler).not.toHaveProperty("version");
+  });
+
+  it("leaves the question absent when the provider did not ask it", async () => {
+    const [compiler] = await compilersOf([{ id: "gcc", path: "/usr/bin/g++" }]);
+    expect(compiler).not.toHaveProperty("on_path");
   });
 });

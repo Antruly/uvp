@@ -71,6 +71,16 @@ export const doctorContract = defineTool({
             path: z.string(),
             version: z.string().optional(),
             target: z.string().optional(),
+            on_path: z
+              .boolean()
+              .optional()
+              .describe(
+                "Whether this compiler was found on this host's PATH. False means it was " +
+                  "located elsewhere — on Windows, an installed MSVC that Visual Studio only " +
+                  "puts on PATH inside a Developer Command Prompt — and `limitations` says what " +
+                  "it needs. Absent when the provider did not ask: a container's compilers are " +
+                  "not on this host's PATH at all.",
+              ),
           }),
         ),
         build_systems: z.array(

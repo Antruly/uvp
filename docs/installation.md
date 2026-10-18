@@ -221,6 +221,15 @@ uvp run .\svc --port 8090
 `uvp doctor --json` should report the prefix, the version, and the modules the
 archive's `uvcpp_config.h` defines.
 
+A plain PowerShell window does not have `cl.exe` on `PATH`; Visual Studio only
+adds it inside a Developer Command Prompt. When the `PATH` probe finds no
+compiler on Windows, `uvp doctor` asks Visual Studio's own locator
+(`vswhere.exe`) for an installed MSVC toolset and reports it with
+`on_path: false` and the environment it needs, instead of calling the compiler
+missing. CMake's Visual Studio generator builds with that toolset; the Ninja
+route above needs a Developer Command Prompt, or any shell where `vcvarsall.bat`
+has run.
+
 ### Route 3 — install a distribution package (RPM, deb)
 
 The 1.7.4 release page also publishes RPM and deb packages, split the way
@@ -377,6 +386,12 @@ uvp sees it, so `--request GET /healthz` becomes `C:/Program Files/Git/healthz`.
 Set `MSYS_NO_PATHCONV=1` (Git for Windows) or `MSYS2_ARG_CONV_EXCL='*'` (MSYS2)
 and rerun the pass. The same applies to any other argument that is meant to be a
 POSIX path.
+
+**`uvp doctor` reports `msvc` with `on_path: false`, or a Ninja build says it
+cannot find a compiler.** `cl.exe` is only on `PATH` inside a Developer Command
+Prompt. The doctor found the installed toolset through Visual Studio's locator
+and reports where it is; build with the default Visual Studio generator, or open
+a Developer Command Prompt (or run `vcvarsall.bat x64`) before the Ninja build.
 
 ## Next
 

@@ -24,6 +24,22 @@ export interface CompilerDescriptor {
   readonly path: string;
   readonly version?: string;
   readonly target?: string;
+  /**
+   * Whether this compiler was found on the host's `PATH`.
+   *
+   * Tri-state on purpose. `true` and `false` are observations: the local
+   * provider runs its `PATH` probe, and on Windows also asks Visual Studio's
+   * locator where an installed MSVC toolset is. Absent means the question was
+   * not asked — a container's compilers live in the image, not on this host's
+   * `PATH`, and reporting `false` there would be a claim about a path that does
+   * not exist.
+   *
+   * The distinction is what [#224](https://github.com/Antruly/uvp/issues/224)
+   * is about: an MSVC that is installed but only reachable from a Developer
+   * Command Prompt is not an absent compiler, and reporting it as `missing`
+   * turned "the probe could not see it" into "this host cannot compile".
+   */
+  readonly onPath?: boolean;
 }
 
 export interface BuildSystemDescriptor {
