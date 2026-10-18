@@ -65,6 +65,7 @@ const MANIFEST_KEYS = new Set([
   "license",
   "provenance",
   "preview",
+  "routes",
 ]);
 
 const urlProblem = (value: string): string | undefined => {
@@ -428,6 +429,41 @@ function readPreview(record: Record<string, unknown>, problems: Problems): strin
   return preview;
 }
 
+/** `METHOD /path`, the same spelling `uvp_workspace_create` reports. */
+const ROUTE_PATTERN = /^[A-Z][A-Z0-9-]* \/\S*$/u;
+
+function readRoutes(
+  record: Record<string, unknown>,
+  limits: TemplatePackageLimits,
+  problems: Problems,
+): readonly string[] | undefined {
+  const routes = record["routes"];
+  if (routes === undefined) return undefined;
+  if (!Array.isArray(routes)) {
+    problems.add("routes", "must be an array");
+    return undefined;
+  }
+  if (routes.length > limits.maxRoutes) {
+    problems.add("routes", `contains more than ${limits.maxRoutes} routes`);
+  }
+  const seen = new Set<string>();
+  for (const [index, route] of routes.entries()) {
+    if (typeof route !== "string" || !ROUTE_PATTERN.test(route)) {
+      problems.add(
+        `routes[${index}]`,
+        "must be 'METHOD /path' with an uppercase method and no whitespace in the path",
+      );
+      continue;
+    }
+    if (route.length > limits.maxRouteLength) {
+      problems.add(`routes[${index}]`, `is longer than ${limits.maxRouteLength} characters`);
+    }
+    if (seen.has(route)) problems.add(`routes[${index}]`, `duplicates '${route}'`);
+    seen.add(route);
+  }
+  return routes as readonly string[];
+}
+
 function validateManifest(
   value: unknown,
   observations: readonly TemplatePackageFileObservation[] | undefined,
@@ -455,6 +491,7 @@ function validateManifest(
   const license = readLicense(value, limits, problems);
   const provenance = readProvenance(value, limits, problems);
   const preview = readPreview(value, problems);
+  const routes = readRoutes(value, limits, problems);
   if (files !== undefined && observations !== undefined) {
     compareObservations(files, observations, limits, problems);
   }
@@ -485,6 +522,7 @@ function validateManifest(
     license,
     provenance,
     ...(preview === undefined ? {} : { preview }),
+    ...(routes === undefined ? {} : { routes }),
   };
 }
 

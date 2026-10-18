@@ -104,6 +104,8 @@ export interface StoredTemplatePackage {
   readonly digest: string;
   readonly files: readonly TemplatePackageFile[];
   readonly preview?: string;
+  /** The routes the package declares, as `METHOD /path`. */
+  readonly routes?: readonly string[];
   readonly unverified: boolean;
   /** The directory this package occupies in the store. */
   readonly path: string;
@@ -498,6 +500,7 @@ const storedFields = (validated: ValidatedPackage): InspectedTemplatePackage => 
     digest: validated.digest,
     files: validated.files,
     ...(manifest.preview === undefined ? {} : { preview: manifest.preview }),
+    ...(manifest.routes === undefined ? {} : { routes: manifest.routes }),
     unverified: validated.unverified,
   };
 };

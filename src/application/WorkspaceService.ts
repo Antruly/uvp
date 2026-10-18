@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
 import { Buffer } from "node:buffer";
 
 import { UvpFailure, cancelledFailure } from "../domain/errors.js";
@@ -50,6 +51,11 @@ import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
 import { manifestOf, manifestProblemFailure, readWorkspaceManifest } from "./workspaceManifest.js";
 import { workspaceIdOf } from "./workspaceIdentity.js";
+import {
+  getTemplatePackage,
+  TemplateStoreError,
+  type StoredTemplatePackage,
+} from "./TemplateStore.js";
 
 export interface CreatedFile {
   readonly path: string;
@@ -61,6 +67,15 @@ export interface CreateWorkspaceResult {
   readonly workspaceId: string;
   readonly path: string;
   readonly template: string;
+  /**
+   * When the workspace was generated from a template package, the exact package
+   * it came from and the digest recorded in `uvp.json`.
+   */
+  readonly templatePackage?: {
+    readonly id: string;
+    readonly version: string;
+    readonly digest: string;
+  };
   /**
    * The application modules the workspace was born with, in canonical order.
    *
@@ -589,6 +604,206 @@ export class WorkspaceService {
       frontends,
       files: created,
       routes: templateRoutes(input.template, input.features, modules, frontends),
+      nextSteps: [
+        `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
+        `cmake --build ${join(root, "build")}`,
+        `${join(root, "build", input.name)}`,
+      ],
+    };
+  }
+
+  /**
+   * Generate a workspace from an imported template package.
+   *
+   * The package is data: its `files/` tree is copied with the three v1
+   * placeholders substituted, and `uvp.json` records the exact package and
+   * digest. Routes come from the manifest, never from the source; an absent
+   * `routes` field produces `routes: []` and the adapter reports the limitation.
+   *
+   * Files under `assets/` are copied byte for byte: a placeholder substituted
+   * into an image or font would corrupt it. Every other file must decode as
+   * UTF-8 and may contain only the three v1 placeholders; an unresolved
+   * placeholder is refused rather than written literally into a compiled file.
+   */
+  async createFromTemplatePackage(input: {
+    path: string;
+    name: string;
+    port: number;
+    force: boolean;
+    templatePackage: { readonly id: string; readonly version: string };
+  }): Promise<CreateWorkspaceResult> {
+    const root = resolve(input.path);
+    const entries = await directoryEntries(root);
+    const meaningful = entries.filter((entry) => entry !== "." && entry !== "..");
+    if (!input.force && meaningful.length > 0) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message: `Refusing to write into ${root}: it already contains ${String(meaningful.length)} entries.`,
+        remediation: {
+          action:
+            "Choose an empty directory, or pass force=true to write alongside the existing files.",
+        },
+        details: { entries: meaningful.slice(0, 20) },
+      });
+    }
+
+    const reference = `${input.templatePackage.id}@${input.templatePackage.version}`;
+    let pkg: StoredTemplatePackage;
+    try {
+      pkg = await getTemplatePackage(input.templatePackage.id, input.templatePackage.version);
+    } catch (error) {
+      if (error instanceof TemplateStoreError) {
+        throw new UvpFailure({
+          code: "invalid_request",
+          message: `The template package ${reference} could not be read: ${error.message}`,
+          remediation: {
+            action:
+              error.code === "not_found"
+                ? "Import it first with `uvp template import <dir>`, then run init again."
+                : "Repair the store entry with `uvp template validate`, then re-import it.",
+          },
+          details: {
+            code: error.code,
+            ...(error.details.length === 0 ? {} : { problems: [...error.details] }),
+          },
+        });
+      }
+      throw error;
+    }
+
+    const features = pkg.requires?.features ?? [];
+    const replacements: readonly (readonly [string, string])[] = [
+      ["{{project.name}}", input.name],
+      ["{{project.port}}", String(input.port)],
+      ["{{features}}", features.join(",")],
+    ];
+    const rendered: { path: string; content: Buffer }[] = [];
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+
+    const walk = async (directory: string, relative: string): Promise<void> => {
+      const children = await readdir(directory, { withFileTypes: true });
+      for (const child of children) {
+        const childRelative = relative === "" ? child.name : `${relative}/${child.name}`;
+        const source = join(directory, child.name);
+        if (child.isSymbolicLink()) {
+          throw new UvpFailure({
+            code: "workspace_integrity_mismatch",
+            message: `The stored package changed after it was read: '${childRelative}' is a symbolic link.`,
+            remediation: { action: "Re-import the package and try again." },
+          });
+        }
+        if (child.isDirectory()) {
+          await walk(source, childRelative);
+          continue;
+        }
+        if (!child.isFile()) {
+          throw new UvpFailure({
+            code: "workspace_integrity_mismatch",
+            message: `The stored package changed after it was read: '${childRelative}' is not a regular file.`,
+            remediation: { action: "Re-import the package and try again." },
+          });
+        }
+        const content = await readFile(source);
+        // Assets are copied byte for byte: substituting into an image or font
+        // would corrupt it, and the package format allows placeholders in the
+        // source tree, not in binary assets.
+        if (childRelative.startsWith("assets/")) {
+          rendered.push({ path: childRelative, content });
+          continue;
+        }
+        let text: string;
+        try {
+          text = decoder.decode(content);
+        } catch {
+          throw new UvpFailure({
+            code: "invalid_request",
+            message: `The package's '${childRelative}' is not valid UTF-8 and is not under assets/.`,
+            remediation: {
+              action: "Move a binary asset under assets/, or save the file as UTF-8 text.",
+            },
+          });
+        }
+        for (const [token, value] of replacements) text = text.split(token).join(value);
+        const unresolved = /\{\{[^}]*\}\}/u.exec(text);
+        if (unresolved !== null) {
+          throw new UvpFailure({
+            code: "invalid_request",
+            message: `The package's '${childRelative}' contains an unresolved placeholder '${unresolved[0]}'.`,
+            remediation: {
+              action:
+                "A v1 package may use only {{project.name}}, {{project.port}}, and {{features}}.",
+            },
+          });
+        }
+        rendered.push({ path: childRelative, content: Buffer.from(text, "utf8") });
+      }
+    };
+    await walk(join(pkg.path, "files"), "");
+
+    const manifest = {
+      name: input.name,
+      port: input.port,
+      scheme: features.includes("tls") ? "https" : "http",
+      ...(features.length === 0 ? {} : { features }),
+      ...(pkg.requires?.libuvcpp === undefined ? {} : { requiredLibuvcpp: pkg.requires.libuvcpp }),
+      template_package: { id: pkg.id, version: pkg.version, digest: pkg.digest },
+    };
+    rendered.push({
+      path: "uvp.json",
+      content: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
+    });
+
+    const created: CreatedFile[] = [];
+    if (input.force && meaningful.length > 0) {
+      // `force` writes alongside existing files; the staged rename below is for
+      // an absent or empty target. A force write is not atomic, and the result
+      // does not claim it is.
+      for (const file of rendered) {
+        const target = join(root, file.path);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, file.content);
+        created.push({
+          path: target,
+          bytes: file.content.byteLength,
+          digest: sha256(file.content),
+        });
+      }
+    } else {
+      const parent = dirname(root);
+      await mkdir(parent, { recursive: true });
+      const staging = join(parent, `.${basename(root)}.uvp-package-${randomUUID()}`);
+      await mkdir(staging, { recursive: true });
+      try {
+        for (const file of rendered) {
+          const target = join(staging, file.path);
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, file.content);
+        }
+        if (meaningful.length > 0) await rm(root, { recursive: true, force: true });
+        await rename(staging, root);
+      } catch (error) {
+        await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+      }
+      for (const file of rendered) {
+        const target = join(root, file.path);
+        created.push({
+          path: target,
+          bytes: file.content.byteLength,
+          digest: sha256(file.content),
+        });
+      }
+    }
+
+    return {
+      workspaceId: workspaceIdOf(root),
+      path: root,
+      template: pkg.id,
+      templatePackage: { id: pkg.id, version: pkg.version, digest: pkg.digest },
+      modules: [],
+      frontends: [],
+      files: created,
+      routes: pkg.routes === undefined ? [] : [...pkg.routes],
       nextSteps: [
         `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
         `cmake --build ${join(root, "build")}`,

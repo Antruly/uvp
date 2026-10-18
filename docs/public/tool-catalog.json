@@ -479,7 +479,7 @@
             "description": "Project name; used for the CMake target and the default binary name. Use letters, digits, '_', '.', '+' or '-', starting with a letter, digit or '_'; CMake's reserved target names, Windows device names, and a trailing dot are not allowed."
           },
           "template": {
-            "default": "hello-http",
+            "description": "A built-in template. Omit it to use `hello-http`; mutually exclusive with `template_package`.",
             "type": "string",
             "enum": [
               "hello-http",
@@ -491,11 +491,26 @@
               "http3-service"
             ]
           },
+          "template_package": {
+            "description": "Generate from an imported `uvp.template/1` package instead of a built-in template. The package's files are rendered with `{{project.name}}`, `{{project.port}}`, and `{{features}}`, and `uvp.json` records its id, version, and digest. Mutually exclusive with `template`; `modules`, `frontends`, `event_payloads`, and `features` are built-in-template selections and are refused with a package.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "version"
+            ]
+          },
           "features": {
-            "default": [
-              "websocket"
-            ],
-            "description": "Transport and service modules to build against. Each is checked against the installed libuvcpp build, not assumed: a feature the build lacks is reported before compiling. `db` also changes what the generated service keeps, on the one template that keeps anything: `rest-api` is written with libuvcpp's connection pool in place of its in-memory map, and the other templates carry it as a build requirement only.",
+            "description": "Transport and service modules to build against. Absent means `websocket` for a built-in template; a template package declares its features in its manifest and refuses a caller-supplied list. Each feature is checked against the installed libuvcpp build, not assumed: a feature the build lacks is reported before compiling. `db` also changes what the generated service keeps, on the one template that keeps anything: `rest-api` is written with libuvcpp's connection pool in place of its in-memory map, and the other templates carry it as a build requirement only.",
             "type": "array",
             "items": {
               "type": "string",
@@ -742,6 +757,26 @@
           "template": {
             "type": "string"
           },
+          "template_package": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "digest"
+            ],
+            "additionalProperties": false
+          },
           "modules": {
             "type": "array",
             "items": {
@@ -846,6 +881,17 @@
             "name": "svc",
             "template": "rest-api",
             "port": 8080
+          }
+        },
+        {
+          "description": "A workspace generated from an imported template package",
+          "input": {
+            "path": "/home/dev/svc",
+            "name": "svc",
+            "template_package": {
+              "id": "acme-dashboard",
+              "version": "1.2.0"
+            }
           }
         }
       ]
@@ -1678,6 +1724,13 @@
           "preview": {
             "type": "string"
           },
+          "routes": {
+            "description": "The routes the package declares, as `METHOD /path`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "unverified": {
             "type": "boolean",
             "description": "True only when the package was admitted without licence or provenance."
@@ -2058,6 +2111,13 @@
           },
           "preview": {
             "type": "string"
+          },
+          "routes": {
+            "description": "The routes the package declares, as `METHOD /path`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "unverified": {
             "type": "boolean",
@@ -2447,6 +2507,13 @@
           },
           "preview": {
             "type": "string"
+          },
+          "routes": {
+            "description": "The routes the package declares, as `METHOD /path`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "unverified": {
             "type": "boolean",

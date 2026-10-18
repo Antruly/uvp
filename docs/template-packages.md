@@ -8,10 +8,11 @@ package that disagrees with them is refused rather than repaired.
 
 ## Status
 
-This page documents the **schema and validator** (P1 of #236). The local store,
-the directory/zip reader, search, rendering, and the tool contracts that will
-consume a package are later increments. Until those land, no `uvp` command reads
-a package; the format is published so that authoring one does not have to guess.
+This page documents the **schema, validator, local store, and rendering** of
+the template-package increments of #236. The store, search, inspect/export,
+scan, and the CLI/MCP tools are implemented; `uvp init --template-package`
+renders a package into a workspace. The registry runtime lane is a separate
+claim and stays off until a published uvp exposes the template commands.
 
 ## Package layout
 
@@ -50,6 +51,7 @@ with `files/`.
     "name": { "type": "slug", "required": true, "default": "acme-dashboard" },
     "port": { "type": "port", "default": 8080 }
   },
+  "routes": ["GET /hello", "WS /ws"],
   "files": [
     {
       "path": "src/main.cc",
@@ -92,6 +94,7 @@ manifest would silently drop it.
 | `license`           | yes      | `spdx` or `name`, and `file: "LICENSE"`                                                          |
 | `provenance`        | yes      | `author`, `createdAt`; optional `source` and `revision`                                          |
 | `preview`           | no       | `preview.png`, `preview.svg`, or `preview.webp`                                                  |
+| `routes`            | no       | at most 64 entries, each `METHOD /path` with an uppercase method; unique                         |
 
 `name`, `description`, `license.name`, and `provenance.author` may not contain
 control characters. They appear in search results and reports, and a control
@@ -118,6 +121,8 @@ before the store's own checks run.
 | revision                   | 120 characters  |
 | licence name               | 80 characters   |
 | SPDX identifier            | 64 characters   |
+| routes per package         | 64              |
+| one route                  | 200 characters  |
 
 ## Paths
 
@@ -156,7 +161,27 @@ A v1 package may use three placeholders in `files/`:
 | <span v-pre>`{{features}}`</span>     | `requires.features`                             |
 
 There are no conditional placeholders in v1. A variable for any other
-placeholder is refused, because it would render literally into a compiled file.
+placeholder is refused, and the renderer also refuses an unresolved <span v-pre>`{{...}}`</span>
+placeholder in a text file rather than writing it literally. Files under
+`assets/` are copied byte for byte, so a placeholder in an image or font is not
+substituted.
+
+## Init integration
+
+`uvp init <dir> --template-package id@version` reads the package from the local
+store and writes its `files/` tree at the workspace root, substituting the three
+placeholders in UTF-8 text files. The package must be imported first
+(`uvp template import <dir>`); `--template` and `--template-package` are mutually
+exclusive.
+
+`uvp.json` records `template_package: { id, version, digest }` and the package's
+`requires.features`; a package workspace has no `template` field. The result's
+`routes` comes from the manifest's optional `routes` array, never from the
+source; when the field is absent, the result reports `routes: []` with a
+limitation. `--features`, `--modules`, `--frontends`, and `--event-payloads` are
+built-in-template selections and are refused with a package. The package's CMake
+target should use <span v-pre>`{{project.name}}`</span>, which is also the default binary name
+`uvp run` looks for.
 
 ## What validation establishes
 

@@ -155,23 +155,23 @@ That last rule is the one that shapes everything else. A tool that says
 
 ## What uvp can do
 
-| Task                                                           | Tools                                                                                                                                   |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Check the toolchain and which libuvcpp modules are present     | `uvp_doctor`                                                                                                                            |
-| Scaffold a buildable project (7 templates)                     | `uvp_workspace_create`                                                                                                                  |
-| Search, validate, import, export, and remove template packages | `uvp_template_search`, `uvp_template_get`, `uvp_template_validate`, `uvp_template_import`, `uvp_template_export`, `uvp_template_remove` |
-| Configure and build with CMake                                 | `uvp_build`                                                                                                                             |
-| Install and build a generated Node frontend app                | `uvp_frontend_build`                                                                                                                    |
-| Start a service and wait for it to actually answer             | `uvp_run`, `uvp_run_stop`                                                                                                               |
-| Drive HTTP/1.1, HTTP/2, and HTTP/3 requests, and report TLS    | `uvp_http_request`                                                                                                                      |
-| Probe a WebSocket endpoint                                     | `uvp_websocket_probe`                                                                                                                   |
-| Post a SOAP envelope and read the reply                        | `uvp_soap_call`                                                                                                                         |
-| Measure throughput and latency percentiles                     | `uvp_load_test`                                                                                                                         |
-| Record a session of exchanges for later reading                | `uvp_capture_start`, `uvp_capture_read`                                                                                                 |
-| Replay a recorded session against a live target                | `uvp_capture_replay`                                                                                                                    |
-| Evaluate assertions against a recorded exchange                | `uvp_assert_exchange`                                                                                                                   |
-| Do all of the above as one supervised pass                     | `uvp_verify`                                                                                                                            |
-| Compare two verification reports and see what moved            | `uvp_bundle_diff`                                                                                                                       |
+| Task                                                                                              | Tools                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Check the toolchain and which libuvcpp modules are present                                        | `uvp_doctor`                                                                                                                                                                         |
+| Scaffold a buildable project (7 templates)                                                        | `uvp_workspace_create`                                                                                                                                                               |
+| Search, validate, import, export, and remove template packages, and generate a workspace from one | `uvp_template_search`, `uvp_template_get`, `uvp_template_validate`, `uvp_template_import`, `uvp_template_export`, `uvp_template_remove`; `uvp_workspace_create` (`template_package`) |
+| Configure and build with CMake                                                                    | `uvp_build`                                                                                                                                                                          |
+| Install and build a generated Node frontend app                                                   | `uvp_frontend_build`                                                                                                                                                                 |
+| Start a service and wait for it to actually answer                                                | `uvp_run`, `uvp_run_stop`                                                                                                                                                            |
+| Drive HTTP/1.1, HTTP/2, and HTTP/3 requests, and report TLS                                       | `uvp_http_request`                                                                                                                                                                   |
+| Probe a WebSocket endpoint                                                                        | `uvp_websocket_probe`                                                                                                                                                                |
+| Post a SOAP envelope and read the reply                                                           | `uvp_soap_call`                                                                                                                                                                      |
+| Measure throughput and latency percentiles                                                        | `uvp_load_test`                                                                                                                                                                      |
+| Record a session of exchanges for later reading                                                   | `uvp_capture_start`, `uvp_capture_read`                                                                                                                                              |
+| Replay a recorded session against a live target                                                   | `uvp_capture_replay`                                                                                                                                                                 |
+| Evaluate assertions against a recorded exchange                                                   | `uvp_assert_exchange`                                                                                                                                                                |
+| Do all of the above as one supervised pass                                                        | `uvp_verify`                                                                                                                                                                         |
+| Compare two verification reports and see what moved                                               | `uvp_bundle_diff`                                                                                                                                                                    |
 
 Templates: `hello-http`, `rest-api`, `websocket-echo`, `websocket-test`,
 `soap-service`, `static-files`, `http3-service`.
@@ -259,9 +259,9 @@ package format for templates, and ships the local store, deterministic search,
 inspect/export, and a bounded secret/PII scan as application modules. It also
 adds a read client for the `uvp.registry/1` index used by the official registry,
 [Antruly/uvp-templates](https://github.com/Antruly/uvp-templates). The CLI and MCP
-tools (`uvp_template_*`) are present for the next release; 0.3.0 does not expose
-them, and `uvp init --template-package` remains the P6 increment. The registry
-does not claim a build-verified package until its runtime lane is enabled.
+tools (`uvp_template_*`) and `uvp init --template-package` are implemented on
+`main` for the next release; 0.3.0 does not expose them. The registry does not
+claim a build-verified package until its runtime lane is enabled.
 
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp

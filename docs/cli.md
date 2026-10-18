@@ -134,6 +134,33 @@ The switches that would enable them are emitted as comments in the generated
 `CMakeLists.txt`, because a feature cannot be retrofitted into an installed
 library.
 
+### Template packages
+
+```bash
+uvp init ./svc --name svc --template-package acme-dashboard@1.2.0
+```
+
+`--template-package ID@VERSION` generates from an imported `uvp.template/1`
+package instead of a built-in template. The package must already be in the local
+store (`uvp template import <dir>`); `--template` and `--template-package` are
+mutually exclusive, and omitting both uses `hello-http`.
+
+The package's `files/` tree is written at the workspace root. Three placeholders
+are substituted in UTF-8 text files: <span v-pre>`{{project.name}}`</span>, <span v-pre>`{{project.port}}`</span>, and
+<span v-pre>`{{features}}`</span> (the package's `requires.features`, comma-separated). Files under
+`assets/` are copied byte for byte. An unresolved <span v-pre>`{{...}}`</span> placeholder is
+refused rather than written into a compiled file, and a non-UTF-8 file outside
+`assets/` is refused too.
+
+`uvp.json` records `template_package: {id, version, digest}` and the package's
+features; a package workspace has no `template` field. The result's `routes`
+comes from the manifest's optional `routes` array; when it is absent, the result
+reports `routes: []` with a limitation rather than deriving routes from source.
+`--features`, `--modules`, `--frontends`, and `--event-payloads` are
+built-in-template selections and are refused with a package. The package's CMake
+target should use <span v-pre>`{{project.name}}`</span>, which is also the default binary name
+`uvp run` looks for.
+
 ### Application modules
 
 `--modules` composes uvp's own application code into the template. These are not

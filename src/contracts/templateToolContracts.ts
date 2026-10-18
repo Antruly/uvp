@@ -79,6 +79,10 @@ const packageFields = {
   digest: z.string().describe("The package digest over the manifest's canonical JSON."),
   files: z.array(packageFile),
   preview: z.string().optional(),
+  routes: z
+    .array(z.string())
+    .optional()
+    .describe("The routes the package declares, as `METHOD /path`."),
   unverified: z
     .boolean()
     .describe("True only when the package was admitted without licence or provenance."),

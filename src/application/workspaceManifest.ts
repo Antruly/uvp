@@ -33,6 +33,18 @@ export interface WorkspaceManifest {
   readonly port?: number;
   readonly template?: string;
   /**
+   * When the workspace came from a template package, the exact source and the
+   * digest that was recorded when it was generated.
+   *
+   * Mutually exclusive with `template`: a workspace has one source. A file that
+   * declares both is reported as unreadable rather than choosing one.
+   */
+  readonly templatePackage?: {
+    readonly id: string;
+    readonly version: string;
+    readonly digest: string;
+  };
+  /**
    * The transport this workspace's service answers on.
    *
    * Derived from `features` rather than read from a field of its own, and that is
@@ -334,6 +346,37 @@ export const readWorkspaceManifest = async (
   const port = parsed["port"];
   const { toolchain, problem: toolchainProblem } = readToolchain(parsed["toolchain"]);
 
+  const templatePackageValue = parsed["template_package"];
+  let templatePackage:
+    | { readonly id: string; readonly version: string; readonly digest: string }
+    | undefined;
+  if (templatePackageValue !== undefined) {
+    if (!isRecord(templatePackageValue)) {
+      return {
+        state: "unreadable",
+        problem: `${manifestName} declares \`template_package\` and it is not an object`,
+      };
+    }
+    const id = asString(templatePackageValue["id"]);
+    const version = asString(templatePackageValue["version"]);
+    const digest = asString(templatePackageValue["digest"]);
+    if (id === undefined || version === undefined || digest === undefined) {
+      return {
+        state: "unreadable",
+        problem:
+          `${manifestName} declares \`template_package\` without string ` +
+          "`id`, `version`, and `digest` fields",
+      };
+    }
+    if (template !== undefined) {
+      return {
+        state: "unreadable",
+        problem: `${manifestName} declares both \`template\` and \`template_package\``,
+      };
+    }
+    templatePackage = { id, version, digest };
+  }
+
   return {
     state: "read",
     manifest: {
@@ -341,6 +384,7 @@ export const readWorkspaceManifest = async (
       ...(binary === undefined ? {} : { binary }),
       ...(typeof port === "number" && Number.isInteger(port) ? { port } : {}),
       ...(template === undefined ? {} : { template }),
+      ...(templatePackage === undefined ? {} : { templatePackage }),
       // `https` only for a workspace that declares `tls`, and for no other
       // reason. A workspace with no manifest at all is not read here — the
       // caller gets `absent` and applies its own default, so "no manifest"

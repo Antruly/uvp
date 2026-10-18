@@ -8,11 +8,25 @@ import { UVP_EVENT_PAYLOAD_POLICIES } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import { UVP_FRONTEND_APPS, UVP_FRONTEND_SELECTIONS } from "../domain/frontends.js";
 import { UVP_MODULES } from "../domain/modules.js";
+import { parseTemplatePackageVersion } from "../domain/templatePackage.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
 
 const workspaceIdSchema = z.string().regex(/^wsp_[0-9a-f]{22}$/u);
 const runIdSchema = z.string().regex(/^run_[0-9a-f]{22}$/u);
+const packageIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, "must be a lowercase slug")
+  .max(64);
+const templatePackageSchema = z.object({
+  id: packageIdSchema,
+  version: z
+    .string()
+    .refine(
+      (value) => parseTemplatePackageVersion(value) !== undefined,
+      "must be SemVer 2.0.0 without a range",
+    ),
+});
 
 /**
  * Workspace creation.
@@ -31,85 +45,109 @@ export const workspaceCreateContract = defineTool({
     "manifest with digests and the routes the generated service registers, so the first request " +
     "can be made without reading the generated source.",
   kind: "workspace",
-  inputSchema: z.object({
-    path: z.string().min(1).describe("Absolute path to create the workspace at."),
-    name: z
-      .string()
-      .min(1)
-      .regex(WORKSPACE_NAME_PATTERN, WORKSPACE_NAME_MESSAGE)
-      .describe(
-        "Project name; used for the CMake target and the default binary name. " +
-          WORKSPACE_NAME_MESSAGE,
-      ),
-    template: z
-      .enum([
-        "hello-http",
-        "rest-api",
-        "websocket-echo",
-        "websocket-test",
-        "soap-service",
-        "static-files",
-        "http3-service",
-      ])
-      .default("hello-http"),
-    features: z
-      .array(z.enum(UVP_FEATURES))
-      .default(["websocket"])
-      .describe(
-        "Transport and service modules to build against. Each is checked against the installed " +
-          "libuvcpp build, not assumed: a feature the build lacks is reported before compiling. " +
-          "`db` also changes what the generated service keeps, on the one template that keeps " +
-          "anything: `rest-api` is written with libuvcpp's connection pool in place of its " +
-          "in-memory map, and the other templates carry it as a build requirement only.",
-      ),
-    port: z.number().int().min(1).max(65535).default(8080),
-    modules: z
-      .array(z.enum(UVP_MODULES))
-      .optional()
-      .describe(
-        "Application modules to compose into the generated service. Absent means the template's " +
-          "own default: `websocket-test` composes `health`, `echo-log`, `websocket-echo` and " +
-          "`static-console`, and every other template none; `evidence-log` is opt-in everywhere. " +
-          "`websocket-echo` needs the `websocket` feature, and `static-console` composes " +
-          "`websocket-echo` and `echo-log`. A module whose exact route the template already " +
-          "serves is refused, as is any module on `http3-service`.",
-      ),
-    event_payloads: z
-      .enum(UVP_EVENT_PAYLOAD_POLICIES)
-      .optional()
-      .describe(
-        "What the evidence log keeps of a text message payload. `summary` (the default) keeps " +
-          "the length and an FNV-1a hash, so the log can correlate messages without retaining " +
-          "their bodies; `verbatim` keeps the text itself. Recorded in `uvp.json` and reported " +
-          "by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
-      ),
-    frontends: z
-      .array(z.enum(UVP_FRONTEND_SELECTIONS))
-      .optional()
-      .describe(
-        "Frontends to generate. Static page sets (`h5-minimal`, `h5-dashboard`, `h5-tech`) are " +
-          "written under `public/<name>/` and served from the workspace's document root; the page " +
-          "at `/` lists them unless the template's own page already owns `/`. Frontend apps " +
-          "(`vue3`, `react`, `svelte`) write a standalone `frontend/` Vite project instead: it is " +
-          "not part of `uvp build`, Node is never required to generate, build, or run the C++ " +
-          "workspace, and the service serves `frontend/dist` at `/` when that build output exists " +
-          "at startup. Until then `/` answers 503 with the build instruction. At most one app per " +
-          "workspace, and an app cannot be combined with static page sets or with a template that " +
-          "already owns the document root. Absent or empty means no frontend; a template with its " +
-          "own page keeps that page either way. Refused on `http3-service`, whose generated source " +
-          "registers no static document root. Every generated page uses local assets only: no CDN, " +
-          "external font, or remote script.",
-      ),
-    force: z
-      .boolean()
-      .default(false)
-      .describe("Allow writing into a directory that already contains files."),
-  }),
+  inputSchema: z
+    .object({
+      path: z.string().min(1).describe("Absolute path to create the workspace at."),
+      name: z
+        .string()
+        .min(1)
+        .regex(WORKSPACE_NAME_PATTERN, WORKSPACE_NAME_MESSAGE)
+        .describe(
+          "Project name; used for the CMake target and the default binary name. " +
+            WORKSPACE_NAME_MESSAGE,
+        ),
+      template: z
+        .enum([
+          "hello-http",
+          "rest-api",
+          "websocket-echo",
+          "websocket-test",
+          "soap-service",
+          "static-files",
+          "http3-service",
+        ])
+        .optional()
+        .describe(
+          "A built-in template. Omit it to use `hello-http`; mutually exclusive with " +
+            "`template_package`.",
+        ),
+      template_package: templatePackageSchema
+        .optional()
+        .describe(
+          "Generate from an imported `uvp.template/1` package instead of a built-in template. " +
+            "The package's files are rendered with `{{project.name}}`, `{{project.port}}`, and " +
+            "`{{features}}`, and `uvp.json` records its id, version, and digest. Mutually " +
+            "exclusive with `template`; `modules`, `frontends`, `event_payloads`, and `features` " +
+            "are built-in-template selections and are refused with a package.",
+        ),
+      features: z
+        .array(z.enum(UVP_FEATURES))
+        .optional()
+        .describe(
+          "Transport and service modules to build against. Absent means `websocket` for a " +
+            "built-in template; a template package declares its features in its manifest and " +
+            "refuses a caller-supplied list. Each feature is checked against the installed " +
+            "libuvcpp build, not assumed: a feature the build lacks is reported before compiling. " +
+            "`db` also changes what the generated service keeps, on the one template that keeps " +
+            "anything: `rest-api` is written with libuvcpp's connection pool in place of its " +
+            "in-memory map, and the other templates carry it as a build requirement only.",
+        ),
+      port: z.number().int().min(1).max(65535).default(8080),
+      modules: z
+        .array(z.enum(UVP_MODULES))
+        .optional()
+        .describe(
+          "Application modules to compose into the generated service. Absent means the template's " +
+            "own default: `websocket-test` composes `health`, `echo-log`, `websocket-echo` and " +
+            "`static-console`, and every other template none; `evidence-log` is opt-in everywhere. " +
+            "`websocket-echo` needs the `websocket` feature, and `static-console` composes " +
+            "`websocket-echo` and `echo-log`. A module whose exact route the template already " +
+            "serves is refused, as is any module on `http3-service`.",
+        ),
+      event_payloads: z
+        .enum(UVP_EVENT_PAYLOAD_POLICIES)
+        .optional()
+        .describe(
+          "What the evidence log keeps of a text message payload. `summary` (the default) keeps " +
+            "the length and an FNV-1a hash, so the log can correlate messages without retaining " +
+            "their bodies; `verbatim` keeps the text itself. Recorded in `uvp.json` and reported " +
+            "by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
+        ),
+      frontends: z
+        .array(z.enum(UVP_FRONTEND_SELECTIONS))
+        .optional()
+        .describe(
+          "Frontends to generate. Static page sets (`h5-minimal`, `h5-dashboard`, `h5-tech`) are " +
+            "written under `public/<name>/` and served from the workspace's document root; the page " +
+            "at `/` lists them unless the template's own page already owns `/`. Frontend apps " +
+            "(`vue3`, `react`, `svelte`) write a standalone `frontend/` Vite project instead: it is " +
+            "not part of `uvp build`, Node is never required to generate, build, or run the C++ " +
+            "workspace, and the service serves `frontend/dist` at `/` when that build output exists " +
+            "at startup. Until then `/` answers 503 with the build instruction. At most one app per " +
+            "workspace, and an app cannot be combined with static page sets or with a template that " +
+            "already owns the document root. Absent or empty means no frontend; a template with its " +
+            "own page keeps that page either way. Refused on `http3-service`, whose generated source " +
+            "registers no static document root. Every generated page uses local assets only: no CDN, " +
+            "external font, or remote script.",
+        ),
+      force: z
+        .boolean()
+        .default(false)
+        .describe("Allow writing into a directory that already contains files."),
+    })
+    .refine((value) => !(value.template !== undefined && value.template_package !== undefined), {
+      message: "`template` and `template_package` are mutually exclusive; pass one.",
+      path: ["template_package"],
+    }),
   outputSchema: z.object({
     ...toolEnvelopeShape,
     workspace_id: workspaceIdSchema,
     path: z.string(),
     template: z.string(),
+    /** Present when the workspace came from a template package. */
+    template_package: z
+      .object({ id: z.string(), version: z.string(), digest: z.string() })
+      .optional(),
     /**
      * The application modules the workspace was composed from, in canonical
      * order, after the template's default was applied and dependencies were
@@ -146,6 +184,14 @@ export const workspaceCreateContract = defineTool({
     {
       description: "A JSON API on port 8080 with WebSocket support",
       input: { path: "/home/dev/svc", name: "svc", template: "rest-api", port: 8080 },
+    },
+    {
+      description: "A workspace generated from an imported template package",
+      input: {
+        path: "/home/dev/svc",
+        name: "svc",
+        template_package: { id: "acme-dashboard", version: "1.2.0" },
+      },
     },
   ],
 });

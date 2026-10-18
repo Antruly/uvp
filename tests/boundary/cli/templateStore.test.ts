@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -113,5 +113,67 @@ describe("the template commands", () => {
     });
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("not in the store");
+  });
+
+  it("generates a workspace from an imported package", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({
+      root,
+      content: "// {{project.name}} {{project.port}} {{features}}\nint main() { return 0; }\n",
+      overrides: {
+        requires: { features: ["websocket"] },
+        routes: ["GET /hello"],
+      },
+    });
+    const imported = await run(["template", "import", fixture.dir, "--json"], env);
+    expect(imported.code).toBe(0);
+
+    const workspace = path.join(root, "ws");
+    const init = await run(
+      ["init", workspace, "--name", "acme", "--template-package", "acme-dashboard@1.2.0", "--json"],
+      env,
+    );
+    expect(init.code, init.stderr).toBe(0);
+    const output = json(init);
+    expect(output["template"]).toBe("acme-dashboard");
+    expect(output["template_package"]).toMatchObject({
+      id: "acme-dashboard",
+      version: "1.2.0",
+    });
+    expect(output["routes"]).toEqual(["GET /hello"]);
+
+    const rendered = await readFile(path.join(workspace, "src", "main.cc"), "utf8");
+    expect(rendered).toContain("// acme 8080 websocket");
+
+    const manifest = JSON.parse(await readFile(path.join(workspace, "uvp.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const templatePackage = manifest["template_package"] as Record<string, unknown>;
+    expect(templatePackage["id"]).toBe("acme-dashboard");
+    expect(templatePackage["version"]).toBe("1.2.0");
+    expect(manifest["features"]).toEqual(["websocket"]);
+    expect(manifest["scheme"]).toBe("http");
+  });
+
+  it("refuses both a built-in template and a template package", async () => {
+    const root = await temporaryRoot();
+    const result = await run(
+      [
+        "init",
+        path.join(root, "ws"),
+        "--name",
+        "acme",
+        "--template",
+        "hello-http",
+        "--template-package",
+        "acme-dashboard@1.2.0",
+      ],
+      { UVP_TEMPLATE_HOME: path.join(root, "store") },
+    );
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("both name a source");
   });
 });

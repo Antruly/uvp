@@ -84,6 +84,8 @@ export interface TemplatePackageLimits {
   readonly maxRevisionLength: number;
   readonly maxLicenseNameLength: number;
   readonly maxSpdxLength: number;
+  readonly maxRoutes: number;
+  readonly maxRouteLength: number;
 }
 
 export const DEFAULT_TEMPLATE_PACKAGE_LIMITS: TemplatePackageLimits = {
@@ -100,6 +102,8 @@ export const DEFAULT_TEMPLATE_PACKAGE_LIMITS: TemplatePackageLimits = {
   maxRevisionLength: 120,
   maxLicenseNameLength: 80,
   maxSpdxLength: 64,
+  maxRoutes: 64,
+  maxRouteLength: 200,
 };
 
 export interface TemplatePackageVariable {
@@ -160,6 +164,15 @@ export interface TemplatePackageManifest {
   readonly provenance: TemplatePackageProvenance;
   /** A root-level `preview.png`, `preview.svg`, or `preview.webp`. */
   readonly preview?: string;
+  /**
+   * The routes the generated service registers, as `METHOD /path`.
+   *
+   * Declared by the package rather than derived from its source: deriving them
+   * would be a second interpretation of code uvp does not execute. Absent means
+   * the package declares none, and `uvp init` reports `routes: []` with a
+   * limitation rather than guessing.
+   */
+  readonly routes?: readonly string[];
 }
 
 /**

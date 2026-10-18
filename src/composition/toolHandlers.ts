@@ -281,6 +281,7 @@ const templatePackageOutput = (
   digest: pkg.digest,
   files: pkg.files.map((file) => ({ path: file.path, bytes: file.bytes, digest: file.digest })),
   ...(pkg.preview === undefined ? {} : { preview: pkg.preview }),
+  ...(pkg.routes === undefined ? {} : { routes: [...pkg.routes] }),
   unverified: pkg.unverified,
 });
 
@@ -327,17 +328,51 @@ export const createToolHandlers = (
     [workspaceCreateContract.name]: handler(
       workspaceCreateContract.inputSchema,
       async (input, recorder) => {
-        const created = await services.workspace.create({
-          path: input.path,
-          name: input.name,
-          template: input.template,
-          features: input.features,
-          port: input.port,
-          force: input.force,
-          ...(input.modules === undefined ? {} : { modules: input.modules }),
-          ...(input.event_payloads === undefined ? {} : { eventPayloads: input.event_payloads }),
-          ...(input.frontends === undefined ? {} : { frontends: input.frontends }),
-        });
+        if (input.template_package !== undefined) {
+          const refused = [
+            ...(input.modules === undefined ? [] : ["modules"]),
+            ...(input.frontends === undefined ? [] : ["frontends"]),
+            ...(input.event_payloads === undefined ? [] : ["event_payloads"]),
+            ...(input.features === undefined || input.features.length === 0 ? [] : ["features"]),
+          ];
+          if (refused.length > 0) {
+            throw new UvpFailure({
+              code: "invalid_request",
+              message:
+                `A template package supplies its own files; ${refused.join(", ")} ` +
+                `${refused.length === 1 ? "is a built-in-template selection" : "are built-in-template selections"} ` +
+                "and cannot be combined with template_package.",
+              remediation: {
+                action:
+                  "Drop the built-in-template selection, or generate from a built-in template instead.",
+              },
+              details: { template_package: input.template_package, refused },
+            });
+          }
+        }
+
+        const created =
+          input.template_package === undefined
+            ? await services.workspace.create({
+                path: input.path,
+                name: input.name,
+                template: input.template ?? "hello-http",
+                features: input.features ?? ["websocket"],
+                port: input.port,
+                force: input.force,
+                ...(input.modules === undefined ? {} : { modules: input.modules }),
+                ...(input.event_payloads === undefined
+                  ? {}
+                  : { eventPayloads: input.event_payloads }),
+                ...(input.frontends === undefined ? {} : { frontends: input.frontends }),
+              })
+            : await services.workspace.createFromTemplatePackage({
+                path: input.path,
+                name: input.name,
+                port: input.port,
+                force: input.force,
+                templatePackage: input.template_package,
+              });
 
         record(recorder, {
           kind: "build",
@@ -360,11 +395,19 @@ export const createToolHandlers = (
             provider: identity,
             limitations: [
               "The generated project has not been compiled. Its first build is the evidence that it works.",
+              ...(input.template_package !== undefined && created.routes.length === 0
+                ? [
+                    "The package declares no routes; its source was not inspected to derive a route table.",
+                  ]
+                : []),
             ],
           }),
           workspace_id: created.workspaceId,
           path: created.path,
           template: created.template,
+          ...(created.templatePackage === undefined
+            ? {}
+            : { template_package: created.templatePackage }),
           modules: [...created.modules],
           frontends: [...created.frontends],
           files: created.files.map((file) => ({

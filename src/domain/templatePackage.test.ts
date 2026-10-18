@@ -456,6 +456,29 @@ describe("preview", () => {
   });
 });
 
+describe("routes", () => {
+  it("accepts METHOD /path routes and reports them", () => {
+    const result = check({ routes: ["GET /hello", "POST /api/items", "WS /ws"] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.routes).toEqual(["GET /hello", "POST /api/items", "WS /ws"]);
+  });
+
+  it("refuses a lowercase method, a duplicate, too many, and a non-list", () => {
+    rejects(check({ routes: ["get /hello"] }), "routes[0]");
+    rejects(check({ routes: ["GET /hello", "GET /hello"] }), "routes[1]", /duplicates/u);
+    rejects(
+      check({ routes: ["GET /a", "GET /b"] }, undefined, {
+        ...DEFAULT_TEMPLATE_PACKAGE_LIMITS,
+        maxRoutes: 1,
+      }),
+      "routes",
+      /more than 1/u,
+    );
+    rejects(check({ routes: "GET /hello" }), "routes", /array/u);
+  });
+});
+
 describe("file paths", () => {
   it.each([
     ["a source file", "src/main.cc", true],

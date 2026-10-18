@@ -126,6 +126,14 @@ app, and an app on `static-files`, `websocket-test`, `static-console`, or
 `http3-service` are refused before any file is written. The selection is
 recorded in `uvp.json` and reported beside `routes`.
 
+`template_package` generates from an imported `uvp.template/1` package instead
+of a built-in template. It is mutually exclusive with `template`; `features`,
+`modules`, `frontends`, and `event_payloads` are built-in-template selections
+and are refused with a package. The package's `files/` tree is rendered with
+<span v-pre>`{{project.name}}`</span>, <span v-pre>`{{project.port}}`</span>, and <span v-pre>`{{features}}`</span>; `uvp.json` records
+`template_package: { id, version, digest }`, and `routes` comes from the
+manifest's optional `routes` array (absent means `[]` plus a limitation).
+
 ### Template packages
 
 The six `uvp_template_*` tools read and write the local template store. The
@@ -154,6 +162,11 @@ stores.
   manifest before success is reported.
 - **`uvp_template_remove`** removes one version, or every version of an id,
   through quarantine. A failed cleanup is reported as `retained`.
+
+`search` returns metadata only; `get`, `validate`, and `import` return the
+package's optional `routes` array beside its manifest fields. `uvp init
+--template-package` renders those files into a workspace and records the
+package in `uvp.json`.
 
 `import`, `export`, and `remove` declare `mutatesTarget: true` because they
 change state outside the uvp workspace (the local store, or a caller-named

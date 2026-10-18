@@ -29,9 +29,9 @@ export const initCommand: CommandSpec = {
   tool: "uvp_workspace_create",
   summary: "Scaffold a buildable libuvcpp C++ project.",
   usage:
-    "uvp init PATH --name NAME [--template TEMPLATE] [--port PORT] [--features LIST] " +
-    "[--modules LIST] [--event-payloads summary|verbatim] [--frontend ID|none] " +
-    "[--frontends LIST] [--force] [--json]",
+    "uvp init PATH --name NAME [--template TEMPLATE | --template-package ID@VERSION] " +
+    "[--port PORT] [--features LIST] [--modules LIST] [--event-payloads summary|verbatim] " +
+    "[--frontend ID|none] [--frontends LIST] [--force] [--json]",
   positionals: [{ name: "PATH", description: "Directory to create the workspace in." }],
   flags: [
     { name: "name", type: "string", value: "NAME", description: "Project and CMake target name." },
@@ -42,6 +42,14 @@ export const initCommand: CommandSpec = {
       description:
         "hello-http, rest-api, websocket-echo, websocket-test, soap-service, static-files, or " +
         "http3-service.",
+    },
+    {
+      name: "template-package",
+      type: "string",
+      value: "ID@VERSION",
+      description:
+        "Generate from an imported uvp.template/1 package instead of a built-in template; " +
+        "mutually exclusive with --template.",
     },
     {
       name: "port",
@@ -120,11 +128,39 @@ export const initCommand: CommandSpec = {
     "then / answers 503 with that instruction. One app per workspace, and it cannot be combined",
     "with static skins or with a template that already owns the document root.",
     "http3-service refuses a frontend: its generated source registers no static document root.",
+    "--template-package generates from an imported uvp.template/1 package instead of a built-in",
+    "template. The package's files are rendered with {{project.name}}, {{project.port}}, and",
+    "{{features}}; uvp.json records its id, version, and digest. Import it first with",
+    "`uvp template import <dir>`. --features, --modules, --frontends, and --event-payloads are",
+    "built-in-template selections and are refused with a package, which supplies its own files",
+    "and declares its features in its manifest.",
   ],
   input: (parsed) => {
     const path = requirePositional(parsed, 0, "a workspace path", "uvp init ./svc --name svc");
     const name = asString(parsed, "name");
     const template = asString(parsed, "template");
+    const templatePackage = asString(parsed, "template-package");
+    if (template !== undefined && templatePackage !== undefined) {
+      flagError("--template and --template-package both name a source; pass one of them.", {
+        usage: "uvp init PATH --name NAME --template-package acme-dashboard@1.2.0",
+      });
+    }
+    let templatePackageRef: { readonly id: string; readonly version: string } | undefined;
+    if (templatePackage !== undefined) {
+      const parts = templatePackage.split("@");
+      if (
+        parts.length !== 2 ||
+        parts[0] === undefined ||
+        parts[0] === "" ||
+        parts[1] === undefined ||
+        parts[1] === ""
+      ) {
+        flagError(`"${templatePackage}" is not an id@version reference.`, {
+          usage: "uvp init PATH --name NAME --template-package acme-dashboard@1.2.0",
+        });
+      }
+      templatePackageRef = { id: parts[0], version: parts[1] };
+    }
     const port = asNumber(parsed, "port");
     const features = parseCsv(asList(parsed, "features"));
     // Not `parseCsv`: that helper drops repeats, and a module named twice is a
@@ -196,6 +232,7 @@ export const initCommand: CommandSpec = {
       path,
       ...(derivedName === undefined ? { name } : { name: derivedName }),
       ...(template === undefined ? {} : { template }),
+      ...(templatePackageRef === undefined ? {} : { template_package: templatePackageRef }),
       ...(port === undefined ? {} : { port }),
       ...(features.length === 0 ? {} : { features }),
       ...(modulesGiven ? { modules } : {}),
