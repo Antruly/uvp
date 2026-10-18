@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import { renderTemplate } from "../../src/application/templates.js";
 import { sha256 } from "../../src/domain/identity.js";
+import { EXE } from "../../src/toolchains/host.js";
 import {
   realLibuvcpp,
   resultOrThrow,
   runCli,
   scratch,
   skipReason,
+  startService,
 } from "../support/realLibuvcpp.js";
 
 /**
@@ -118,5 +120,21 @@ describe.skipIf(guard !== "")("a template package", () => {
 
     const built = resultOrThrow(await runCli(["build", workspace, "--json"]));
     expect(built["succeeded"]).toBe(true);
+
+    const service = await startService({
+      name: NAME,
+      template: "fixture-package",
+      port: PORT,
+      root: workspace,
+      buildDir: join(workspace, "build"),
+      binary: join(workspace, "build", NAME + EXE),
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${String(PORT)}/hello`);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("Hello, AI");
+    } finally {
+      await service.stop();
+    }
   }, 600_000);
 });
