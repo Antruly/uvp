@@ -73,6 +73,7 @@ import { isRecord } from "../domain/templatePackageProblems.js";
 export type TemplateStoreErrorCode =
   | "invalid_package"
   | "template_exists"
+  | "target_exists"
   | "not_found"
   | "store_locked"
   | "io_error";
@@ -146,6 +147,21 @@ export interface ListTemplatePackagesResult {
   readonly packages: readonly StoredTemplatePackage[];
   readonly corrupt: readonly CorruptTemplatePackage[];
 }
+
+export interface InspectTemplatePackageOptions {
+  readonly sourceDir: string;
+  readonly limits?: TemplatePackageLimits;
+  /** Admit a package whose only problems are licence/provenance. */
+  readonly allowUnverified?: boolean;
+}
+
+/**
+ * What validation observed about a directory, before anything is written.
+ *
+ * The dry run's answer: every field `StoredTemplatePackage` carries except
+ * `path`, which would name a store entry that does not exist yet.
+ */
+export type InspectedTemplatePackage = Omit<StoredTemplatePackage, "path">;
 
 const STORE_METADATA_SCHEMA = "uvp.store/1";
 const TOP_LEVEL_DIRECTORY = "files";
@@ -462,7 +478,7 @@ const readPackageDirectory = async (
   };
 };
 
-const toStored = (validated: ValidatedPackage, packagePath: string): StoredTemplatePackage => {
+const storedFields = (validated: ValidatedPackage): InspectedTemplatePackage => {
   const manifest = validated.manifest;
   return {
     id: manifest.id,
@@ -483,9 +499,13 @@ const toStored = (validated: ValidatedPackage, packagePath: string): StoredTempl
     files: validated.files,
     ...(manifest.preview === undefined ? {} : { preview: manifest.preview }),
     unverified: validated.unverified,
-    path: packagePath,
   };
 };
+
+const toStored = (validated: ValidatedPackage, packagePath: string): StoredTemplatePackage => ({
+  ...storedFields(validated),
+  path: packagePath,
+});
 
 interface StoreMetadata {
   readonly digest: string;
@@ -819,6 +839,29 @@ export const getTemplatePackage = async (
     throw recordFailureOf(metadata, error) ?? error;
   }
   return toStored(validated, target);
+};
+
+/**
+ * Validate a directory as an import would, without writing anything.
+ *
+ * This is the dry run: it calls the same reader `importTemplatePackage` calls,
+ * so a caller that wants the import's verdict before mutating the store gets
+ * the same verdict — the package format is not interpreted a second time here.
+ * A source that an import would refuse throws the same `TemplateStoreError`.
+ *
+ * It answers the format question only. No store is consulted, so a package
+ * whose `id@version` the store already holds passes here and the import then
+ * refuses it with `template_exists`; that call takes no `storeRoot` because it
+ * would promise a duplicate check it does not perform.
+ */
+export const inspectTemplatePackage = async (
+  options: InspectTemplatePackageOptions,
+): Promise<InspectedTemplatePackage> => {
+  const validated = await readPackageDirectory(path.resolve(options.sourceDir), {
+    limits: options.limits ?? DEFAULT_TEMPLATE_PACKAGE_LIMITS,
+    allowUnverified: options.allowUnverified === true,
+  });
+  return storedFields(validated);
 };
 
 /** Every readable package, plus entries the reader refused. */
