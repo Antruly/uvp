@@ -31,7 +31,7 @@ against [libuvcpp](https://github.com/Antruly/libuvcpp), starts it, drives
 requests at it, and hands back a report that separates what it **observed** from
 what it **derived** and from what it could **not establish**.
 
-It is one CLI and one MCP server. The same 15 tool contracts back both, so
+It is one CLI and one MCP server. The same 16 tool contracts back both, so
 an agent and a shell script get identical behaviour and identical evidence.
 
 The generated code is not a uvp artifact. It is ordinary libuvcpp C++ that builds

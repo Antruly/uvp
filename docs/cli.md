@@ -356,8 +356,9 @@ Node.
 The tool call succeeds even when the build does not: `steps_succeeded` is
 `false`, the CLI exits `1`, and the failing step's output tail says why. `2` is
 reserved for a question that could not be put — a path that is not a workspace,
-a workspace whose `uvp.json` records no app, or a `frontend/` project missing
-its `package.json` or its committed `package-lock.json`.
+a workspace whose `uvp.json` records no app, a `frontend/` project missing its
+`package.json` or its committed `package-lock.json`, or a host where Node or
+npm is absent, broken, or did not answer the version probe.
 
 `built` is a claim about the filesystem, not about this run: it is true when
 `frontend/dist/index.html` exists after the build, which can be a leftover from
@@ -369,8 +370,9 @@ Node and npm are checked before anything is installed: a `node --version` or
 a `missing_requirement` naming the executable, not a failed build. The
 generated project accepts the same Node lines as uvp itself.
 
-Effects: reads and writes the filesystem (only inside `frontend/`: its
-`node_modules/` and `dist/`), spawns processes, and may contact the registry
+Effects: reads and writes the filesystem (inside `frontend/`: its
+`node_modules/` and `dist/`; npm may also write its own cache outside the
+workspace), spawns processes, and may contact the registry
 named in the lockfile. It runs on this host even when `uvp.json` names a
 container for the C++ build; the result says so when it does.
 

@@ -1,6 +1,6 @@
 # MCP contracts
 
-uvp exposes 15 tools over MCP, from the same contracts that back the CLI. This
+uvp exposes 16 tools over MCP, from the same contracts that back the CLI. This
 page is the reference: what each tool does, what it touches, and what a result
 contains.
 
@@ -157,7 +157,8 @@ after the run — the file the generated service checks for at startup — while
 disagree: a failed rebuild over an earlier output leaves `built` true. `net` and
 `proc` are unconditional because the install may fetch packages from the
 registry named in the committed lockfile and both steps are processes; `mut` is
-not set because everything written stays inside the workspace's `frontend/`.
+not set because the workspace's own files outside `frontend/` are not touched,
+although npm may use its cache outside the workspace.
 `untrusted` because npm's output is npm's words. The build never runs as part
 of `uvp_build`, and it runs on this host even when `uvp.json` names a container
 for the C++ build — the result says so when it does.
