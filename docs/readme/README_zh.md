@@ -20,9 +20,8 @@
 </div>
 
 > [!IMPORTANT]
-> uvp 通过 [Antruly/uvp](https://github.com/Antruly/uvp) 分发。npm 包名
-> `uvp-agents` 为首次发布预留，**目前尚未发布** —— 在此之前请从源码检出安装。
-> 仅凭仓库名相似或 README 雷同，并不能证明某个下载来源是官方渠道。
+> uvp 通过 [Antruly/uvp](https://github.com/Antruly/uvp) 分发，并已发布到 npm
+> 的 `uvp-agents` 包。仅凭仓库名相似或 README 雷同，并不能证明某个下载来源是官方渠道。
 
 ---
 
@@ -57,10 +56,10 @@ uvp doctor --json
 ### 配置你的 Agent
 
 ```bash
-npx uvp-agents setup      # 尚未发布，见上方说明
+npx uvp-agents setup
 ```
 
-首次发布之前，请从源码检出运行：
+如果希望从源码检出运行：
 
 ```bash
 git clone https://github.com/Antruly/uvp
@@ -210,15 +209,22 @@ libuvcpp 自己的那一个，也就是生成的服务所链接的同一个栈�
 MySQL 和 PostgreSQL 走的是同一份生成代码、同一条运行时加载驱动的路径，
 这里不会声称观察过它们。
 
+**模板包（0.3.0）。** 本版本定义了 `uvp.template/1` 模板包格式，并以应用模块的形式
+提供本地 store、确定性搜索、inspect/export 以及有界的密钥/PII 扫描。它还加入了官方
+registry [Antruly/uvp-templates](https://github.com/Antruly/uvp-templates) 所用
+`uvp.registry/1` 索引的读取客户端。包的 CLI 与 MCP 表面 —— `uvp template ...` 与
+`uvp init --template-package` —— 是下一个增量；0.3.0 尚未暴露这些命令，registry 在其
+runtime lane 启用前也不会声称任何包已通过构建验证。
+
 **进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
 对任何服务都能用，不只对 uvp 生成的。它还缺的是触达范围：工具链 provider 的
 **端口（port）**已经定义，`local` provider 已实现；容器与远程 SSH provider 尚未编写。
 
-**进行中。** 发布自动化：`release-please-config.json`、针对 PR 标题的
-传统提交（Conventional Commits）门禁，以及运行 release-please 的工作流
-（`.github/workflows/release-please.yml`，由 #177 为 #160 添加）都已存在，但至今没有切过版本，
-包只能从 clone 或 tarball 安装。发布 PR 上的派生文件仍由维护者手动重新生成，
-这是 #160 记录在案的决定。路线图里列出的加固项
+**发布。** `uvp-agents@0.2.0` 是首个正式发布；`0.3.0` 是当前由 release-please
+准备的版本。针对 PR 标题的传统提交门禁与 release-please 工作流
+（`.github/workflows/release-please.yml`，由 #177 为 #160 添加）负责生成发布 PR。
+发布 PR 上的派生文件仍由维护者手动重新生成，这是 #160 记录在案的决定；
+发布工作流由维护者从发布 tag 手动 dispatch。路线图里列出的加固项
 只剩下最后一项：`local-msvc` 的 Windows 通道。同一列表里的其余各项已经落地并有检查兜底：
 `.github/` 下的每个 action 都固定到 SHA 并在旁边写明release
 （`npm run verify:actions`），tarball 无论从工作树打包、从解包到另一路径的副本打包，
