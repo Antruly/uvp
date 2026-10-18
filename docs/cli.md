@@ -863,8 +863,11 @@ error, so a typo cannot widen a removal into a whole-id one.
 A missing package, a malformed source, a duplicate import without `--replace`,
 an export target that is not empty, or a bad flag exits 2 — the question could
 not be put, and the caller can put it again by changing the input. A store that
-is locked, unreadable, or no longer matches its manifest exits 1 — the question
-was asked and the answer is no, so retrying with the same input will not help.
+is unreadable, or whose tree no longer matches its manifest, exits 1 — the
+question was asked and the answer is no, so the same input needs a change first.
+A locked store also exits 1, but retrying is the remedy: another uvp process
+holds the lock, the failure is `resource_constraint` with `retryable: true`, and
+the same call succeeds once that process finishes.
 
 ## `uvp mcp` and `uvp setup`
 
