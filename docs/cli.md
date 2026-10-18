@@ -860,9 +860,11 @@ re-verifying the exported bytes before reporting success. `remove` takes
 `id@version` for one version or a bare `id` for every version; `id@` is a usage
 error, so a typo cannot widen a removal into a whole-id one.
 
-A missing package, a malformed one, or a bad flag exits 2 — the question could
-not be put. A store that is locked, unreadable, or no longer matches its
-manifest exits 1 — the question was asked and the answer is no.
+A missing package, a malformed source, a duplicate import without `--replace`,
+an export target that is not empty, or a bad flag exits 2 — the question could
+not be put, and the caller can put it again by changing the input. A store that
+is locked, unreadable, or no longer matches its manifest exits 1 — the question
+was asked and the answer is no, so retrying with the same input will not help.
 
 ## `uvp mcp` and `uvp setup`
 

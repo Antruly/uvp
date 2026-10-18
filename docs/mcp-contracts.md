@@ -170,10 +170,10 @@ instructions. `export` and `remove` return only paths, digests, and counts that
 uvp computed.
 
 Store failures map to one code each: `template_not_found` for a missing
-package, `invalid_request` for a malformed source or an occupied destination,
-`artifact_modified` for a stored tree that no longer matches its manifest,
-`resource_constraint` for a held store lock, and `execution_failure` for an I/O
-error.
+package, `invalid_request` for a malformed source, a duplicate import without
+`replace`, or a destination that is not empty, `artifact_modified` for a stored
+tree that no longer matches its manifest, `resource_constraint` for a held store
+lock, and `execution_failure` for an I/O error.
 
 ### Build
 
