@@ -80,7 +80,9 @@ export const initCommand: CommandSpec = {
       name: "frontends",
       type: "list",
       value: "LIST",
-      description: "Comma-separated static page sets to generate together; none means no frontend.",
+      description:
+        "Comma-separated frontend selections to generate together: static page sets " +
+        "(h5-minimal, h5-dashboard, h5-tech) or one Node app (vue3, react, svelte); none means no frontend.",
     },
     {
       name: "force",

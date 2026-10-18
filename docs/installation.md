@@ -20,8 +20,9 @@ compiler error.
 Node is also the prerequisite for one optional command. A workspace generated
 with a Node frontend app (`uvp init --frontend vue3|react|svelte`) carries a
 Vite project under `frontend/`, and `uvp frontend build` runs its install and
-framework build. That project asks for Node `>=22.19.0`. Nothing else needs
-Node: `uvp build` compiles the C++ project without it, the generated service
+framework build. That project accepts the same Node lines as uvp itself:
+`^22.19.0`, `^24.11.0`, or `>=26.0.0`. Nothing else needs Node: `uvp build`
+compiles the C++ project without it, the generated service
 starts and serves its routes without it, and a workspace with no frontend app
 has no `frontend/` directory at all.
 

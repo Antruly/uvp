@@ -20,7 +20,7 @@ import {
   resolveModules,
   type UvpModule,
 } from "../domain/modules.js";
-import { frontendAppFiles } from "./frontendApps.js";
+import { frontendAppFiles, NODE_ENGINES } from "./frontendApps.js";
 import { frontendFiles, frontendSelector } from "./frontends.js";
 
 /**
@@ -2122,7 +2122,7 @@ starting the service, or restart it after a build. Until that file exists, \`/\`
 answers \`503\` with the instruction to build. A client-side route that does not
 exist answers with the app's \`index.html\`.
 
-Node 22.19 or newer is a prerequisite for \`frontend/\` only. Nothing in the
+Node \`${NODE_ENGINES}\` is a prerequisite for \`frontend/\` only. Nothing in the
 generated C++ project, \`uvp build\`, or \`uvp run\` needs it.
 `;
   }

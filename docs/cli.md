@@ -254,8 +254,9 @@ versions, and a `package-lock.json` generated from those versions is written
 beside it, so `npm ci` installs the same tree without contacting a registry for
 resolution. It contains `vite.config.js`, `index.html`, `src/main.*`,
 `src/App.*`, `src/style.css`, a `.gitignore`, and a README. The page loads
-nothing remote — no CDN, no external font, no network call — and needs Node
-22.19 or newer, but only inside `frontend/`.
+nothing remote — no CDN, no external font, no network call — and needs one of
+the Node lines uvp itself accepts (`^22.19.0`, `^24.11.0`, or `>=26.0.0`), but
+only inside `frontend/`.
 
 `uvp build` still never runs Node, and the generated `CMakeLists.txt` is
 unchanged. At startup the service checks for `frontend/dist/index.html` and,
@@ -366,7 +367,7 @@ this run, and the two together are what the verdict reads.
 Node and npm are checked before anything is installed: a `node --version` or
 `npm --version` that cannot be started, exits non-zero, or prints no version is
 a `missing_requirement` naming the executable, not a failed build. The
-generated project asks for Node 22.19 or newer.
+generated project accepts the same Node lines as uvp itself.
 
 Effects: reads and writes the filesystem (only inside `frontend/`: its
 `node_modules/` and `dist/`), spawns processes, and may contact the registry

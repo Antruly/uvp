@@ -125,6 +125,11 @@ export const workspaceCreateContract = defineTool({
      * A first request has to guess otherwise: the smallest template answers
      * `GET /hello`, not `GET /`, and an unlisted path is a 404 from a service
      * that is working exactly as generated.
+     *
+     * For a workspace with a Node frontend app these describe the built state.
+     * Before `frontend/dist/index.html` exists the source registers only
+     * `GET /` (the 503 with the build instruction), so a client-side path is a
+     * 404 until the frontend build runs and the service restarts.
      */
     routes: z.array(z.string()),
     /** The exact command that turns this workspace into a running binary. */

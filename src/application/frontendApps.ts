@@ -25,6 +25,15 @@ import vue3Lockfile from "./frontendLockfiles/vue3.package-lock.json" with { typ
  */
 const VITE_VERSION = "8.3.4";
 
+/**
+ * The Node lines the generated project accepts.
+ *
+ * The same range as this repository's own `engines`, so a generated frontend
+ * and uvp itself agree on which Node lines are supported. A bare `>=22.19.0`
+ * would also admit the odd-numbered lines that Vite does not test against.
+ */
+export const NODE_ENGINES = "^22.19.0 || ^24.11.0 || >=26.0.0";
+
 interface FrontendAppFramework {
   readonly dependencies: Readonly<Record<string, string>>;
   readonly devDependencies: Readonly<Record<string, string>>;
@@ -77,7 +86,7 @@ const packageManifest = (app: UvpFrontendApp, name: string): string => {
       private: true,
       version: "0.0.0",
       type: "module",
-      engines: { node: ">=22.19.0" },
+      engines: { node: NODE_ENGINES },
       scripts: { dev: "vite", build: "vite build", preview: "vite preview" },
       ...(Object.keys(framework.dependencies).length === 0
         ? {}
@@ -90,8 +99,29 @@ const packageManifest = (app: UvpFrontendApp, name: string): string => {
 };
 
 /** The lockfile as `npm ci` reads it, reserialized from the committed data. */
-const packageLockfile = (app: UvpFrontendApp): string =>
-  `${JSON.stringify(FRAMEWORKS[app].lockfile, null, 2)}\n`;
+const packageLockfile = (app: UvpFrontendApp, name: string): string => {
+  const lockfile = FRAMEWORKS[app].lockfile as {
+    name?: string;
+    packages?: Record<string, Record<string, unknown>>;
+  };
+  // The committed data names the package `uvp-frontend`, because it was
+  // generated before a workspace name existed. The root name is not what `npm
+  // ci` installs, but leaving it different from `package.json` means the first
+  // `npm install` in a generated project rewrites the lockfile for no reason.
+  const packageName = frontendPackageName(name);
+  const root = lockfile.packages?.[""];
+  return `${JSON.stringify(
+    {
+      ...lockfile,
+      name: packageName,
+      ...(root === undefined
+        ? {}
+        : { packages: { ...lockfile.packages, "": { ...root, name: packageName } } }),
+    },
+    null,
+    2,
+  )}\n`;
+};
 
 const viteConfig = (app: UvpFrontendApp): string => {
   const imports: Readonly<Record<UvpFrontendApp, string>> = {
@@ -304,7 +334,7 @@ generated service checks for \`frontend/dist/index.html\` at startup:
 - before a build, \`/\` answers \`503\` with an instruction to build;
 - after a build, restart the service and \`/\` serves the built page.
 
-Node 22.19 or newer is a prerequisite for this directory only. Nothing in the generated C++ project, \`uvp build\`, or
+Node \`${NODE_ENGINES}\` is a prerequisite for this directory only. Nothing in the generated C++ project, \`uvp build\`, or
 \`uvp run\` needs it.
 
 ## Versions
@@ -325,7 +355,7 @@ export const frontendAppFiles = (app: UvpFrontendApp, name: string): readonly Fr
   const directory = FRONTEND_APP_DIRECTORY;
   return [
     { path: `${directory}/package.json`, content: packageManifest(app, name) },
-    { path: `${directory}/package-lock.json`, content: packageLockfile(app) },
+    { path: `${directory}/package-lock.json`, content: packageLockfile(app, name) },
     { path: `${directory}/vite.config.js`, content: viteConfig(app) },
     { path: `${directory}/index.html`, content: entryHtml(app, name) },
     { path: `${directory}/src/main.${app === "react" ? "jsx" : "js"}`, content: mainSource(app) },

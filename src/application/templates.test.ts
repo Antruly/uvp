@@ -1031,7 +1031,7 @@ describe("frontend app composition", () => {
     expect(readme).toContain("npm ci");
     expect(readme).toContain("frontend/dist");
     expect(readme).toContain("503");
-    expect(readme).toContain("Node 22.19 or newer");
+    expect(readme).toContain("^22.19.0 || ^24.11.0 || >=26.0.0");
   });
 
   it("writes each framework with its own entry, component, and pinned manifest", () => {

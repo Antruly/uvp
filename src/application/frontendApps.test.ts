@@ -53,15 +53,24 @@ describe("the generated frontend project", () => {
         devDependencies: Record<string, string>;
       };
       const lockfile = JSON.parse(byPath(app, "frontend/package-lock.json")) as {
+        name?: string;
         lockfileVersion: number;
         packages: Record<
           string,
-          { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+          {
+            name?: string;
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+          }
         >;
       };
       expect(lockfile.lockfileVersion, app).toBe(3);
       const root = lockfile.packages[""];
       expect(root, app).toBeDefined();
+      // The root name follows the generated package, so the first `npm install`
+      // in a generated project does not rewrite a lockfile nobody changed.
+      expect(lockfile.name, app).toBe(frontendPackageName("svc"));
+      expect(root?.name, app).toBe(frontendPackageName("svc"));
       expect(root?.dependencies ?? {}, app).toEqual(manifest.dependencies ?? {});
       expect(root?.devDependencies ?? {}, app).toEqual(manifest.devDependencies);
       // A lockfile with only the root entry is not a lockfile; `npm ci` would
