@@ -122,6 +122,8 @@ let otherPrefix: string;
 let savedPath: string | undefined;
 let savedRoot: string | undefined;
 let savedNodeOptions: string | undefined;
+let savedCmakePrefixPath: string | undefined;
+let savedPkgConfigPath: string | undefined;
 
 /** The signal a build under test is given. Real, and never aborted. */
 const signal = new AbortController().signal;
@@ -181,6 +183,20 @@ beforeAll(async () => {
   // installed. The assertions below check the relation, and this makes the
   // relation decidable rather than merely likely.
   process.env["UVCPP_ROOT"] = installPrefix;
+
+  // The build inherits this process's environment, and the provider appends
+  // its own entries to a caller's search paths rather than replacing them — so
+  // an exported `PKG_CONFIG_PATH` or `CMAKE_PREFIX_PATH` reaches every recorded
+  // command line below. A developer who exported one is following the
+  // installation instructions: pointing at an unpacked release archive, or at
+  // a `cmake --install` prefix. Clearing both for the duration keeps the exact
+  // assertions about what the provider adds from depending on what their shell
+  // already had (#210). The two preserve tests set each variable themselves and
+  // restore it, so the append rule stays covered on purpose.
+  savedCmakePrefixPath = process.env["CMAKE_PREFIX_PATH"];
+  savedPkgConfigPath = process.env["PKG_CONFIG_PATH"];
+  delete process.env["CMAKE_PREFIX_PATH"];
+  delete process.env["PKG_CONFIG_PATH"];
 });
 
 afterAll(async () => {
@@ -190,6 +206,10 @@ afterAll(async () => {
   else process.env["UVCPP_ROOT"] = savedRoot;
   if (savedNodeOptions === undefined) delete process.env["NODE_OPTIONS"];
   else process.env["NODE_OPTIONS"] = savedNodeOptions;
+  if (savedCmakePrefixPath === undefined) delete process.env["CMAKE_PREFIX_PATH"];
+  else process.env["CMAKE_PREFIX_PATH"] = savedCmakePrefixPath;
+  if (savedPkgConfigPath === undefined) delete process.env["PKG_CONFIG_PATH"];
+  else process.env["PKG_CONFIG_PATH"] = savedPkgConfigPath;
   await removeTree(root);
 });
 
@@ -292,6 +312,8 @@ describe("the libuvcpp a build points CMake at", () => {
     // Both routes, because a prebuilt archive ships a `.pc` file and no CMake
     // package config at all: the first finds a `cmake --install`ed prefix, the
     // second finds the archive. Setting one leaves the other unfindable.
+    // Exact, because this file clears the caller's search paths in `beforeAll`;
+    // the append rule they would otherwise contribute is asserted below.
     expect(assignmentOf(configure, "PKG_CONFIG_PATH")).toBe(
       [join(installPrefix, "lib", "pkgconfig"), join(installPrefix, "lib64", "pkgconfig")].join(
         delimiter,
@@ -314,6 +336,28 @@ describe("the libuvcpp a build points CMake at", () => {
     } finally {
       if (existing === undefined) delete process.env["CMAKE_PREFIX_PATH"];
       else process.env["CMAKE_PREFIX_PATH"] = existing;
+    }
+  });
+
+  it("keeps an existing PKG_CONFIG_PATH, since a caller put it there", async () => {
+    // The same rule on the other route: the prebuilt-archive search path is
+    // extended, not replaced. Without this test the preserve behaviour would
+    // only ever be exercised by whatever the developer's shell happened to
+    // contain — which is how #210 went unnoticed until a run with it exported.
+    const existing = process.env["PKG_CONFIG_PATH"];
+    process.env["PKG_CONFIG_PATH"] = "/somewhere/caller/put";
+    try {
+      const configure = (await buildWithoutPrefix()).commands[0] ?? "";
+      const value = assignmentOf(configure, "PKG_CONFIG_PATH") ?? "";
+      expect(
+        value.startsWith(
+          `${[join(installPrefix, "lib", "pkgconfig"), join(installPrefix, "lib64", "pkgconfig")].join(delimiter)}${delimiter}`,
+        ),
+      ).toBe(true);
+      expect(value).toContain("/somewhere/caller/put");
+    } finally {
+      if (existing === undefined) delete process.env["PKG_CONFIG_PATH"];
+      else process.env["PKG_CONFIG_PATH"] = existing;
     }
   });
 
