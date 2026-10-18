@@ -10,6 +10,7 @@ import {
   TEMPLATE_PACKAGE_VARIABLES,
   parseTemplatePackageVersion,
   templatePackageDigest,
+  templatePackageTextProblem,
   templateVersionRequirementProblem,
   type TemplatePackageCategory,
   type TemplatePackageFileObservation,
@@ -126,6 +127,9 @@ function readText(
     problems.add(key, "must not be empty");
   } else if (value.length > max) {
     problems.add(key, `must be at most ${max} characters`);
+  } else {
+    const textProblem = templatePackageTextProblem(value);
+    if (textProblem !== undefined) problems.add(key, textProblem);
   }
   return typeof value === "string" ? value : undefined;
 }
@@ -181,8 +185,11 @@ function readTags(
   tags.forEach((tag: unknown, index) => {
     if (typeof tag !== "string") {
       problems.add(`tags[${index}]`, "must be a string");
-    } else if (!SLUG_PATTERN.test(tag) || tag.length > 32) {
-      problems.add(`tags[${index}]`, "must be a lowercase slug of at most 32 characters");
+    } else if (!SLUG_PATTERN.test(tag) || tag.length > limits.maxTagLength) {
+      problems.add(
+        `tags[${index}]`,
+        `must be a lowercase slug of at most ${limits.maxTagLength} characters`,
+      );
     } else if (seen.has(tag)) {
       problems.add(`tags[${index}]`, `duplicates '${tag}'`);
     } else {
@@ -296,6 +303,7 @@ function readVariables(
 
 function readLicense(
   record: Record<string, unknown>,
+  limits: TemplatePackageLimits,
   problems: Problems,
 ): TemplatePackageLicense | undefined {
   const license = record["license"];
@@ -311,15 +319,21 @@ function readLicense(
   const spdx = license["spdx"];
   if (spdx !== undefined) {
     if (typeof spdx !== "string") problems.add("license.spdx", "must be a string");
-    else if (!SPDX_PATTERN.test(spdx) || spdx.length > 64) {
-      problems.add("license.spdx", "must be an SPDX identifier or expression such as MIT");
+    else if (!SPDX_PATTERN.test(spdx) || spdx.length > limits.maxSpdxLength) {
+      problems.add(
+        "license.spdx",
+        `must be a single SPDX identifier such as MIT or Apache-2.0 (at most ${limits.maxSpdxLength} characters)`,
+      );
     }
   }
   const name = license["name"];
   if (name !== undefined) {
     if (typeof name !== "string") problems.add("license.name", "must be a string");
-    else if (name.length === 0 || name.length > 80) {
-      problems.add("license.name", "must be 1 to 80 characters");
+    else if (name.length === 0 || name.length > limits.maxLicenseNameLength) {
+      problems.add("license.name", `must be 1 to ${limits.maxLicenseNameLength} characters`);
+    } else {
+      const textProblem = templatePackageTextProblem(name);
+      if (textProblem !== undefined) problems.add("license.name", textProblem);
     }
   }
   if (spdx === undefined && name === undefined) {
@@ -331,8 +345,19 @@ function readLicense(
   return license as unknown as TemplatePackageLicense;
 }
 
+const isCalendarTimestamp = (value: string): boolean => {
+  if (!CREATED_AT_PATTERN.test(value)) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  // `Date.parse` rolls a nonexistent day such as 31 February into March; a
+  // provenance time that names a day the calendar does not have is a data
+  // error, not a time to normalise silently.
+  return date.toISOString().slice(0, 10) === value.slice(0, 10);
+};
+
 function readProvenance(
   record: Record<string, unknown>,
+  limits: TemplatePackageLimits,
   problems: Problems,
 ): TemplatePackageProvenance | undefined {
   const provenance = record["provenance"];
@@ -350,15 +375,17 @@ function readProvenance(
     new Set(["author", "source", "revision", "createdAt"]),
   );
   const author = provenance["author"];
-  if (typeof author !== "string" || author.length === 0 || author.length > 120) {
-    problems.add("provenance.author", "must be a non-empty string of at most 120 characters");
+  if (typeof author !== "string" || author.length === 0 || author.length > limits.maxAuthorLength) {
+    problems.add(
+      "provenance.author",
+      `must be a non-empty string of at most ${limits.maxAuthorLength} characters`,
+    );
+  } else {
+    const textProblem = templatePackageTextProblem(author);
+    if (textProblem !== undefined) problems.add("provenance.author", textProblem);
   }
   const createdAt = provenance["createdAt"];
-  if (
-    typeof createdAt !== "string" ||
-    !CREATED_AT_PATTERN.test(createdAt) ||
-    Number.isNaN(Date.parse(createdAt))
-  ) {
+  if (typeof createdAt !== "string" || !isCalendarTimestamp(createdAt)) {
     problems.add(
       "provenance.createdAt",
       "must be a UTC ISO-8601 timestamp such as 2026-10-18T00:00:00Z",
@@ -376,9 +403,17 @@ function readProvenance(
   const revision = provenance["revision"];
   if (
     revision !== undefined &&
-    (typeof revision !== "string" || revision.length === 0 || revision.length > 120)
+    (typeof revision !== "string" ||
+      revision.length === 0 ||
+      revision.length > limits.maxRevisionLength)
   ) {
-    problems.add("provenance.revision", "must be a non-empty string of at most 120 characters");
+    problems.add(
+      "provenance.revision",
+      `must be a non-empty string of at most ${limits.maxRevisionLength} characters`,
+    );
+  } else if (typeof revision === "string") {
+    const textProblem = templatePackageTextProblem(revision);
+    if (textProblem !== undefined) problems.add("provenance.revision", textProblem);
   }
   return provenance as unknown as TemplatePackageProvenance;
 }
@@ -417,8 +452,8 @@ function validateManifest(
   const requires = readRequires(value, problems);
   const variables = readVariables(value, problems);
   const files = readFiles(value, limits, problems);
-  const license = readLicense(value, problems);
-  const provenance = readProvenance(value, problems);
+  const license = readLicense(value, limits, problems);
+  const provenance = readProvenance(value, limits, problems);
   const preview = readPreview(value, problems);
   if (files !== undefined && observations !== undefined) {
     compareObservations(files, observations, limits, problems);
@@ -460,6 +495,12 @@ export const validateTemplatePackage = (
   const limits = input.limits ?? DEFAULT_TEMPLATE_PACKAGE_LIMITS;
   const manifest = validateManifest(input.manifest, input.files, limits, problems);
   return problems.list.length === 0 && manifest !== undefined
-    ? { ok: true, manifest, digest: templatePackageDigest(manifest), problems: [] }
+    ? {
+        ok: true,
+        manifest,
+        digest: templatePackageDigest(manifest),
+        filesObserved: input.files !== undefined,
+        problems: [],
+      }
     : { ok: false, problems: problems.list };
 };
