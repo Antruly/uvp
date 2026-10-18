@@ -1,5 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
+import type { Server as HttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -231,6 +232,97 @@ const runUntilNothingListens = async (
     if (attempt === attempts) {
       throw new Error(
         `the reserved port ${String(port)} answered on all ${String(attempts)} attempts, so this case never observed a port with nothing behind it`,
+      );
+    }
+  }
+  throw new Error("the retry loop did not return on its last attempt");
+};
+
+/**
+ * A listener that answers every request after a delay, so a launch can be
+ * overtaken deterministically.
+ *
+ * The delay is what makes the collision observable as the ambiguous pair: the
+ * fixture must have had time to die of `EADDRINUSE` before the probe's answer
+ * resolves, or the result reads `still_running: true` for a process that is
+ * about to exit and the case never exercises the retry. The route is answered
+ * for any path, matching the fixture's own `/healthz`.
+ */
+const listenAsStranger = async (port: number): Promise<HttpServer> => {
+  const stranger = createHttpServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"status":"ok"}');
+    }, 1_000);
+  });
+  await new Promise<void>((resolve, reject) => {
+    stranger.once("error", reject);
+    stranger.listen(port, "127.0.0.1", () => {
+      resolve();
+    });
+  });
+  return stranger;
+};
+
+/** Close a listener and wait for it to release the port. */
+const closeListener = async (listener: HttpServer): Promise<void> => {
+  await new Promise<void>((resolve) => {
+    listener.close(() => {
+      resolve();
+    });
+  });
+};
+
+/**
+ * Whether a launch's result says a stranger, not the fixture, owns the port.
+ *
+ * The ambiguous pair is `ready: true` with `still_running: false`: the probe
+ * answered, and the process this call started is gone. Two kinds of evidence
+ * turn that pair into "the port was taken from under us": the child's own
+ * `EADDRINUSE`, or a probe showing a listener answering right now. Neither is
+ * present, and this is not that case — the caller returns the run for the
+ * assertions to fail on, which is the defect the launch cases exist to catch.
+ *
+ * A pure predicate so the four combinations can be tested without racing a real
+ * stranger: the retry it feeds is only as good as this decision.
+ */
+const launchWasOvertaken = (
+  run: Record<string, unknown>,
+  portStillAnswers: boolean | undefined,
+): boolean =>
+  run["ready"] === true &&
+  run["still_running"] !== true &&
+  (String(run["stderr_tail"] ?? "").includes("EADDRINUSE") || portStillAnswers === true);
+
+/**
+ * Launch the fixture service on a reserved port, retrying only when another
+ * worker took the number.
+ *
+ * `freePort` reserves against a stranger only for an instant; another worker
+ * can bind the number before the fixture does. The fixture then prints
+ * `EADDRINUSE` and exits, the readiness probe is answered by the stranger —
+ * every conformance fixture serves `/healthz` — and the result reads
+ * `ready: true` with `still_running: false`. That is a correct observation of a
+ * badly chosen port rather than a `uvp_run` defect
+ * ([#246](https://github.com/Antruly/uvp/issues/246)).
+ *
+ * The retry is gated on evidence, never on the pair alone. Three attempts is
+ * the bound; when every one is overtaken, the failure says the premise never
+ * held instead of asserting a defect in the handler.
+ */
+const launchOnReservedPort = async (
+  launch: (port: number) => Promise<Record<string, unknown>>,
+): Promise<{ readonly run: Record<string, unknown>; readonly port: number }> => {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const port = await freePort();
+    const run = await launch(port);
+    if (run["ready"] !== true || run["still_running"] === true) return { run, port };
+    const answers = await portAnswers(port);
+    if (!launchWasOvertaken(run, answers)) return { run, port };
+    if (attempt === attempts) {
+      throw new Error(
+        `the reserved port ${String(port)} was taken on all ${String(attempts)} attempts, so this case never launched its own listener`,
       );
     }
   }
@@ -594,6 +686,82 @@ describe("build", () => {
   });
 });
 
+describe("the launch retry", () => {
+  it("retries a launch only on evidence that a stranger owns the port", () => {
+    // The retry's gate, one row per combination: a pair that is ambiguous on
+    // its own (`ready: true`, `still_running: false`) must not become a retry
+    // without the child's own word or a listener answering now — otherwise a
+    // genuine defect would be retried until the bound and reported as a port
+    // collision.
+    const collision = {
+      ready: true,
+      still_running: false,
+      stderr_tail: "Error: listen EADDRINUSE: address already in use 127.0.0.1:41000",
+    };
+    const silentDeath = { ready: true, still_running: false, stderr_tail: "" };
+    const rows: readonly [Record<string, unknown>, boolean | undefined, boolean][] = [
+      [collision, undefined, true],
+      [collision, true, true],
+      [collision, false, true],
+      [silentDeath, true, true],
+      [silentDeath, false, false],
+      [silentDeath, undefined, false],
+      [{ ...silentDeath, ready: false }, true, false],
+      [{ ...collision, still_running: true }, true, false],
+    ];
+    for (const [run, answers, expected] of rows) {
+      expect(
+        launchWasOvertaken(run, answers),
+        `ready=${String(run["ready"])} still_running=${String(run["still_running"])} ` +
+          `stderr=${JSON.stringify(run["stderr_tail"])} answers=${String(answers)}`,
+      ).toBe(expected);
+    }
+  });
+
+  it("returns an ambiguous launch that nothing shows was overtaken, rather than retrying it", async () => {
+    // The pair alone — `ready: true`, `still_running: false` — is not evidence:
+    // a service that answered and then died leaves the same pair. Retrying it
+    // would run a genuine defect three times and then report it as a port
+    // collision, so the helper must hand this run back for the caller's
+    // assertions to fail on. The synthetic result is the input: what is under
+    // test here is the retry decision, not the handler.
+    let attempts = 0;
+    const { run } = await launchOnReservedPort(async () => {
+      attempts += 1;
+      return { ready: true, still_running: false, stderr_tail: "" };
+    });
+    expect(attempts).toBe(1);
+    expect(run["still_running"]).toBe(false);
+  });
+
+  it(
+    "retries a launch whose reserved port another listener owns, and keeps the run that survived",
+    async () => {
+      let stranger: HttpServer | undefined;
+      let attempts = 0;
+      try {
+        const { run } = await launchOnReservedPort(async (port) => {
+          attempts += 1;
+          if (attempts === 1) stranger = await listenAsStranger(port);
+          const svc = await writeFakeService(harness.workspace, "svc", port);
+          return await call("uvp_run", {
+            path: harness.workspace,
+            args: svc.args,
+            ready: { port, path: "/healthz", timeout_ms: 15_000 },
+          });
+        });
+        expect(attempts).toBe(2);
+        expect(run["ready"]).toBe(true);
+        expect(run["still_running"]).toBe(true);
+        await call("uvp_run_stop", { run_id: run["run_id"] });
+      } finally {
+        if (stranger !== undefined) await closeListener(stranger);
+      }
+    },
+    TIMEOUT,
+  );
+});
+
 describe("launch and stop", () => {
   it("refuses a stop with neither a run id nor all, instead of stopping every run", async () => {
     // `{}` is valid input: `all` defaults to false and `run_id` is optional. The
@@ -608,16 +776,17 @@ describe("launch and stop", () => {
       // `--binary PATH` is a path. It used to be joined to `<workspace>/build`,
       // so an absolute path became a fabricated one and the call reported
       // `launch_failed` for an executable that existed.
-      const port = await freePort();
       const elsewhere = await mkdtemp(join(tmpdir(), "uvp-run-binary-"));
       temporaryRoots.push(elsewhere);
-      const svc = await writeFakeService(elsewhere, "svc", port);
 
-      const run = await call("uvp_run", {
-        path: harness.workspace,
-        binary: svc.path,
-        args: svc.args,
-        ready: { port, path: "/healthz", timeout_ms: 15_000 },
+      const { run } = await launchOnReservedPort(async (port) => {
+        const svc = await writeFakeService(elsewhere, "svc", port);
+        return await call("uvp_run", {
+          path: harness.workspace,
+          binary: svc.path,
+          args: svc.args,
+          ready: { port, path: "/healthz", timeout_ms: 15_000 },
+        });
       });
       expectConforms("uvp_run", run);
       // The launch itself is the assertion: before the resolve, the fabricated
@@ -633,13 +802,13 @@ describe("launch and stop", () => {
   it(
     "launches a real process, waits for a real probe, then stops it",
     async () => {
-      const port = await freePort();
-      const svc = await writeFakeService(harness.workspace, "svc", port);
-
-      const run = await call("uvp_run", {
-        path: harness.workspace,
-        args: svc.args,
-        ready: { port, path: "/healthz", timeout_ms: 15_000 },
+      const { run, port } = await launchOnReservedPort(async (port) => {
+        const svc = await writeFakeService(harness.workspace, "svc", port);
+        return await call("uvp_run", {
+          path: harness.workspace,
+          args: svc.args,
+          ready: { port, path: "/healthz", timeout_ms: 15_000 },
+        });
       });
       expectConforms("uvp_run", run);
 
@@ -685,14 +854,14 @@ describe("launch and stop", () => {
       // uvp_run_stop" — name a remedy that did not exist: the stop found an empty
       // registry, which it reports as `stopped: []` and a `cleanup_complete`
       // that is true of nothing.
-      const port = await freePort();
-      const svc = await writeFakeService(harness.workspace, "svc", port);
-
-      const run = await call("uvp_run", {
-        path: harness.workspace,
-        args: svc.args,
-        ready: { port, path: "/healthz", timeout_ms: 15_000 },
-        detach: false,
+      const { run } = await launchOnReservedPort(async (port) => {
+        const svc = await writeFakeService(harness.workspace, "svc", port);
+        return await call("uvp_run", {
+          path: harness.workspace,
+          args: svc.args,
+          ready: { port, path: "/healthz", timeout_ms: 15_000 },
+          detach: false,
+        });
       });
       expectConforms("uvp_run", run);
       expect(run["ready"]).toBe(true);
