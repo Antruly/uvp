@@ -31,7 +31,7 @@ export const UVP_FRONTEND_DEFINITIONS: Readonly<Record<UvpFrontend, UvpFrontendD
     description: "a light, single-column page with a heading, a status line, and a local clock",
   },
   "h5-dashboard": {
-    description: "a dark card grid with locally rendered status tiles and a page-load count",
+    description: "a dark card grid with locally rendered status tiles and a count-up timer",
   },
   "h5-tech": {
     description: "a dark, monospace terminal-style page with a local render log",

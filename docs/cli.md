@@ -210,11 +210,11 @@ generated `CMakeLists.txt` is the same with or without a skin. The service
 serves the directory with `app.serve_static("/", "./public")`, registered after
 the template's exact routes.
 
-| Skin           | What it is                                                                |
-| -------------- | ------------------------------------------------------------------------- |
-| `h5-minimal`   | a light, single-column page with a heading, a status line, a local clock  |
-| `h5-dashboard` | a dark card grid with locally rendered status tiles and a page-load count |
-| `h5-tech`      | a dark, monospace terminal-style page with a local render log             |
+| Skin           | What it is                                                               |
+| -------------- | ------------------------------------------------------------------------ |
+| `h5-minimal`   | a light, single-column page with a heading, a status line, a local clock |
+| `h5-dashboard` | a dark card grid with locally rendered status tiles and a count-up timer |
+| `h5-tech`      | a dark, monospace terminal-style page with a local render log            |
 
 ```bash
 uvp init ./svc --name svc --template rest-api --frontends h5-minimal,h5-tech

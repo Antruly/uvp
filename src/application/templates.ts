@@ -2068,6 +2068,15 @@ uvp verify ${input.name} --port ${String(input.port)}
 \`\`\`
 `;
 
+/**
+ * Renders one template into files.
+ *
+ * Callers must refuse the combinations whose output could not serve what it
+ * writes before calling this: a skin on `http3-service`, whose generated source
+ * registers no document root. Rendering is not the refusal point — the service
+ * and the CLI are — so calling this directly with such a combination produces
+ * the files and a README that claims more than the source does.
+ */
 export const renderTemplate = (
   template: TemplateId,
   input: TemplateInput,

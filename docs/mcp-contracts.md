@@ -93,6 +93,8 @@ refused before any file is written.
 `summary` (the default) keeps its length and an FNV-1a hash, `verbatim` keeps the
 text itself. The policy is compiled into the service, recorded in `uvp.json`, and
 reported by `GET /api/events`; asking for it without `evidence-log` is refused,
+because it would describe a log the workspace does not have.
+
 `frontends` selects built-in static skins — `h5-minimal`, `h5-dashboard`,
 `h5-tech` — generated as plain HTML, CSS, and JavaScript under
 `public/<skin>/`. Each is served at `/<skin>/`, and `/` lists the selection;
@@ -104,8 +106,6 @@ result reports the resolved `frontends` beside `routes`, and the selection is
 recorded in `uvp.json` in canonical order. An unknown or repeated skin, and any
 skin on `http3-service` (whose source registers no document root), are refused
 before any file is written.
-
-because it would describe a log the workspace does not have.
 
 ### Build
 
