@@ -874,19 +874,21 @@ const evidenceLogRoute = (input: TemplateInput): string => `
     // close an unnamed one.
     std::string body =
         R"j({"schema":{"version":1,"retention":)j" + std::to_string(kMaxEvidenceEvents) +
-        R"j(,"event":{"ts":"unix epoch milliseconds","kind":["http","message"],)j" +
+        R"j(,"window":"the log begins when the process started; earlier events are unobserved, not dropped",)j" +
+        R"j("event":{"ts":"unix epoch milliseconds","kind":["http","message"],)j" +
         R"j("method":"HTTP method (kind=http; empty otherwise)",)j" +
         R"j("path":"request path (kind=http; empty otherwise)",)j" +
         R"j("status":"final status code (kind=http; 0 otherwise)",)j" +
         R"j("duration_ms":"elapsed milliseconds (kind=http; -1 otherwise)",)j" +
         R"j("direction":"received (kind=message; empty otherwise)",)j" +
-        R"j("type":["text","binary"],)j" +
+        R"j("type":["text","binary"],"type_note":"kind=message only; empty for http",)j" +
         R"j("payload":"${
           eventPayloadsOf(input) === "summary"
             ? "length and FNV-1a hash for text; hex prefix and length for binary"
             : "the text a peer sent, JSON-escaped; hex prefix and length for binary"
         }",)j" +
-        R"j("bytes":"payload or response-body byte length","ok":"write succeeded"}},)j" +
+        R"j("bytes":"payload or response-body byte length",)j" +
+        R"j("ok":"kind=http: the response write succeeded; kind=message: the event was recorded"}},)j" +
         R"j("payload_policy":")j" + kEvidencePayloadPolicy + R"j(","retained":)j" +
         std::to_string(events.size()) + R"(,"dropped":)" + std::to_string(dropped) +
         R"(,"events":[)";

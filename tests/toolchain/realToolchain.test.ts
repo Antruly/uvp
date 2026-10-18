@@ -408,6 +408,10 @@ const composedService = async (): Promise<void> => {
  * `hello-http` is the template and `websocket-echo` is the second module, so this
  * also covers the conditional message hook: with no WebSocket module the hook is
  * absent, and here it must be present and working.
+ *
+ * The ring is then driven past its bound, because `retention` echoing a constant
+ * is not the same observation as an event leaving the window: `retained`,
+ * `dropped`, and the evicted message event are read back from the endpoint.
  */
 const evidenceService = async (): Promise<void> => {
   const workspace = await createWorkspace(
@@ -446,11 +450,36 @@ const evidenceService = async (): Promise<void> => {
     const text = bodyText(response);
     const event = JSON.parse(text) as {
       readonly payload_policy?: unknown;
-      readonly schema?: { readonly retention?: unknown };
+      readonly schema?: {
+        readonly version?: unknown;
+        readonly retention?: unknown;
+        readonly window?: unknown;
+        readonly event?: Readonly<Record<string, unknown>>;
+      };
+      readonly retained?: unknown;
+      readonly dropped?: unknown;
       readonly events?: readonly Record<string, unknown>[];
     };
     expect(event.payload_policy).toBe("summary");
+    expect(event.schema?.version).toBe(1);
     expect(event.schema?.retention).toBe(100);
+    // The schema is the endpoint's statement of what a reader is looking at,
+    // not only the constant the code was built with.
+    expect(String(event.schema?.window)).toContain("unobserved, not dropped");
+    expect(Object.keys(event.schema?.event ?? {}).sort()).toEqual([
+      "bytes",
+      "direction",
+      "duration_ms",
+      "kind",
+      "method",
+      "ok",
+      "path",
+      "payload",
+      "status",
+      "ts",
+      "type",
+      "type_note",
+    ]);
 
     const events = event.events ?? [];
     const httpEvent = events.find((entry) => entry["kind"] === "http");
@@ -473,6 +502,30 @@ const evidenceService = async (): Promise<void> => {
     // The policy is a promise about what is retained, so the probe's own text
     // must not appear anywhere in the report.
     expect(text).not.toContain("probe-text");
+
+    // A bound that is never driven is a claim, not a test. One more event than
+    // the ring holds makes eviction and the dropped counter observable; the
+    // message event above was in the window before this, so its absence below
+    // is eviction rather than a window that started after it.
+    const ring = 100;
+    for (let sent = 0; sent <= ring; sent += 1) {
+      const helloAgain = await fetch(`${base}/hello`);
+      expect(helloAgain.status).toBe(200);
+      await helloAgain.text();
+    }
+    const windowResponse = await fetch(`${base}/api/events`);
+    expect(windowResponse.status).toBe(200);
+    const windowed = (await windowResponse.json()) as {
+      readonly retained?: unknown;
+      readonly dropped?: unknown;
+      readonly events?: readonly Record<string, unknown>[];
+    };
+    expect(windowed.retained).toBe(ring);
+    expect(Number(windowed.dropped)).toBeGreaterThanOrEqual(1);
+    const windowedEvents = windowed.events ?? [];
+    expect(windowedEvents).toHaveLength(ring);
+    expect(windowedEvents.every((entry) => entry["kind"] === "http")).toBe(true);
+    expect(windowedEvents.every((entry) => entry["path"] === "/hello")).toBe(true);
   } finally {
     await service.stop();
   }

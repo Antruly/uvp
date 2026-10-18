@@ -78,7 +78,9 @@ writes files and starts nothing. Refuses to overwrite an existing workspace
 unless told to.
 
 `modules` composes uvp's application pieces — `health`, `echo-log`,
-`evidence-log`, `websocket-echo`, `static-console` — into the template. Omit it
+`evidence-log`, `websocket-echo`, `static-console` — into the template. `evidence-log`
+records HTTP requests and the messages the `websocket-echo` route receives; a
+WebSocket route a template already serves is not instrumented. Omit it
 to get the template's default: `websocket-test` composes the other four, every
 other template none; `evidence-log` is opt-in everywhere. The result reports the
 resolved `modules` beside `routes`, and records the

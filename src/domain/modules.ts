@@ -73,7 +73,7 @@ export const UVP_MODULE_DEFINITIONS: Readonly<Record<UvpModule, UvpModuleDefinit
   },
   "evidence-log": {
     description:
-      "a bounded in-memory log of request and message events with a GET /api/events route that reports its schema, counters, and payload policy",
+      "a bounded in-memory log of HTTP request events and of messages the websocket-echo route receives, with a GET /api/events route that reports its schema, counters, window, and payload policy",
     requiresFeatures: [],
     requiresModules: [],
     routes: ["GET /api/events"],
