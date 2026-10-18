@@ -148,8 +148,9 @@ export interface ListTemplatePackagesResult {
   readonly corrupt: readonly CorruptTemplatePackage[];
 }
 
-export interface InspectTemplatePackageOptions extends TemplateStoreOptions {
+export interface InspectTemplatePackageOptions {
   readonly sourceDir: string;
+  readonly limits?: TemplatePackageLimits;
   /** Admit a package whose only problems are licence/provenance. */
   readonly allowUnverified?: boolean;
 }
@@ -847,6 +848,11 @@ export const getTemplatePackage = async (
  * so a caller that wants the import's verdict before mutating the store gets
  * the same verdict — the package format is not interpreted a second time here.
  * A source that an import would refuse throws the same `TemplateStoreError`.
+ *
+ * It answers the format question only. No store is consulted, so a package
+ * whose `id@version` the store already holds passes here and the import then
+ * refuses it with `template_exists`; that call takes no `storeRoot` because it
+ * would promise a duplicate check it does not perform.
  */
 export const inspectTemplatePackage = async (
   options: InspectTemplatePackageOptions,

@@ -17,7 +17,9 @@ import { TemplateStoreError } from "./TemplateStore.js";
  * that was read so a caller cannot mistake one for the other.
  *
  * Nothing is executed, no network request is made, and no package script is
- * consulted. The scan is over bytes on disk.
+ * consulted. The scan is over bytes on disk. Every match on a line is reported,
+ * not only the first, and a `.git` directory is named as skipped rather than
+ * scanned so repository metadata does not become a finding.
  *
  * ## Bounds
  *
@@ -63,6 +65,7 @@ export interface TemplateScanSkip {
 }
 
 export interface TemplateScanLimits {
+  /** Directory entries (files and directories) visited, not files read. */
   readonly maxFiles: number;
   readonly maxFileBytes: number;
   readonly maxTotalBytes: number;
@@ -87,9 +90,8 @@ export interface TemplateScanResult {
   readonly skipped: readonly TemplateScanSkip[];
   readonly findings: readonly TemplateScanFinding[];
   /**
-   * True when a limit stopped the walk early. `scanned` is still exact; the
-   * remaining entries are in `skipped` when the file cap or findings cap was
-   * the cause, and are simply unlisted when the walk ended at the cap.
+   * True when a limit stopped the walk early. `scanned` is still exact; every
+   * entry the walk did not read is named in `skipped` with its reason.
    */
   readonly truncated: boolean;
   readonly limits: TemplateScanLimits;
@@ -130,9 +132,10 @@ const SCAN_RULES: readonly ScanRule[] = [
   {
     rule: "secret_assignment",
     // `NAME = value` where the name says it holds a credential, and the value
-    // is long enough to be one rather than a placeholder.
+    // is long enough to be one rather than a placeholder. Case-insensitive:
+    // `.env` files conventionally spell these names in lowercase.
     pattern:
-      /^\s*(?:export\s+)?([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*)\s*=\s*\S{8,}/u,
+      /^\s*(?:export\s+)?([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*)\s*=\s*\S{8,}/iu,
     redact: (_match, groups) => `${groups[0] ?? "…"}=…`,
   },
   {
@@ -159,20 +162,38 @@ const SCAN_RULES: readonly ScanRule[] = [
 
 const linesOf = (text: string): readonly string[] => text.split(/\r?\n/u);
 
-const findingsForFile = (relative: string, text: string): readonly TemplateScanFinding[] => {
+/**
+ * One `g`-flagged copy per rule, so every match on a line is reported rather
+ * than only the first. `lastIndex` is reset before each line.
+ */
+const GLOBAL_PATTERNS: readonly { readonly rule: ScanRule; readonly pattern: RegExp }[] =
+  SCAN_RULES.map((rule) => ({
+    rule,
+    pattern: new RegExp(rule.pattern.source, `${rule.pattern.flags}g`),
+  }));
+
+const findingsForFile = (
+  relative: string,
+  text: string,
+  limit: number,
+): readonly TemplateScanFinding[] => {
   const findings: TemplateScanFinding[] = [];
   const lines = linesOf(text);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
-    for (const rule of SCAN_RULES) {
-      const match = rule.pattern.exec(line);
-      if (match === null) continue;
-      findings.push({
-        path: relative,
-        line: index + 1,
-        rule: rule.rule,
-        redacted: rule.redact(match[0], match.slice(1)),
-      });
+    for (const { rule, pattern } of GLOBAL_PATTERNS) {
+      pattern.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(line)) !== null) {
+        if (findings.length >= limit) return findings;
+        findings.push({
+          path: relative,
+          line: index + 1,
+          rule: rule.rule,
+          redacted: rule.redact(match[0], match.slice(1)),
+        });
+        if (match[0].length === 0) pattern.lastIndex += 1;
+      }
     }
   }
   return findings;
@@ -233,13 +254,12 @@ const scanFile = async (root: string, relative: string, state: ScanState): Promi
     return;
   }
   state.scanned.push(relative);
-  for (const finding of findingsForFile(relative, content.toString("utf8"))) {
-    if (state.findings.length >= limits.maxFindings) {
-      state.truncated = true;
-      break;
-    }
-    state.findings.push(finding);
-  }
+  const remaining = limits.maxFindings - state.findings.length;
+  // Ask for one more than fits: a returned extra is what tells us a finding was
+  // dropped, so an exact fit is not reported as truncation.
+  const found = findingsForFile(relative, content.toString("utf8"), remaining + 1);
+  for (const finding of found.slice(0, remaining)) state.findings.push(finding);
+  if (found.length > remaining) state.truncated = true;
 };
 
 const walk = async (root: string, relative: string, state: ScanState): Promise<void> => {
@@ -253,7 +273,9 @@ const walk = async (root: string, relative: string, state: ScanState): Promise<v
       `could not list ${directory}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  entries.sort((left, right) => left.name.localeCompare(right.name));
+  // Code-unit order, not `localeCompare`: the scanned/skipped lists and which
+  // entries a cap reaches must not depend on the host's collation.
+  entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
   for (const entry of entries) {
     const childRelative = relative === "" ? entry.name : `${relative}/${entry.name}`;
     if (state.entries >= state.limits.maxFiles) {
@@ -262,6 +284,12 @@ const walk = async (root: string, relative: string, state: ScanState): Promise<v
       continue;
     }
     state.entries += 1;
+    if (entry.name === ".git") {
+      // Repository metadata is not package content, and its logs and config
+      // are full of addresses and tokens that are not the package's.
+      skip(state, childRelative, "version-control metadata (.git) is not scanned");
+      continue;
+    }
     if (entry.isSymbolicLink()) {
       skip(state, childRelative, "symbolic link (not followed)");
       continue;

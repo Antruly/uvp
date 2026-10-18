@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,7 +33,7 @@ const SECRETS = [
   'const char* gh = "ghp_0123456789012345678901234567890123456789";',
   'const char* slack = "xoxb-123456789012-abcdefghij";',
   'const char* provider = "sk-abcdefghijklmnopqrstuvwx";',
-  "API_TOKEN=supersecretvalue123",
+  "api_token=supersecretvalue123",
   "path = /home/alice/projects/app",
   "mail: alice@example.com",
   "call +86 138 0013 8000",
@@ -72,7 +72,7 @@ describe("scanning a template package", () => {
     const byRule = new Map(result.findings.map((finding) => [finding.rule, finding.redacted]));
     expect(byRule.get("home_path")).toBe("/home/…/");
     expect(byRule.get("email")).toBe("a…@example.com");
-    expect(byRule.get("secret_assignment")).toBe("API_TOKEN=…");
+    expect(byRule.get("secret_assignment")).toBe("api_token=…");
     expect(result.truncated).toBe(false);
     expect(result.scanned).toContain("files/src/secrets.txt");
     expect(result.scanned).toContain("template.json");
@@ -111,7 +111,9 @@ describe("scanning a template package", () => {
       { path: "files/src/logo.bin", reason: "binary content (contains a NUL byte)" },
     ]);
   });
+});
 
+describe("the scan's bounds and accounting", () => {
   it("refuses to read a file over the byte limit, so the limit bounds memory", async () => {
     const root = await temporaryRoot("uvp-scan-large-");
     const fixture = await makeTemplatePackage({ root, content: "int main() {}\n" });
@@ -165,6 +167,65 @@ describe("scanning a template package", () => {
     expect(result.skipped).toEqual(
       expect.arrayContaining([
         { path: "files/src/link.cc", reason: "symbolic link (not followed)" },
+      ]),
+    );
+  });
+
+  it("reports every match on a line, not only the first", async () => {
+    const root = await temporaryRoot("uvp-scan-pairs-");
+    const fixture = await makeTemplatePackage({ root });
+    await writeFile(
+      path.join(fixture.dir, "files", "src", "pairs.txt"),
+      [
+        "mail: alice@example.com, bob@example.com",
+        'keys: "AKIAIOSFODNN7EXAMPLE", "ghp_0123456789012345678901234567890123456789"',
+      ].join("\n"),
+    );
+
+    const result = await scanTemplatePackage(fixture.dir);
+
+    expect(
+      result.findings.filter((finding) => finding.rule === "email").map((f) => f.redacted),
+    ).toEqual(["a…@example.com", "b…@example.com"]);
+    expect(
+      result.findings.filter(
+        (finding) => finding.rule === "aws_access_key" || finding.rule === "github_token",
+      ),
+    ).toHaveLength(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("skips .git by name instead of reporting repository metadata", async () => {
+    const root = await temporaryRoot("uvp-scan-git-");
+    const fixture = await makeTemplatePackage({ root });
+    await mkdir(path.join(fixture.dir, ".git"), { recursive: true });
+    await writeFile(
+      path.join(fixture.dir, ".git", "config"),
+      "[user]\n\temail = alice@example.com\n",
+    );
+
+    const result = await scanTemplatePackage(fixture.dir);
+
+    expect(result.skipped).toContainEqual({
+      path: ".git",
+      reason: "version-control metadata (.git) is not scanned",
+    });
+    expect(result.findings).toEqual([]);
+    expect(result.scanned.some((path) => path.startsWith(".git"))).toBe(false);
+  });
+
+  it("counts directory entries against the entry limit and names the rest", async () => {
+    const root = await temporaryRoot("uvp-scan-entries-");
+    const fixture = await makeTemplatePackage({ root });
+
+    const result = await scanTemplatePackage(fixture.dir, { limits: { maxFiles: 1 } });
+
+    expect(result.truncated).toBe(true);
+    expect(result.scanned).toEqual(["LICENSE"]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        { path: "README.md", reason: "the entry limit of 1 was reached" },
+        { path: "files", reason: "the entry limit of 1 was reached" },
       ]),
     );
   });

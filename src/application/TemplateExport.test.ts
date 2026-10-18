@@ -114,17 +114,21 @@ describe("exporting a template package", () => {
     const { storeRoot } = await storeWithPackage();
     const storedEntry = path.join(storeRoot, "acme-dashboard", "1.2.0");
     const before = (await readdir(storedEntry)).sort();
-    const target = path.join(storedEntry, "out");
 
-    expect(
-      await codeOf(
-        exportTemplatePackage("acme-dashboard", "1.2.0", { storeRoot, targetDir: target }),
-      ),
-    ).toBe("target_exists");
-    // The staging directory would have been a sibling of the target, inside the
-    // tree being copied; nothing may be created there.
-    expect((await readdir(storedEntry)).sort()).toEqual(before);
-    await expect(access(target)).rejects.toThrow();
+    // `..out` is a child whose name starts with `..`; it must not be mistaken
+    // for a path outside the stored tree.
+    for (const name of ["out", "..out"]) {
+      const target = path.join(storedEntry, name);
+      expect(
+        await codeOf(
+          exportTemplatePackage("acme-dashboard", "1.2.0", { storeRoot, targetDir: target }),
+        ),
+      ).toBe("target_exists");
+      // The staging directory would have been a sibling of the target, inside
+      // the tree being copied; nothing may be created there.
+      expect((await readdir(storedEntry)).sort()).toEqual(before);
+      await expect(access(target)).rejects.toThrow();
+    }
   });
 
   it("does not create the target when the store entry no longer matches its manifest", async () => {

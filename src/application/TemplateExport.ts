@@ -28,7 +28,9 @@ import {
  * something a caller can undo. The copy is staged in a sibling directory on the
  * same filesystem and renamed into place only after verification, so a failed
  * export leaves no partial package at the target. A cleanup that fails is
- * reported in the error's details, not hidden.
+ * reported in the error's details, not hidden. Parent directories created for
+ * an absent target are left in place when the copy fails: the no-partial-package
+ * invariant covers the package, not the empty ancestors.
  */
 
 export interface ExportTemplatePackageOptions extends TemplateStoreOptions {
@@ -57,7 +59,14 @@ const isAbsent = (error: unknown): boolean => codeOf(error) === "ENOENT";
 /** True when `child` names a path below `parent`, not `parent` itself. */
 const isInside = (parent: string, child: string): boolean => {
   const relative = path.relative(parent, child);
-  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+  // `..` must be a whole segment: a sibling named `..out` has the relative
+  // path `..out`, which is a child of `parent` despite the prefix.
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
 };
 
 const assertTargetIsFree = async (target: string): Promise<boolean> => {
@@ -186,7 +195,16 @@ export const exportTemplatePackage = async (
       `could not create ${path.dirname(target)}: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
-  if (targetWasEmpty) await rm(target, { recursive: true, force: true });
+  if (targetWasEmpty) {
+    try {
+      await rm(target, { recursive: true, force: true });
+    } catch (error) {
+      throw new TemplateStoreError(
+        "io_error",
+        `could not clear ${target}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   const staging = path.join(
     path.dirname(target),
     `.${path.basename(target)}.export-${randomUUID()}`,

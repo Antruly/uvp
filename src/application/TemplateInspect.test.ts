@@ -55,7 +55,7 @@ describe("inspecting a template package", () => {
     const fixture = await makeTemplatePackage({ root: source });
     const storeRoot = path.join(await temporaryRoot("uvp-inspect-store-"), "store");
 
-    const inspected = await inspectTemplatePackage({ sourceDir: fixture.dir, storeRoot });
+    const inspected = await inspectTemplatePackage({ sourceDir: fixture.dir });
 
     expect(inspected.id).toBe("acme-dashboard");
     expect(inspected.version).toBe("1.2.0");
