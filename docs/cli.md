@@ -76,6 +76,12 @@ A feature uvp could not check is listed under `undetermined` with the reason, no
 folded into either side. See
 [libuvcpp feature mapping](libuvcpp-features.md#undetermined-is-a-real-answer).
 
+Each compiler is reported where it was found. On Windows, an MSVC that is
+installed but not on `PATH` — the normal state outside a Developer Command
+Prompt — is listed with `on_path: false` and the environment it needs, rather
+than as a missing prerequisite; CMake's Visual Studio generator builds with it,
+the Ninja generator needs a Developer Command Prompt.
+
 Pass `--workspace PATH` and the report describes the toolchain the workspace
 asks for, not only this host: a `uvp.json` that names a container is reported
 with that image's toolchain in the list — or, when this host has no runtime or

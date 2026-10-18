@@ -37,10 +37,14 @@ import {
  * to fail at the link step.
  *
  * The distinction that carries the whole design is between *absent* and
- * *unknown*. A compiler that is not on PATH is absent, and uvp says so. A
- * libuvcpp build whose feature set cannot be read is unknown, and uvp says that
- * too rather than reporting the feature as missing. Every remaining decision in
- * this file follows from keeping those two apart.
+ * *unknown*. A compiler that neither the PATH probe nor the platform's own
+ * locator can find is absent, and uvp says so; an MSVC that is installed but
+ * only reachable from a Developer Command Prompt is reported where it is, with
+ * the environment it needs, because "not on PATH" is not "not installed"
+ * ([#224](https://github.com/Antruly/uvp/issues/224)). A libuvcpp build whose
+ * feature set cannot be read is unknown, and uvp says that too rather than
+ * reporting the feature as missing. Every remaining decision in this file
+ * follows from keeping those apart.
  *
  * A workspace can name the toolchain it is built with, and that is the third
  * thing this service has to keep straight. `selectToolchain` is asked the same
@@ -540,6 +544,9 @@ export class DoctorService {
           path: compiler.path,
           ...(compiler.version === undefined ? {} : { version: compiler.version }),
           ...(compiler.target === undefined ? {} : { target: compiler.target }),
+          // Absent when the provider did not ask the question — a container's
+          // compilers are not on this host's PATH at all.
+          ...(compiler.onPath === undefined ? {} : { on_path: compiler.onPath }),
         })),
         build_systems: availability.buildSystems.map((system) => ({
           id: system.id,
@@ -733,7 +740,13 @@ export interface DoctorToolchain {
   id: string;
   available: boolean;
   version?: string;
-  compilers: { id: string; path: string; version?: string; target?: string }[];
+  compilers: {
+    id: string;
+    path: string;
+    version?: string;
+    target?: string;
+    on_path?: boolean;
+  }[];
   build_systems: { id: string; path: string; version?: string }[];
   missing: { id: string; required_for: string }[];
   limitations: string[];
