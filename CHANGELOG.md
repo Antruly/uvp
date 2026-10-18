@@ -1,5 +1,121 @@
 # Changelog
 
+## [0.3.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.2.0...uvp-agents-0.3.0) (2026-10-18)
+
+
+### Features
+
+* **doctor:** require pkg-config on the archive route and surface its remedy ([c4475d2](https://github.com/Antruly/uvp/commit/c4475d288b12b343b6abdb2501d6abba8d059b84))
+* **doctor:** require pkg-config on the archive route and surface its remedy ([f95400b](https://github.com/Antruly/uvp/commit/f95400bb9eba6f7c69d5c649062f0f763e070eff))
+* **domain:** add the uvp.template/1 manifest schema and validator ([dd454a7](https://github.com/Antruly/uvp/commit/dd454a7ecbd3cafb78f9be706ae3effe6eb9a2d3))
+* **domain:** add the uvp.template/1 manifest schema and validator ([c6b1908](https://github.com/Antruly/uvp/commit/c6b190807467504b9f14d6f4a1bb82624b398ba2)), closes [#236](https://github.com/Antruly/uvp/issues/236)
+* **init:** add the evidence-log module with a recorded payload policy ([be99c25](https://github.com/Antruly/uvp/commit/be99c25314f50ea83771017369d4dda39fd77aa4))
+* **init:** add the evidence-log module with a recorded payload policy ([78d183a](https://github.com/Antruly/uvp/commit/78d183a8970460b0cb2a487a3e3e559b2351c05e))
+* **init:** compose application modules into generated workspaces ([804efbe](https://github.com/Antruly/uvp/commit/804efbeccfd13a7b1cf619a0c7dacce8f49a363e))
+* **init:** compose application modules into generated workspaces ([5c17d11](https://github.com/Antruly/uvp/commit/5c17d11bc4387acd7d1abb407015bc03eff2e6dd))
+* **registry:** read, cache, and search the template registry index ([a8791a4](https://github.com/Antruly/uvp/commit/a8791a4665ca53555fcacaddfc5c1ad18ac5e8db))
+* **registry:** read, cache, and search the template registry index ([bfafd17](https://github.com/Antruly/uvp/commit/bfafd177e0502efd04f7ac022bae4f36410476af))
+* **search:** add deterministic template search over the local store ([e274a51](https://github.com/Antruly/uvp/commit/e274a5146aa69629715c42f4ade5ffcacb9c355c))
+* **search:** add deterministic template search over the local store ([fd073db](https://github.com/Antruly/uvp/commit/fd073db4084df0a471148b2d02b72d05a5486c4a))
+* **store:** add the local template package store ([b5abe0b](https://github.com/Antruly/uvp/commit/b5abe0b70c974e02c670237b96c51bbb709ec618))
+* **store:** add the local template package store ([9672605](https://github.com/Antruly/uvp/commit/9672605985795976bdbd89cbab811ad31f4e81aa))
+* **store:** export, inspect, and scan template packages ([20de099](https://github.com/Antruly/uvp/commit/20de09948bfbe4afa1c83d9f96b80b23f6f10562))
+* **store:** export, inspect, and scan template packages ([65aa184](https://github.com/Antruly/uvp/commit/65aa18479648dc43cd008c8530b0b6b44aaeb15a))
+* **templates:** add a websocket-test console template ([730992a](https://github.com/Antruly/uvp/commit/730992a3d24cce8f3aa54f30d1f598ccf2d2f715))
+* **templates:** add a websocket-test console template ([37ff885](https://github.com/Antruly/uvp/commit/37ff885c472e2efea7e30af7b6cc8fbe6f27ee1a))
+* **workspace:** report the routes a generated service registers ([43f4d69](https://github.com/Antruly/uvp/commit/43f4d69c09e5a2092a0d388c014047b5452906f2))
+* **workspace:** report the routes a generated service registers ([1cc6ea6](https://github.com/Antruly/uvp/commit/1cc6ea699839b81e1ad3a4083ca125fd8f29d3be)), closes [#221](https://github.com/Antruly/uvp/issues/221)
+
+
+### Bug Fixes
+
+* **doctor:** name how to install libuvcpp when discovery finds none ([4726813](https://github.com/Antruly/uvp/commit/472681341c1fa16ec4f077f4ff39fecfd026aea9))
+* **doctor:** name how to install libuvcpp when discovery finds none ([262052c](https://github.com/Antruly/uvp/commit/262052c55a9bc763e66818c8bd5b8b6f37534f2e))
+* **domain:** close the review notes on the template package schema ([f11e57a](https://github.com/Antruly/uvp/commit/f11e57aa004261a59c528dad1d16e37e5ab977b9))
+* **domain:** close the review notes on the template package schema ([1508f7c](https://github.com/Antruly/uvp/commit/1508f7cdd82c3636ed98dde7341ad6689d36ec72)), closes [#236](https://github.com/Antruly/uvp/issues/236)
+* **evidence-log:** drive the ring past its bound and clarify the schema ([cb2986b](https://github.com/Antruly/uvp/commit/cb2986b9c49326aad738ce264979cd8485de3b6a))
+* **http:** destroy an abandoned HTTP/2 session instead of closing gracefully ([507fd99](https://github.com/Antruly/uvp/commit/507fd99350d82ef429aaf570125efce4e3ae3aad))
+* **registry:** accept the generator's index shape and bind the cache to the URL ([285140a](https://github.com/Antruly/uvp/commit/285140af3e75c128691c3ad9732955ffcdf68b0c))
+* **release:** check the version from the staged helpers on a bootstrap tag ([04ea6df](https://github.com/Antruly/uvp/commit/04ea6df0dc54cad8f7b0afc9873a7d16986cf8ac))
+* **release:** check the version from the staged helpers on a bootstrap tag ([38eff70](https://github.com/Antruly/uvp/commit/38eff704065daebebb708d7971a592aabe202b39))
+* **scan:** report a home path whose user name ends the path ([3ae159f](https://github.com/Antruly/uvp/commit/3ae159f4653cca7ec7de2060446d9c42a76d03d1))
+* **scan:** report a home path whose user name ends the path ([81ccd94](https://github.com/Antruly/uvp/commit/81ccd94ab752deb290100123c2840e1d16328c17)), closes [#255](https://github.com/Antruly/uvp/issues/255)
+* **store:** bound the reader's memory by checking each file's size first ([ffa8350](https://github.com/Antruly/uvp/commit/ffa8350d07cefda0e9eed028313b62a56770c987))
+* **store:** bound the reader's memory by checking each file's size first ([934c74d](https://github.com/Antruly/uvp/commit/934c74d58745a6bd1dcf777379668372dcf48ebd))
+* **store:** name an unreadable record instead of calling the package invalid ([017a6ff](https://github.com/Antruly/uvp/commit/017a6ff20ad27c0096a3b73f1c7c3798091485b2))
+* **store:** name an unreadable record instead of calling the package invalid ([6702581](https://github.com/Antruly/uvp/commit/6702581509db450e43d606a0c4349d0b77e7101e))
+* **store:** roll back a package when metadata cannot be published ([7b062a3](https://github.com/Antruly/uvp/commit/7b062a35738fe712a080680c4224efa2687aa981))
+* **store:** treat .. as a segment and harden the scan's accounting ([0f57376](https://github.com/Antruly/uvp/commit/0f5737695f9c735fc281871bd8735f6b9d23c072))
+* **templates:** compile the generated sources as UTF-8 under MSVC ([4f4b827](https://github.com/Antruly/uvp/commit/4f4b827e88044fab14fc970094eb25b7b27d5ba5))
+* **templates:** compile the generated sources as UTF-8 under MSVC ([dd150fe](https://github.com/Antruly/uvp/commit/dd150fe6c472771268d05530f8d8a598ea7e9b4f))
+* **templates:** keep the websocket-test log parseable and its console upgradable ([46431b8](https://github.com/Antruly/uvp/commit/46431b87192ced4f82f8b65f35b4b2df1e25bd42))
+* **toolchain:** explain a runtime-only libuvcpp package ([8141304](https://github.com/Antruly/uvp/commit/8141304c9bc812baa515a09ac9f8ba7b3aefe95b))
+* **toolchain:** explain a runtime-only libuvcpp package ([915cb3d](https://github.com/Antruly/uvp/commit/915cb3d60522bb6972329b2bc66cf87682889fce)), closes [#213](https://github.com/Antruly/uvp/issues/213)
+* **toolchain:** find an installed MSVC that is not on PATH ([3930a7b](https://github.com/Antruly/uvp/commit/3930a7b5bf5910993e7c40d15edb6a04611af7fd))
+* **toolchain:** find an installed MSVC that is not on PATH ([11cb1d5](https://github.com/Antruly/uvp/commit/11cb1d5b8320fed7f953991f3bb7ef51466d0a79))
+* **toolchains:** ask the pkg-config question CMake's FindPkgConfig asks ([d1ca987](https://github.com/Antruly/uvp/commit/d1ca98719917d7cd2d9121ca1ec8e05c2dc371fd))
+* **toolchains:** gate the pkg-config validator at CMake 3.29.1 ([72ca40e](https://github.com/Antruly/uvp/commit/72ca40eaa2593ab77c6d82b2ebde2ff3c3ae636a))
+* **toolchains:** run a batch pkg-config candidate through cmd ([33e6494](https://github.com/Antruly/uvp/commit/33e6494cabc2dcb01e29ba22c357be96a9349bcf))
+* **web:** bound the WebSocket opening handshake and settle an aborted response ([81a7ea8](https://github.com/Antruly/uvp/commit/81a7ea8dbfe6d0c741bf61fc0f7097564b8cc78d))
+* **web:** destroy the pre-upgrade request when the handshake deadline fires ([5be6fbb](https://github.com/Antruly/uvp/commit/5be6fbb64acbf2632e08b7bd5315e778e881f407)), closes [#182](https://github.com/Antruly/uvp/issues/182)
+
+
+### Code Refactoring
+
+* **domain:** drop the unread staticPrefix field ([3bccfe5](https://github.com/Antruly/uvp/commit/3bccfe5c19f69fc949cf71c4a3f7fb491e1569ac))
+* **domain:** drop the unread staticPrefix field ([4a93335](https://github.com/Antruly/uvp/commit/4a933353a94de20f2b5a217a889afff57f1311aa))
+
+
+### Documentation
+
+* check, docs:build, and oxfmt pass on this tree. ([c868f4d](https://github.com/Antruly/uvp/commit/c868f4dc030a16cf5bc63cd6f5891ba039c5aaf5))
+* **cli:** name the Git Bash/MSYS path-conversion workaround ([b612ac6](https://github.com/Antruly/uvp/commit/b612ac653dd391e899ea9e9cf082c48c7f9976cd))
+* **cli:** name the Git Bash/MSYS path-conversion workaround ([ca21a44](https://github.com/Antruly/uvp/commit/ca21a44921209a3e30c4a17a069bfd4b5540a06c))
+* **installation:** clarify local and global installs when uvp is not found ([44f980f](https://github.com/Antruly/uvp/commit/44f980f7f184cc02b8573649f78078549a499751))
+* **installation:** clarify local and global installs when uvp is not found ([cda1469](https://github.com/Antruly/uvp/commit/cda1469f06b0f08fe2076c3794498c2e8dcec107)), closes [#215](https://github.com/Antruly/uvp/issues/215)
+* **registry:** state the proxy limitation of the default transport ([64ac69a](https://github.com/Antruly/uvp/commit/64ac69a651205483429e095ee0e2c1ba032de4c7))
+* **release-notes:** draft the first-release notes and upgrade guidance ([2944b95](https://github.com/Antruly/uvp/commit/2944b95b8567fcaddbc15c48de66b7b58b7c736c))
+* **release-notes:** draft the first-release notes and upgrade guidance ([3c4e413](https://github.com/Antruly/uvp/commit/3c4e413d105896df8ce882366dd76d00013054f2))
+* **release:** attribute the bootstrap choice to its recorded author ([753f6cd](https://github.com/Antruly/uvp/commit/753f6cd0d469213be2b419e86ffd27be21b23a35))
+* **release:** prepare the MCP registry entry and check it against the package ([368229f](https://github.com/Antruly/uvp/commit/368229f66cdb612bd341c083749e3c9bf748e8c0))
+* **release:** prepare the MCP registry entry and check it against the package ([0fc6b11](https://github.com/Antruly/uvp/commit/0fc6b11e73fa15eadb04c9815e2ede89c3ccdfcc)), closes [#162](https://github.com/Antruly/uvp/issues/162)
+* **release:** record the observed 0.2.0 GitHub Packages mirror ([eba81cd](https://github.com/Antruly/uvp/commit/eba81cd28bbdca5901b7e9a8607d41a831c53ffc))
+* **release:** record the observed 0.2.0 GitHub Packages mirror ([c868f4d](https://github.com/Antruly/uvp/commit/c868f4dc030a16cf5bc63cd6f5891ba039c5aaf5)), closes [#207](https://github.com/Antruly/uvp/issues/207)
+* **release:** record the observed 0.2.0 publish and the open follow-up ([b039c19](https://github.com/Antruly/uvp/commit/b039c19ff1f211f5323b72bb2cfae221a8ee4779))
+* **support-matrix:** record what the first-release lanes observed ([becfeb5](https://github.com/Antruly/uvp/commit/becfeb57ae940738bd6a2f6b56a5685183e4c092))
+* **work-plan:** correct the release and [#184](https://github.com/Antruly/uvp/issues/184) facts after review ([5f16565](https://github.com/Antruly/uvp/commit/5f1656534697c0520847df05c631fa0559bfc6be))
+* **work-plan:** record the npm publish and support-matrix prep PRs ([4dd0315](https://github.com/Antruly/uvp/commit/4dd0315fdfbdca39c76b6b8718b7772d0520abf9))
+* **work-plan:** record the release PR and post-release lanes ([614d9a1](https://github.com/Antruly/uvp/commit/614d9a175abb0837c8de09a601cc3e6726659816))
+* **work-plan:** record the release PR and post-release lanes ([b4f155e](https://github.com/Antruly/uvp/commit/b4f155ef6b6148d804fb7e7430e0ccf72d01d167)), closes [#189](https://github.com/Antruly/uvp/issues/189)
+* **work-plan:** record the release prep claims ([ea77788](https://github.com/Antruly/uvp/commit/ea7778802d5ccb772f2e48328d0dec7243f8678d))
+* **work-plan:** refresh the snapshot after the merged prep PRs ([260d448](https://github.com/Antruly/uvp/commit/260d448e08e5904b206758b3f1a29cd1d1c4ec64))
+* **work-plan:** refresh the snapshot after the release-tooling merges ([9cd5bb9](https://github.com/Antruly/uvp/commit/9cd5bb9865d77d5aaf02d1848775475f76051f8a))
+* **work-plan:** refresh the snapshot after the release-tooling merges ([8f87e7f](https://github.com/Antruly/uvp/commit/8f87e7f2bf6c87255c957f1071834995c87b18e8))
+
+
+### Tests
+
+* **acceptance:** prove the published package onboards an agent ([65be960](https://github.com/Antruly/uvp/commit/65be960cc89de5e64aa7841e6739aa7d142102a1))
+* **acceptance:** prove the published package onboards an agent ([5816a0b](https://github.com/Antruly/uvp/commit/5816a0b526e1d1d6085d626c40f99c477f3dbdc9)), closes [#163](https://github.com/Antruly/uvp/issues/163)
+* **conformance:** retry a launch only when a stranger owns its port ([23485a2](https://github.com/Antruly/uvp/commit/23485a282c8f35977f8959aaf1c45920ab417690))
+* **conformance:** retry a launch only when a stranger owns its port ([083c7bc](https://github.com/Antruly/uvp/commit/083c7bc04f29629c32aec99a3b23b3c71c654f77))
+* **toolchain:** keep the provider test off the caller's search paths ([73058c3](https://github.com/Antruly/uvp/commit/73058c31d31da4282548f36e1e5c718346287b30))
+* **toolchain:** keep the provider test off the caller's search paths ([69f2cea](https://github.com/Antruly/uvp/commit/69f2cead6926ef37713ae08279949715913ce66a)), closes [#210](https://github.com/Antruly/uvp/issues/210)
+* **workspace:** check the route table against the source in both directions ([20b89c2](https://github.com/Antruly/uvp/commit/20b89c26e0574739bd5782a53e2dbb0c7e38ae71))
+
+
+### Continuous Integration
+
+* **release:** bootstrap GitHub Packages for pre-helper tags ([79b40b3](https://github.com/Antruly/uvp/commit/79b40b314a0d902656c6d0c8f2931b66266ed2d2))
+* **release:** bootstrap GitHub Packages for pre-helper tags ([2a2a142](https://github.com/Antruly/uvp/commit/2a2a142521ec296407c8840e538c89a1e29c0c39))
+* **release:** keep the prepare lifecycle out of pack JSON ([7b70359](https://github.com/Antruly/uvp/commit/7b703598cf0de2eec42ac9b57bf2c76dede19f9a))
+* **release:** keep the prepare lifecycle out of pack JSON ([f269e9b](https://github.com/Antruly/uvp/commit/f269e9bd3bd8ddb506cd72e757cebc3daea4f76b))
+* **release:** publish a release tag from a manual dispatch ([c0adf7f](https://github.com/Antruly/uvp/commit/c0adf7f16a37c6464c52a2f0755cb5de34ab0a84))
+* **release:** publish a release tag to npm from a manual dispatch ([40b2765](https://github.com/Antruly/uvp/commit/40b276580cfc37114b76ad7f767f268d284bfb95))
+* **release:** publish a scoped GitHub Packages mirror ([5065609](https://github.com/Antruly/uvp/commit/5065609efc10994d276de1305bba3d3ffe651854))
+* **release:** publish a scoped GitHub Packages mirror ([ece06d7](https://github.com/Antruly/uvp/commit/ece06d739f202d71132c149779954e2eee86b544))
+* **windows:** record CMake's version and describe the .bat validator ([3d139f0](https://github.com/Antruly/uvp/commit/3d139f06bfe08acd3f00049925361fbd2f136cdd))
+
 ## [0.2.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.1.0...uvp-agents-0.2.0) (2026-10-17)
 
 
