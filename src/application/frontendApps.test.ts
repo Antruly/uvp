@@ -50,7 +50,7 @@ describe("the generated frontend project", () => {
     }
   });
 
-  it("commits a lockfile whose root dependencies match the manifest", () => {
+  it("commits a lockfile that matches the manifest and the public registry", () => {
     for (const app of UVP_FRONTEND_APPS) {
       const manifest = JSON.parse(byPath(app, "frontend/package.json")) as {
         dependencies?: Record<string, string>;
@@ -63,6 +63,7 @@ describe("the generated frontend project", () => {
           string,
           {
             name?: string;
+            resolved?: string;
             dependencies?: Record<string, string>;
             devDependencies?: Record<string, string>;
           }
@@ -80,6 +81,16 @@ describe("the generated frontend project", () => {
       // A lockfile with only the root entry is not a lockfile; `npm ci` would
       // fail to find the packages it names.
       expect(Object.keys(lockfile.packages).length, app).toBeGreaterThan(1);
+      // `npm ci` downloads from each `resolved` URL, so a lockfile written on a
+      // mirror-configured host sends every generated project to that mirror.
+      // The committed data must leave the registry choice to the user's config.
+      const resolved = Object.values(lockfile.packages)
+        .map((entry) => entry.resolved)
+        .filter((url): url is string => url !== undefined);
+      expect(resolved.length, app).toBeGreaterThan(0);
+      for (const url of resolved) {
+        expect(new URL(url).host, `${app} ${url}`).toBe("registry.npmjs.org");
+      }
     }
   });
 
