@@ -62,6 +62,29 @@ const CMAKE_MODULE_ERROR = [
   "",
 ].join("\n");
 
+/**
+ * CMake 3.28, from a `find_package(PkgConfig REQUIRED)` with no usable
+ * `pkg-config` executable — captured on this host by forcing
+ * `PKG_CONFIG_EXECUTABLE` to `NOTFOUND`.
+ *
+ * This is the configure failure a Windows host meets when the only pkg-config
+ * on `PATH` is a `.bat` wrapper: `FindPkgConfig` uses `find_program`, which
+ * accepts an executable image and not a script. The message is CMake's and
+ * names neither the wrapper nor the documentation, so the parser attaches the
+ * remedy beside it.
+ */
+const CMAKE_PKG_CONFIG_MISSING = [
+  "CMake Error at /usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake:230 (message):",
+  "  Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)",
+  "Call Stack (most recent call first):",
+  "  /usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake:600 (_FPHSA_FAILURE_MESSAGE)",
+  "  /usr/share/cmake-3.28/Modules/FindPkgConfig.cmake:99 (find_package_handle_standard_args)",
+  "  CMakeLists.txt:3 (find_package)",
+  "",
+  "",
+  "-- Configuring incomplete, errors occurred!",
+].join("\n");
+
 /** CMake 3.28, from `cmake -S` on a directory that does not exist. */
 const CMAKE_LOCATIONLESS_ERROR = [
   'CMake Error: The source directory "/tmp/nope" does not exist.',
@@ -348,6 +371,32 @@ describe("CMake's own diagnostics", () => {
     expect(only?.message).toContain("The following required packages were not found:");
     expect(only?.message).toContain("- uvcpp-absent");
     expect(only?.message).not.toContain("Call Stack");
+  });
+
+  it("attaches the pkg-config remedy to CMake's missing-executable failure", () => {
+    const said = parseDiagnostics("", CMAKE_PKG_CONFIG_MISSING, "configure");
+
+    expect(said).toHaveLength(1);
+    const [only] = said;
+    // The message is kept as CMake printed it — the remedy is attached beside
+    // it, never folded in, so a caller can still match the tool's own words.
+    expect(only?.message).toBe(
+      "message: Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)",
+    );
+    expect(only?.phase).toBe("configure");
+    expect(only?.remediation?.action).toContain("pkg-config");
+    expect(only?.remediation?.action).toContain("pkgconfiglite");
+    expect(only?.remediation?.docs).toBe("docs/installation.md#windows-msvc");
+  });
+
+  it("does not attach that remedy to a missing package, which is a different failure", () => {
+    // Same module, same `message` command, different sentence: the packages
+    // were not found because they are not installed, not because the tool that
+    // reads their metadata is missing. Sending this caller to install
+    // pkg-config would be advice about a program they already have.
+    const said = parseDiagnostics("", CMAKE_MODULE_ERROR, "configure");
+
+    expect(said[0]?.remediation).toBeUndefined();
   });
 
   it("reads the location-less form, which is one diagnostic on one line", () => {

@@ -55,6 +55,25 @@ const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[
 ];
 
 /**
+ * Whether this host has a pkg-config executable, observed rather than required.
+ *
+ * Two names for one program: `pkgconf` is the implementation many distributions
+ * and the Windows pkgconfiglite shim install, and CMake's `FindPkgConfig`
+ * accepts either. `whichOnPath` accepts only an executable image, so a `.bat`
+ * wrapper that answers `pkg-config --version` in a shell is reported as absent
+ * — which is exactly what CMake will do with it.
+ *
+ * `{}` means "looked and found nothing"; the caller decides whether that is a
+ * problem, because whether a build needs pkg-config depends on the libuvcpp
+ * route it resolved to.
+ */
+const pkgConfigOnPath = async (signal: AbortSignal): Promise<{ readonly path?: string }> => {
+  if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
+  const path = (await whichOnPath("pkg-config")) ?? (await whichOnPath("pkgconf"));
+  return path === undefined ? {} : { path };
+};
+
+/**
  * The entries of `CMAKE_PREFIX_PATH`, in the spellings a caller may have used.
  *
  * CMake uses `:` on UNIX and `;` on Windows; both are accepted here because
@@ -341,6 +360,12 @@ export class LocalToolchainProvider implements ToolchainProvider {
       limitations.push(`Default compiler is ${compilers[0].id}; pass a generator to override.`);
     }
 
+    // Looked for, not required. Whether a build needs pkg-config depends on the
+    // libuvcpp route — an install with a CMake package never reaches the
+    // fallback — and that is a fact about the library, decided by the caller
+    // once discovery has answered.
+    const pkgConfig = await pkgConfigOnPath(signal);
+
     const cmakeVersion = await versionOf("cmake", ["--version"]).catch(() => undefined);
     return {
       id: "local",
@@ -350,6 +375,7 @@ export class LocalToolchainProvider implements ToolchainProvider {
       buildSystems,
       missing,
       limitations,
+      pkgConfig,
     };
   }
 
@@ -422,10 +448,15 @@ export const discoverLibuvcpp = async (
       continue;
     }
     const modules = await readModules(root);
-    const hasConfig =
-      (modules?.length ?? 0) > 0 ||
-      (await cmakePackageIn(root, "lib")) ||
-      (await cmakePackageIn(root, "lib64"));
+    // Kept rather than folded into `hasConfig`: the generated project's first
+    // route is `find_package(uvcpp CONFIG)`, and whether this install answers
+    // it is what decides if pkg-config is a prerequisite. `hasConfig` is the
+    // broader question — "does this root hold anything at all" — and answering
+    // it by throwing this away would leave the doctor to infer the route from
+    // the version-source order.
+    const cmakePackage =
+      (await cmakePackageIn(root, "lib")) || (await cmakePackageIn(root, "lib64"));
+    const hasConfig = (modules?.length ?? 0) > 0 || cmakePackage;
     if (!hasConfig) {
       // A header that was read and defines nothing is not "missing development
       // files"; only a root with no readable config source at all is.
@@ -438,6 +469,7 @@ export const discoverLibuvcpp = async (
       ...(version === undefined ? {} : { version: version.version, versionSource: version.source }),
       installPrefix: root,
       modules: modules ?? [],
+      cmakePackage,
       ...(modules === undefined
         ? {
             modulesUnknown: true,

@@ -6,6 +6,8 @@ import { assessFeatures } from "./ToolchainProvider.js";
 import type {
   HeaderProbe,
   LibuvcppBuild,
+  MissingPrerequisite,
+  ToolchainAvailability,
   ToolchainIdentity,
   ToolchainProvider,
 } from "./ToolchainProvider.js";
@@ -212,6 +214,69 @@ interface FeatureQuestion {
 const NO_BUILD = "libuvcpp was not found, so no build could be inspected for this feature";
 
 /**
+ * How a caller fixes a missing prerequisite.
+ *
+ * The doctor knows the remedy for the one requirement it adds itself. Every
+ * other gap comes from a provider, and "install it" is the most a generic
+ * layer can say about a name it did not choose.
+ */
+const blockedByFor = (id: string): string =>
+  id === "pkg-config"
+    ? "Install an executable pkg-config (pkgconf works too), then re-run uvp_doctor. " +
+      "On Windows the release-archive route needs a real .exe rather than a .bat wrapper; " +
+      "see docs/installation.md#windows-msvc."
+    : `Install ${id}, then re-run uvp_doctor.`;
+
+/**
+ * The toolchain this workspace builds with, and the libuvcpp found for it.
+ *
+ * One record rather than two parameters because the conditional requirement is
+ * a fact about both: a provider that is not this one has no libuvcpp route in
+ * this report, and a libuvcpp without its provider names no row to attach a
+ * gap to.
+ */
+interface InspectSubject {
+  readonly selected: ToolchainProvider;
+  readonly build: LibuvcppBuild;
+}
+
+/**
+ * The pkg-config requirement the libuvcpp route creates, when it does.
+ *
+ * The generated project asks `find_package(uvcpp CONFIG)` first and falls back
+ * to pkg-config when no CMake package answered. A release archive ships only
+ * `uvcpp.pc`, so on that route a missing executable is what turns a configure
+ * into CMake's `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`.
+ *
+ * Three observations decide it, and each has to be an observation:
+ *
+ *  - `build.found` — there is no route to judge when there is no library;
+ *  - `build.cmakePackage === false` — the package was looked for and was not
+ *    there. `undefined` is a provider that did not examine the install (the
+ *    container does not), and it must not become "the fallback is required";
+ *  - `availability.pkgConfig !== undefined` — the provider looked. A provider
+ *    that did not look yields no requirement, because "I could not look" is not
+ *    "it is missing" (AGENTS.md).
+ *
+ * A found executable ends it: the fallback will have what it needs.
+ */
+const pkgConfigGap = (
+  availability: ToolchainAvailability,
+  build: LibuvcppBuild,
+): MissingPrerequisite | undefined => {
+  if (!build.found || build.cmakePackage !== false) return undefined;
+  if (availability.pkgConfig === undefined || availability.pkgConfig.path !== undefined) {
+    return undefined;
+  }
+  return {
+    id: "pkg-config",
+    requiredFor:
+      "configuring against this libuvcpp install, which has no CMake package config, " +
+      "so the generated project falls back to pkg-config",
+  };
+};
+
+/**
  * Whether anything at all can be decided about these features.
  *
  * Two states with one shape: the toolchain the workspace named could not be
@@ -308,7 +373,31 @@ export class DoctorService {
       });
     }
 
-    const { toolchains, limitations } = await this.#inspect(providers, recorder, signal);
+    // Discovery runs before the host inspection because one of the host's
+    // requirements is conditional on it: an install with no CMake package config
+    // sends the generated project down its pkg-config fallback, and that
+    // fallback needs an executable pkg-config. `#inspect` records the toolchain
+    // evidence as one record, so a requirement discovered afterwards could not
+    // be added to it without the record disagreeing with the report.
+    //
+    // Asked of the toolchain the workspace named, not of the first provider a
+    // caller listed. A container's build links against the libuvcpp inside the
+    // image, so this host's install is not an answer to the question the report
+    // is asked — and reporting it as one is how a workspace gets built against a
+    // library nobody described.
+    const { build, unexamined } = await this.#libuvcppOf(
+      selected,
+      selection,
+      input.workspace,
+      signal,
+    );
+
+    const { toolchains, limitations } = await this.#inspect(
+      providers,
+      { selected, build },
+      recorder,
+      signal,
+    );
 
     // A caller's restriction is honoured as a restriction on what is reported,
     // and it does not move the subject of the sections below: those answer what
@@ -322,18 +411,6 @@ export class DoctorService {
           "below are still about the toolchain this workspace named.",
       );
     }
-
-    // Asked of the toolchain the workspace named, not of the first provider a
-    // caller listed. A container's build links against the libuvcpp inside the
-    // image, so this host's install is not an answer to the question the report
-    // is asked — and reporting it as one is how a workspace gets built against a
-    // library nobody described.
-    const { build, unexamined } = await this.#libuvcppOf(
-      selected,
-      selection,
-      input.workspace,
-      signal,
-    );
 
     // A container's install prefix is a path inside the image. Rooting a probe
     // at it would `stat` this host, where nothing is there, and answer `false`
@@ -402,6 +479,7 @@ export class DoctorService {
    */
   async #inspect(
     providers: readonly ToolchainProvider[],
+    subject: InspectSubject,
     recorder: EvidenceRecorder,
     signal: AbortSignal,
   ): Promise<{ toolchains: DoctorToolchain[]; limitations: string[] }> {
@@ -412,15 +490,18 @@ export class DoctorService {
       const identity = provider.identity();
       const availability = await provider.inspectAvailability(signal);
 
-      for (const missing of availability.missing) {
-        recordUnknown(
-          recorder,
-          `Is ${missing.id} available on ${identity.id}?`,
-          "toolchain_missing",
-          {
-            blockedBy: `Install ${missing.id}, then re-run uvp_doctor.`,
-          },
-        );
+      // The conditional requirement belongs to the toolchain this workspace
+      // builds with: `subject.build` describes that provider's libuvcpp, and
+      // another provider's row answers a different question.
+      const conditional =
+        provider === subject.selected ? pkgConfigGap(availability, subject.build) : undefined;
+      const missing =
+        conditional === undefined ? availability.missing : [...availability.missing, conditional];
+
+      for (const gap of missing) {
+        recordUnknown(recorder, `Is ${gap.id} available on ${identity.id}?`, "toolchain_missing", {
+          blockedBy: blockedByFor(gap.id),
+        });
       }
 
       record(recorder, {
@@ -430,12 +511,16 @@ export class DoctorService {
           available: availability.available,
           compilers: availability.compilers.map((compiler) => compiler.id),
           build_systems: availability.buildSystems.map((system) => system.id),
-          missing: availability.missing.map((missing) => missing.id),
+          missing: missing.map((gap) => gap.id),
         },
         // Availability is what was observed; the derived part is the verdict a
-        // caller would otherwise have to compute from it.
+        // caller would otherwise have to compute from it. `can_configure` is
+        // false when the libuvcpp route needs a pkg-config this host lacks,
+        // because cmake alone cannot configure that workspace.
         derived: {
-          can_configure: availability.buildSystems.some((system) => system.id === "cmake"),
+          can_configure:
+            conditional === undefined &&
+            availability.buildSystems.some((system) => system.id === "cmake"),
           can_compile: availability.compilers.length > 0,
         },
         coverage: coverageComplete("toolchain availability"),
@@ -461,9 +546,9 @@ export class DoctorService {
           path: system.path,
           ...(system.version === undefined ? {} : { version: system.version }),
         })),
-        missing: availability.missing.map((missing) => ({
-          id: missing.id,
-          required_for: missing.requiredFor,
+        missing: missing.map((gap) => ({
+          id: gap.id,
+          required_for: gap.requiredFor,
         })),
         limitations: [...availability.limitations],
       });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
+import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
@@ -155,6 +156,12 @@ export const buildContract = defineTool({
         message: z.string(),
         /** Which phase produced it, so a parse failure is distinguishable from a link failure. */
         phase: z.enum(["configure", "compile", "link", "post"]),
+        /**
+         * What to do about it, when the producer knows a concrete next step.
+         * The same `{ action, docs }` shape an error carries, because it is the
+         * same advice; `docs` is repository-relative.
+         */
+        remediation: uvpRemediationSchema.optional(),
       }),
     ),
     artifacts: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),

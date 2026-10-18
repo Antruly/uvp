@@ -175,11 +175,20 @@ $env:PKG_CONFIG_PATH = "$prefix\lib\pkgconfig"
 $env:Path = "$prefix\bin;$env:Path"
 ```
 
-The archive ships `lib/pkgconfig/uvcpp.pc` and no CMake config, and CMake's
-`FindPkgConfig` looks for an executable image (`pkg-config.exe` or
-`pkgconf.exe`), not a `.bat` wrapper. If `pkg-config --version` answers but
-`uvp build` fails during configure with CMake's
-`Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`, the `pkg-config` on
+The archive ships `lib/pkgconfig/uvcpp.pc` and no CMake config, so the generated
+project's pkg-config fallback is the route that runs. That fallback needs a real
+executable: CMake's `FindPkgConfig` looks for `pkg-config.exe` or `pkgconf.exe`
+and does not accept a `.bat` wrapper. Check it in the same shell, after the
+settings above:
+
+```powershell
+(Get-Command pkg-config -ErrorAction SilentlyContinue).Source   # must end in .exe
+pkg-config --modversion uvcpp                                   # should print 1.7.0
+```
+
+If `pkg-config --version` answers but `uvp build` fails during configure with
+CMake's `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`, the
+`pkg-config` on
 `PATH` is a script — the Windows runner has Strawberry Perl's
 `pkg-config.bat`, which is exactly that case. Install an executable one, for
 example with `choco install pkgconfiglite`. The installer adds its shim to the
@@ -192,6 +201,7 @@ $prefix = "$HOME\libuvcpp\libuvcpp-1.7.0-msvc-x64"
 $env:UVCPP_ROOT = $prefix
 $env:PKG_CONFIG_PATH = "$prefix\lib\pkgconfig"
 $env:Path = "$prefix\bin;$env:Path"
+(Get-Command pkg-config).Source   # must end in .exe
 pkg-config --modversion uvcpp     # should print 1.7.0
 ```
 

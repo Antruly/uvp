@@ -247,6 +247,9 @@ describe("the libuvcpp a build points CMake at", () => {
     expect(found.installPrefix).toBe(installPrefix);
     expect(found.version).toBe("1.7.0");
     expect(found.modules).toEqual(["UVCPP_HTTP_ENABLE", "UVCPP_WS_ENABLE"]);
+    // This prefix carries `lib/cmake/uvcpp/uvcppConfig.cmake`, so the generated
+    // project's first route answers and pkg-config is not a prerequisite.
+    expect(found.cmakePackage).toBe(true);
   });
 
   /** Discovery of `prefix`, with `UVCPP_ROOT` pointed at it for one call. */
@@ -260,6 +263,26 @@ describe("the libuvcpp a build points CMake at", () => {
       else process.env["UVCPP_ROOT"] = saved;
     }
   };
+
+  it("reports an archive with no CMake package, which is the pkg-config route", async () => {
+    // A release archive's shape: the config header and `uvcpp.pc`, and no
+    // `cmake/uvcpp` directory at all. The doctor decides the route from this
+    // observation, so it has to be an observation and not a guess from the
+    // version source.
+    const prefix = join(root, "archive-only");
+    mkdirSync(join(prefix, "lib", "pkgconfig"), { recursive: true });
+    mkdirSync(join(prefix, "include", "uvcpp"), { recursive: true });
+    writeFileSync(
+      join(prefix, "include", "uvcpp", "uvcpp_config.h"),
+      "#define UVCPP_HTTP_ENABLE 1\n",
+    );
+    writeFileSync(join(prefix, "lib", "pkgconfig", "uvcpp.pc"), "Name: uvcpp\nVersion: 1.7.0\n");
+
+    const found = await findUnderRoot(prefix);
+    expect(found.found).toBe(true);
+    expect(found.versionSource).toBe("pkgconfig");
+    expect(found.cmakePackage).toBe(false);
+  });
 
   it("marks a module list it could not read as unknown, not as an empty one", async () => {
     // A prefix can carry the CMake package file without the config header the
@@ -633,6 +656,61 @@ describe("a call whose signal was already aborted", () => {
 
     expect(failure.code).toBe("cancelled");
     expect(failure.message).toContain("cancelled");
+  });
+});
+
+/** Run `body` with `PATH` replaced, restoring it even when the body throws. */
+const withPath = async <T>(path: string, body: () => Promise<T>): Promise<T> => {
+  const saved = process.env["PATH"];
+  process.env["PATH"] = path;
+  try {
+    return await body();
+  } finally {
+    if (saved === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = saved;
+  }
+};
+
+/**
+ * The pkg-config executable, as an observation rather than a requirement.
+ *
+ * Whether a workspace needs pkg-config depends on the libuvcpp route, which is
+ * a fact the doctor has only after discovery. The provider's job is to say
+ * whether it looked and what it saw: an absent field means "not looked", `{}`
+ * means "looked, found nothing", and a path means "found it". Collapsing the
+ * first into the second is how a check that never ran becomes an instruction to
+ * install something.
+ */
+describe("the pkg-config executable", () => {
+  it("reports the executable it found, and does not call it missing", async () => {
+    const bin = join(root, "pkg-config-bin");
+    await installFakeTool(bin, "pkg-config", { module: SUCCEEDS_QUIETLY });
+
+    const availability = await withPath(bin, () => provider.inspectAvailability(signal));
+
+    expect(availability.pkgConfig?.path?.startsWith(bin)).toBe(true);
+    // Discovery decides the requirement, not the inspection: this host may have
+    // a CMake-package libuvcpp, in which case pkg-config is never invoked.
+    expect(availability.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+
+  it("reports that it looked and found nothing, rather than saying nothing", async () => {
+    const empty = join(root, "empty-bin");
+    mkdirSync(empty, { recursive: true });
+
+    const availability = await withPath(empty, () => provider.inspectAvailability(signal));
+
+    expect(availability.pkgConfig).toEqual({});
+    expect(availability.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+
+  it("accepts pkgconf, the other name for the same program", async () => {
+    const bin = join(root, "pkgconf-bin");
+    await installFakeTool(bin, "pkgconf", { module: SUCCEEDS_QUIETLY });
+
+    const availability = await withPath(bin, () => provider.inspectAvailability(signal));
+
+    expect(availability.pkgConfig?.path?.includes("pkgconf")).toBe(true);
   });
 });
 

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { headerProbeAt } from "./DoctorService.js";
+import { DoctorService, headerProbeAt } from "./DoctorService.js";
+import { createRecorder } from "./evidenceHelpers.js";
+import type { LibuvcppBuild } from "./ToolchainProvider.js";
+import { createFakeToolchain } from "../../tests/conformance/fakeToolchain.js";
 
 /**
  * `application` does not import a provider, not even from a test — so the host
@@ -101,5 +104,107 @@ describe("the header probe", () => {
 
   it("answers for a missing prefix without looking at the filesystem", async () => {
     await expect(headerProbeAt(undefined)("grpc")).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * The pkg-config requirement the doctor adds, and when it must not.
+ *
+ * A libuvcpp release archive ships only `lib/pkgconfig/uvcpp.pc`, so the
+ * generated project's `find_package(uvcpp CONFIG)` fails and its pkg-config
+ * fallback runs. On a Windows host whose only `pkg-config` is a `.bat` wrapper
+ * that fallback finds no executable, and configure dies in CMake's
+ * `FindPkgConfig`. The doctor used to report such a host ready, because
+ * pkg-config was never part of its inspection.
+ *
+ * The requirement is conditional on three observations — the library was found,
+ * it was seen to have no CMake package config, and the provider looked for
+ * pkg-config and did not find one — and each case below removes one of them.
+ * The last case is the third state: a provider that did not look gets no
+ * requirement, because "I could not look" is not "it is missing".
+ */
+describe("the pkg-config requirement on a libuvcpp route", () => {
+  /** A report from one fake provider with the given observations. */
+  const reportWith = async (options: {
+    readonly cmakePackage?: boolean;
+    readonly pkgConfig?: { readonly path?: string };
+    readonly found?: boolean;
+  }) => {
+    const libuvcpp: LibuvcppBuild = {
+      found: options.found ?? true,
+      version: "1.7.0",
+      versionSource: "pkgconfig",
+      installPrefix: "/opt/uvcpp",
+      modules: [],
+      ...(options.cmakePackage === undefined ? {} : { cmakePackage: options.cmakePackage }),
+    };
+    const provider = createFakeToolchain({
+      libuvcpp,
+      ...(options.pkgConfig === undefined ? {} : { pkgConfig: options.pkgConfig }),
+    });
+    const service = new DoctorService({
+      providers: [provider],
+      toolchainFor: () => provider,
+      // Nothing here is a header-probed feature; a probe that answers `false`
+      // keeps the feature section from touching this machine's filesystem.
+      headerProbe: async () => false,
+    });
+    const recorder = createRecorder();
+    const report = await service.doctor({}, recorder, new AbortController().signal);
+    return { report, recorder };
+  };
+
+  it("is reported when the install has no CMake package and pkg-config is absent", async () => {
+    const { report, recorder } = await reportWith({ cmakePackage: false, pkgConfig: {} });
+
+    const [toolchain] = report.toolchains;
+    expect(toolchain?.missing.map((gap) => gap.id)).toContain("pkg-config");
+    // The evidence record and the report agree: the requirement is recorded
+    // once, in the same record that reports the toolchain.
+    const evidence = recorder.evidence.find((entry) => entry.kind === "toolchain");
+    expect(evidence?.observed["missing"]).toContain("pkg-config");
+    // cmake alone cannot configure this workspace, which is the difference
+    // between "the host has a build system" and "the build can be configured".
+    expect(evidence?.derived?.["can_configure"]).toBe(false);
+    expect(recorder.unknowns.map((unknown) => unknown.question)).toContain(
+      "Is pkg-config available on fake?",
+    );
+  });
+
+  it("is not reported when the fallback has an executable to run", async () => {
+    const { report } = await reportWith({
+      cmakePackage: false,
+      pkgConfig: { path: "/usr/bin/pkg-config" },
+    });
+
+    expect(report.toolchains[0]?.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+
+  it("is not reported when find_package(uvcpp CONFIG) can answer", async () => {
+    // The CMake package route never reaches the fallback, so an executable
+    // pkg-config is not a prerequisite of this host — even though there is
+    // none. Requiring it here would send someone to install a program this
+    // workspace will never invoke.
+    const { report } = await reportWith({ cmakePackage: true, pkgConfig: {} });
+
+    expect(report.toolchains[0]?.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+  });
+
+  it("is not reported when the provider did not look for pkg-config", async () => {
+    // The third state. A provider that never examined the executable (the
+    // container provider does not) has established nothing, and turning that
+    // into "install pkg-config" would be a finding nobody made.
+    const { report, recorder } = await reportWith({ cmakePackage: false });
+
+    expect(report.toolchains[0]?.missing.map((gap) => gap.id)).not.toContain("pkg-config");
+    expect(recorder.unknowns.map((unknown) => unknown.question)).not.toContain(
+      "Is pkg-config available on fake?",
+    );
+  });
+
+  it("is not reported when there is no libuvcpp route to judge", async () => {
+    const { report } = await reportWith({ found: false, cmakePackage: false, pkgConfig: {} });
+
+    expect(report.toolchains[0]?.missing.map((gap) => gap.id)).not.toContain("pkg-config");
   });
 });

@@ -46,6 +46,22 @@ export interface ToolchainAvailability {
   readonly buildSystems: readonly BuildSystemDescriptor[];
   readonly missing: readonly MissingPrerequisite[];
   readonly limitations: readonly string[];
+  /**
+   * The pkg-config executable, when this provider looked for one.
+   *
+   * Three states, because they are three different findings: the field is
+   * absent when the provider did not look, `{}` when it looked and found
+   * nothing, and `{ path }` when it found an executable. `pkgConfig: undefined`
+   * cannot carry the middle state — an absent value and a missing property are
+   * the same thing in JSON — and collapsing "not looked" into "not there" is
+   * how a check that never ran becomes an instruction to install something.
+   *
+   * Only an executable image counts. CMake's `FindPkgConfig` uses
+   * `find_program`, and a `.bat` wrapper that answers `pkg-config --version` in
+   * a shell is not one — so a provider that accepted the wrapper would report a
+   * host ready that configure then refuses.
+   */
+  readonly pkgConfig?: { readonly path?: string };
 }
 
 /**
@@ -79,10 +95,32 @@ export interface LibuvcppBuild {
    * feature as absent — a check that never ran turned into a no.
    */
   readonly modulesUnknown?: boolean;
+  /**
+   * Whether `find_package(uvcpp CONFIG)` can find this install.
+   *
+   * The generated project tries the CMake package first and falls back to
+   * pkg-config, so this is the fact that decides whether pkg-config is a
+   * prerequisite at all. `undefined` means the install was found but its
+   * package files were not examined — a different state from `false`, which is
+   * the observation that the fallback is the route that will run.
+   */
+  readonly cmakePackage?: boolean;
   readonly note?: string;
 }
 
 export type BuildPhase = "configure" | "compile" | "link" | "post";
+
+/**
+ * A remedy for a diagnostic, in the same shape a `UvpFailure` carries one.
+ *
+ * A build that fails during configure is data — a successful tool call with
+ * diagnostics — so its remedy lives on the diagnostic rather than in the error
+ * envelope. `docs` is a repository-relative path, as in `uvpRemediationSchema`.
+ */
+export interface BuildRemediation {
+  readonly action: string;
+  readonly docs?: string;
+}
 
 export interface BuildDiagnostic {
   readonly severity: "error" | "warning" | "note";
@@ -91,6 +129,14 @@ export interface BuildDiagnostic {
   readonly column?: number;
   readonly message: string;
   readonly phase: BuildPhase;
+  /**
+   * What to do about it, when the producer knows a concrete next step.
+   *
+   * Present only when the raw tool output names a failure whose remedy is
+   * known; the message is never rewritten to carry it, so a caller that wants
+   * CMake's own words still has them.
+   */
+  readonly remediation?: BuildRemediation;
 }
 
 export interface BuildArtifact {
