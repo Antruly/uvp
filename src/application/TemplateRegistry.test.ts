@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { parseTemplateRegistryIndex } from "../domain/templateRegistry.js";
 import {
   TemplateRegistryError,
   readTemplateRegistryIndex,
+  resolveTemplateRegistryRedirect,
   searchRegistryIndex,
   searchTemplateRegistry,
   type TemplateRegistryTransport,
@@ -34,6 +36,10 @@ const temporaryRoot = async (): Promise<string> => {
 };
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
+
+/** The documented cache layout: one file per requested index URL. */
+const cacheFile = (cacheRoot: string, indexUrl: string): string =>
+  path.join(cacheRoot, `index-${createHash("sha256").update(indexUrl).digest("hex")}.json`);
 
 const versionEntry = (id: string, version: string, overrides: Record<string, unknown> = {}) => ({
   version,
@@ -99,17 +105,15 @@ describe("reading the registry index", () => {
   it("reads a valid index from the network and caches it", async () => {
     const cacheRoot = await temporaryRoot();
     const base = await serveIndex(fixtureIndex([fixturePackage("acme-dashboard", ["1.0.0"])]));
+    const indexUrl = `${base}/index.json`;
 
-    const result = await readTemplateRegistryIndex({
-      indexUrl: `${base}/index.json`,
-      cacheRoot,
-    });
+    const result = await readTemplateRegistryIndex({ indexUrl, cacheRoot });
 
     expect(result.state).toBe("read");
     if (result.state !== "read") return;
     expect(result.source).toBe("network");
     expect(result.index.packages.map((entry) => entry.id)).toEqual(["acme-dashboard"]);
-    const cached = JSON.parse(await readFile(path.join(cacheRoot, "index.json"), "utf8"));
+    const cached = JSON.parse(await readFile(cacheFile(cacheRoot, indexUrl), "utf8"));
     expect(cached.schema).toBe("uvp.registry/1");
   });
 
@@ -149,9 +153,10 @@ describe("reading the registry index", () => {
   it("serves an offline read from the cache without calling it stale", async () => {
     const cacheRoot = await temporaryRoot();
     const base = await serveIndex(fixtureIndex([]));
-    await readTemplateRegistryIndex({ indexUrl: `${base}/index.json`, cacheRoot });
+    const indexUrl = `${base}/index.json`;
+    await readTemplateRegistryIndex({ indexUrl, cacheRoot });
 
-    const result = await readTemplateRegistryIndex({ cacheRoot, offline: true });
+    const result = await readTemplateRegistryIndex({ indexUrl, cacheRoot, offline: true });
 
     expect(result.state).toBe("read");
     if (result.state !== "read") return;
@@ -237,13 +242,11 @@ describe("reading the registry index", () => {
   it("does not trust a cached index that no longer parses", async () => {
     const cacheRoot = await temporaryRoot();
     const base = await serveIndex(fixtureIndex([]));
-    await readTemplateRegistryIndex({ indexUrl: `${base}/index.json`, cacheRoot });
-    await writeFile(
-      path.join(cacheRoot, "index.json"),
-      '{"schema":"uvp.registry/1","packages":{}}',
-    );
+    const indexUrl = `${base}/index.json`;
+    await readTemplateRegistryIndex({ indexUrl, cacheRoot });
+    await writeFile(cacheFile(cacheRoot, indexUrl), '{"schema":"uvp.registry/1","packages":{}}');
 
-    const result = await readTemplateRegistryIndex({ cacheRoot, transport: offline });
+    const result = await readTemplateRegistryIndex({ indexUrl, cacheRoot, transport: offline });
 
     expect(result.state).toBe("undetermined");
     if (result.state !== "undetermined") return;
@@ -251,11 +254,121 @@ describe("reading the registry index", () => {
       result.details.some((detail) => detail.includes("not a valid uvp.registry/1 index")),
     ).toBe(true);
 
-    await writeFile(path.join(cacheRoot, "index.json"), "not json");
-    const again = await readTemplateRegistryIndex({ cacheRoot, transport: offline });
+    await writeFile(cacheFile(cacheRoot, indexUrl), "not json");
+    const again = await readTemplateRegistryIndex({ indexUrl, cacheRoot, transport: offline });
     expect(again.state).toBe("undetermined");
     if (again.state !== "undetermined") return;
     expect(again.details.some((detail) => detail.includes("could not be parsed"))).toBe(true);
+  });
+});
+
+describe("the read failure paths", () => {
+  it("never serves one registry's cached index for another URL", async () => {
+    const cacheRoot = await temporaryRoot();
+    const registryA = await serveIndex(
+      fixtureIndex([fixturePackage("aaaa-from-registry-a", ["1.0.0"])]),
+    );
+    await readTemplateRegistryIndex({ indexUrl: `${registryA}/a.json`, cacheRoot });
+
+    const result = await readTemplateRegistryIndex({
+      indexUrl: "https://registry-b.invalid/index.json",
+      cacheRoot,
+      transport: offline,
+    });
+
+    expect(result.state).toBe("undetermined");
+    if (result.state !== "undetermined") return;
+    expect(result.details.some((detail) => detail.includes("no cached index"))).toBe(true);
+  });
+
+  it("reports a request timeout instead of waiting forever", async () => {
+    const cacheRoot = await temporaryRoot();
+    const base = await serve((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      // Never end the body: the client's timeout is the only way out.
+    });
+
+    const result = await readTemplateRegistryIndex({
+      indexUrl: `${base}/index.json`,
+      cacheRoot,
+      timeoutMs: 50,
+    });
+
+    expect(result.state).toBe("undetermined");
+    if (result.state !== "undetermined") return;
+    expect(result.reason).toContain("timed out");
+  });
+
+  it("refuses a redirect loop after the redirect limit", async () => {
+    const cacheRoot = await temporaryRoot();
+    const base = await serve((_request, response) => {
+      response.writeHead(302, { location: "/loop" });
+      response.end();
+    });
+
+    const result = await readTemplateRegistryIndex({ indexUrl: `${base}/loop`, cacheRoot });
+
+    expect(result.state).toBe("undetermined");
+    if (result.state !== "undetermined") return;
+    expect(result.reason).toContain("redirected too many times");
+  });
+
+  it("refuses a redirect to a non-http scheme", async () => {
+    const cacheRoot = await temporaryRoot();
+    const base = await serve((_request, response) => {
+      response.writeHead(302, { location: "file:///etc/passwd" });
+      response.end();
+    });
+
+    const result = await readTemplateRegistryIndex({ indexUrl: `${base}/index.json`, cacheRoot });
+
+    expect(result.state).toBe("undetermined");
+    if (result.state !== "undetermined") return;
+    expect(result.reason).toContain("is not an http or https URL");
+  });
+
+  it("refuses an https-to-http redirect", () => {
+    expect(() =>
+      resolveTemplateRegistryRedirect(
+        new URL("https://registry.example/index.json"),
+        "http://registry.example/index.json",
+      ),
+    ).toThrow(/https to http/u);
+    expect(
+      resolveTemplateRegistryRedirect(
+        new URL("https://registry.example/index.json"),
+        "/next.json",
+      ).toString(),
+    ).toBe("https://registry.example/next.json");
+  });
+
+  it("reports a cache write failure without failing the network read", async () => {
+    const root = await temporaryRoot();
+    const blocker = path.join(root, "blocker");
+    await writeFile(blocker, "not a directory");
+    const base = await serveIndex(fixtureIndex([]));
+
+    const result = await readTemplateRegistryIndex({
+      indexUrl: `${base}/index.json`,
+      cacheRoot: path.join(blocker, "cache"),
+    });
+
+    expect(result.state).toBe("read");
+    if (result.state !== "read") return;
+    expect(result.source).toBe("network");
+    expect(result.cacheError).toContain("could not be cached");
+  });
+
+  it("reports a cache path that is a directory rather than treating it as absent", async () => {
+    const cacheRoot = await temporaryRoot();
+    const indexUrl = "https://registry.invalid/index.json";
+    await mkdir(cacheFile(cacheRoot, indexUrl), { recursive: true });
+
+    const result = await readTemplateRegistryIndex({ indexUrl, cacheRoot, transport: offline });
+
+    expect(result.state).toBe("undetermined");
+    if (result.state !== "undetermined") return;
+    expect(result.details.some((detail) => detail.includes("could not be read"))).toBe(true);
   });
 });
 
@@ -379,11 +492,12 @@ describe("the composed search", () => {
   it("searches a cached index when the network read fails", async () => {
     const cacheRoot = await temporaryRoot();
     const base = await serveIndex(fixtureIndex([fixturePackage("acme-dashboard", ["1.0.0"])]));
-    await readTemplateRegistryIndex({ indexUrl: `${base}/index.json`, cacheRoot });
+    const indexUrl = `${base}/index.json`;
+    await readTemplateRegistryIndex({ indexUrl, cacheRoot });
 
     const result = await searchTemplateRegistry(
       { text: "acme" },
-      { cacheRoot, transport: offline },
+      { indexUrl, cacheRoot, transport: offline },
     );
 
     expect(result.state).toBe("read");

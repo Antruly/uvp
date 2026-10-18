@@ -15,6 +15,7 @@
     "licenses/**",
     "sbom.cdx.json",
     "tests/fixtures/**",
+    "tests/support/fixtures/registry-index.generated.json",
     "skills/**",
     "src/generatedPackageMetadata.ts",
     "docs/error-contract.schema.json"

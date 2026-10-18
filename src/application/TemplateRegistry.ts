@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -64,7 +64,6 @@ export const DEFAULT_TEMPLATE_REGISTRY_TIMEOUT_MS = 10_000;
 
 const MAX_REDIRECTS = 3;
 const CACHE_DIRECTORY = ".registry";
-const CACHE_FILE = "index.json";
 
 export type TemplateRegistryFailureCode =
   | "unreachable"
@@ -73,6 +72,7 @@ export type TemplateRegistryFailureCode =
   | "timeout"
   | "invalid_json"
   | "invalid_index"
+  | "redirect_refused"
   | "cache_io";
 
 export class TemplateRegistryError extends Error {
@@ -156,10 +156,16 @@ const describeError = (error: unknown): string => {
   return String(error);
 };
 
-const cachePathOf = (options: TemplateRegistryOptions): string =>
+/**
+ * The cache is keyed by the requested URL, so a cached answer can only be
+ * served for the registry it was fetched from. A fixed file name would let a
+ * caller point at a mirror or a fork and receive the first registry's metadata
+ * under the second URL.
+ */
+const cachePathOf = (options: TemplateRegistryOptions, indexUrl: string): string =>
   path.join(
     options.cacheRoot ?? path.join(resolveTemplateStoreRoot(), CACHE_DIRECTORY),
-    CACHE_FILE,
+    `index-${createHash("sha256").update(indexUrl).digest("hex")}.json`,
   );
 
 interface SingleResponse {
@@ -226,9 +232,36 @@ const once = (url: URL, maxBytes: number, signal: AbortSignal): Promise<SingleRe
   });
 
 /**
+ * Resolve a redirect target and apply the transport's policy: only http(s), and
+ * no https-to-http downgrade. Exported so the policy is testable without an
+ * https fixture server.
+ */
+export const resolveTemplateRegistryRedirect = (current: URL, location: string): URL => {
+  let next: URL;
+  try {
+    next = new URL(location, current);
+  } catch {
+    throw new TemplateRegistryError("redirect_refused", `'${location}' is not a URL`);
+  }
+  if (next.protocol !== "http:" && next.protocol !== "https:") {
+    throw new TemplateRegistryError(
+      "redirect_refused",
+      `'${next.toString()}' is not an http or https URL`,
+    );
+  }
+  if (current.protocol === "https:" && next.protocol === "http:") {
+    throw new TemplateRegistryError(
+      "redirect_refused",
+      `refusing a redirect from https to http: '${next.toString()}'`,
+    );
+  }
+  return next;
+};
+
+/**
  * The default transport: one GET, following up to three redirects. It refuses a
- * non-http(s) redirect target rather than handing a `file:` URL to the request
- * implementation.
+ * non-http(s) or downgrading redirect target rather than handing a `file:` URL
+ * to the request implementation or leaving TLS behind.
  */
 export const defaultTemplateRegistryTransport: TemplateRegistryTransport = async (request) => {
   let url: URL;
@@ -266,7 +299,7 @@ export const defaultTemplateRegistryTransport: TemplateRegistryTransport = async
           `the registry answered HTTP ${response.status} without a Location header`,
         );
       }
-      url = new URL(response.location, url);
+      url = resolveTemplateRegistryRedirect(url, response.location);
       continue;
     }
     if (response.status !== 200) {
@@ -329,6 +362,15 @@ const readCache = async (
       details: [describeError(error)],
     };
   }
+  // `stat` and `readFile` are two observations; a file that grew between them
+  // would otherwise pass the cap and be parsed (the #252 lesson).
+  if (body.byteLength > maxBytes) {
+    return {
+      kind: "invalid",
+      reason: `the cached index is larger than ${maxBytes} bytes`,
+      details: [],
+    };
+  }
   let validation: TemplateRegistryValidation;
   try {
     validation = parseBody(body);
@@ -353,7 +395,7 @@ const readCache = async (
 
 const writeCache = async (cachePath: string, body: Buffer): Promise<string | undefined> => {
   const directory = path.dirname(cachePath);
-  const temporary = path.join(directory, `.${CACHE_FILE}.${randomUUID()}.tmp`);
+  const temporary = path.join(directory, `.index.${randomUUID()}.tmp`);
   try {
     await mkdir(directory, { recursive: true });
     await writeFile(temporary, body);
@@ -379,7 +421,7 @@ export const readTemplateRegistryIndex = async (
   const url = options.indexUrl ?? DEFAULT_TEMPLATE_REGISTRY_INDEX_URL;
   const maxBytes = options.maxBytes ?? DEFAULT_TEMPLATE_REGISTRY_MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TEMPLATE_REGISTRY_TIMEOUT_MS;
-  const cachePath = cachePathOf(options);
+  const cachePath = cachePathOf(options, url);
 
   let networkFailure: { readonly reason: string; readonly details: readonly string[] } | undefined;
   if (options.offline !== true) {

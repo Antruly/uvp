@@ -1,0 +1,60 @@
+{
+  "packages": [
+    {
+      "id": "acme-dashboard",
+      "latest": "1.0.0",
+      "versions": [
+        {
+          "category": "fullstack",
+          "description": "A dashboard service",
+          "digest": "sha256:fbc45b05c9ac68c60f135fc367943a27ccc792183e3d3099b4fcc33a4f55461f",
+          "files": [
+            {
+              "binary": true,
+              "bytes": 4,
+              "digest": "sha256:54a5241688ab835cbc21bd12d6b62db1f87f71a6def707d2d2b730b87cddbed6",
+              "path": "assets/logo.dat"
+            },
+            {
+              "binary": false,
+              "bytes": 52,
+              "digest": "sha256:8537b5a3084a70a71c58b4a01abf9ac0ebea717f6cf09bac14e62bb7fbfb6582",
+              "path": "src/main.cc"
+            }
+          ],
+          "framework": "h5",
+          "id": "acme-dashboard",
+          "license": {
+            "file": "LICENSE",
+            "spdx": "MIT"
+          },
+          "name": "Acme dashboard",
+          "path": "packages/acme-dashboard/1.0.0",
+          "preview": "preview.png",
+          "provenance": {
+            "author": "Acme",
+            "createdAt": "2026-10-18T00:00:00Z"
+          },
+          "requires": {
+            "features": [
+              "websocket"
+            ],
+            "uvp": ">=0.3.0"
+          },
+          "schema": "uvp.template/1",
+          "tags": [
+            "dashboard"
+          ],
+          "variables": {
+            "port": {
+              "default": 8080,
+              "type": "port"
+            }
+          },
+          "version": "1.0.0"
+        }
+      ]
+    }
+  ],
+  "schema": "uvp.registry/1"
+}

@@ -1,6 +1,13 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import { parseTemplateRegistryIndex } from "./templateRegistry.js";
+
+const GENERATED_INDEX = new URL(
+  "../../tests/support/fixtures/registry-index.generated.json",
+  import.meta.url,
+);
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
 
@@ -64,7 +71,95 @@ describe("parsing a uvp.registry/1 index", () => {
     });
     expect(entry?.files).toHaveLength(1);
   });
+});
 
+describe("the shape the registry's generator emits", () => {
+  it("accepts the index its own generator produces", async () => {
+    // Built by `scripts/lib/package.mjs`'s `buildIndex`/`renderIndex` in
+    // Antruly/uvp-templates at commit a95b3e0; regenerate it with
+    // `tests/support/generateRegistryIndexFixture.mjs`. The documented example
+    // omits the manifest repeats and the observation `binary` flag, so only a
+    // generated fixture can show what the reader must actually accept.
+    const raw = JSON.parse(await readFile(GENERATED_INDEX, "utf8")) as {
+      packages: { versions: { preview?: string; files: { binary?: boolean }[] }[] }[];
+    };
+    const rawEntry = raw.packages[0]?.versions[0];
+    expect(rawEntry).toMatchObject({
+      schema: "uvp.template/1",
+      id: "acme-dashboard",
+      preview: "preview.png",
+    });
+    expect(rawEntry?.files.map((file) => file.binary)).toEqual([true, false]);
+
+    const result = parseTemplateRegistryIndex(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const version = result.index.packages[0]?.versions[0];
+    expect(version).toMatchObject({
+      version: "1.0.0",
+      path: "packages/acme-dashboard/1.0.0",
+      name: "Acme dashboard",
+      category: "fullstack",
+      framework: "h5",
+      tags: ["dashboard"],
+      requires: { uvp: ">=0.3.0", features: ["websocket"] },
+      license: { spdx: "MIT", file: "LICENSE" },
+      provenance: { author: "Acme", createdAt: "2026-10-18T00:00:00Z" },
+    });
+    expect(version?.files).toEqual([
+      {
+        path: "assets/logo.dat",
+        digest: "sha256:54a5241688ab835cbc21bd12d6b62db1f87f71a6def707d2d2b730b87cddbed6",
+        bytes: 4,
+      },
+      {
+        path: "src/main.cc",
+        digest: "sha256:8537b5a3084a70a71c58b4a01abf9ac0ebea717f6cf09bac14e62bb7fbfb6582",
+        bytes: 52,
+      },
+    ]);
+  });
+
+  it("requires redundant generator repeats to agree with the index", () => {
+    expect(
+      problemsOf(index([packageEntry({ versions: [versionEntry({ id: "other" })] })])),
+    ).toContain("packages[0].versions[0].id: must be 'acme-dashboard' when present");
+    expect(
+      problemsOf(index([packageEntry({ versions: [versionEntry({ schema: "uvp.template/2" })] })])),
+    ).toContain("packages[0].versions[0].schema: must be 'uvp.template/1' when present");
+  });
+
+  it("checks the observation-only binary field and still refuses unknown file keys", () => {
+    expect(
+      problemsOf(
+        index([
+          packageEntry({
+            versions: [
+              versionEntry({
+                files: [{ path: "src/main.cc", digest: digest("b"), bytes: 1, binary: "no" }],
+              }),
+            ],
+          }),
+        ]),
+      ),
+    ).toContain("packages[0].versions[0].files[0].binary: must be a boolean");
+    expect(
+      problemsOf(
+        index([
+          packageEntry({
+            versions: [
+              versionEntry({
+                files: [{ path: "src/main.cc", digest: digest("b"), bytes: 1, symlink: true }],
+              }),
+            ],
+          }),
+        ]),
+      ),
+    ).toContain("packages[0].versions[0].files[0].symlink: is not a field of uvp.registry/1");
+  });
+});
+
+describe("the index rules", () => {
   it("refuses a schema it does not implement", () => {
     expect(problemsOf({ schema: "uvp.registry/2", packages: [] })).toEqual([
       "schema: must be 'uvp.registry/1'",

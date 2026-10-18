@@ -26,10 +26,17 @@ import { Problems, asString, isRecord } from "./templatePackageProblems.js";
  * the registry (`path`), the manifest's canonical digest (`digest`), and that
  * each version entry repeats the manifest's `files[]`.
  *
- * Two things the index does not carry, and this reader therefore cannot check:
- * the manifest's `variables` and `preview`, and any file bytes. A digest here
- * says what the manifest hashed to; it is verified against downloaded bytes by
- * the client, not inferred from the index.
+ * The documented entry shape omits the manifest's `variables` and `preview`,
+ * but the registry's generator currently spreads the whole `template.json` into
+ * each entry, so those fields (and the redundant `schema`/`id`) can be present.
+ * They are accepted and validated with the manifest rules, and `schema`/`id`
+ * must agree with the index when present. The generator also repeats its
+ * observation list as `files[]`, which carries `binary`; that field is accepted
+ * and checked as a boolean, then left out of the manifest-shaped file list.
+ *
+ * No file bytes are carried: a digest here says what the manifest hashed to; it
+ * is verified against downloaded bytes by the client, not inferred from the
+ * index.
  *
  * The schema is closed at every level. An entry with an unknown key is a
  * problem rather than something ignored: the registry's own generator is the
@@ -58,7 +65,12 @@ export interface TemplateRegistryVersion {
 
 export interface TemplateRegistryPackage {
   readonly id: string;
-  /** Must name one of `versions`. */
+  /**
+   * Must name one of `versions`. Trusted as the producer's answer rather than
+   * recomputed: the registry's generator takes the highest release (used only
+   * when the package has no release), and a client that recomputed it could
+   * disagree with the registry's own answer.
+   */
   readonly latest: string;
   /** Ascending by SemVer precedence. */
   readonly versions: readonly TemplateRegistryVersion[];
@@ -86,10 +98,22 @@ const VERSION_KEYS = new Set([
   "framework",
   "tags",
   "requires",
+  "variables",
   "license",
   "provenance",
+  "preview",
   "files",
+  // The generator spreads `template.json` into the entry, so the manifest's own
+  // `schema` and `id` can appear here as redundant repeats.
+  "schema",
+  "id",
 ]);
+
+/**
+ * Files in an index entry are the generator's observation list: the manifest's
+ * `path`/`digest`/`bytes` plus `binary`. Unknown keys are still refused.
+ */
+const INDEX_FILE_KEYS = new Set(["path", "digest", "bytes", "binary"]);
 
 /** The version-entry fields that are also manifest fields. */
 const MANIFEST_FIELDS = [
@@ -100,9 +124,10 @@ const MANIFEST_FIELDS = [
   "framework",
   "tags",
   "requires",
-  "files",
+  "variables",
   "license",
   "provenance",
+  "preview",
 ] as const;
 
 const PACKAGE_PATH_PREFIX = "packages/";
@@ -116,19 +141,42 @@ export const compareTemplateRegistryIds = (left: string, right: string): number 
   left < right ? -1 : left > right ? 1 : 0;
 
 /**
- * The manifest a version entry mirrors. It omits only `schema`, `variables`,
- * and `preview`, which the index does not carry; unknown keys were already
- * refused at the entry level, so the synthetic record contains manifest fields
- * only and the validator does not report them twice.
+ * The manifest file list, with the generator's observation-only `binary`
+ * removed. The field is checked here because the manifest rules do not know it;
+ * the file's `path`/`digest`/`bytes` are then validated by those same rules.
+ */
+const indexFiles = (value: unknown, location: string, problems: Problems): unknown => {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry: unknown, index) => {
+    if (!isRecord(entry)) return entry;
+    const at = `${location}.files[${index}]`;
+    problems.rejectUnknownKeys(entry, `${at}.`, INDEX_FILE_KEYS, TEMPLATE_REGISTRY_SCHEMA);
+    if (entry["binary"] !== undefined && typeof entry["binary"] !== "boolean") {
+      problems.add(`${at}.binary`, "must be a boolean");
+    }
+    return { path: entry["path"], digest: entry["digest"], bytes: entry["bytes"] };
+  });
+};
+
+/**
+ * The manifest a version entry mirrors. Unknown keys were already refused at
+ * the entry level, so the synthetic record contains manifest fields only and
+ * the validator does not report them twice. The generator's redundant `schema`
+ * and `id` repeats are checked separately and replaced by the canonical values.
  */
 const manifestRecord = (
   entry: Record<string, unknown>,
+  location: string,
   packageId: string | undefined,
+  problems: Problems,
 ): Record<string, unknown> => {
   const record: Record<string, unknown> = { schema: TEMPLATE_PACKAGE_SCHEMA };
   if (packageId !== undefined) record["id"] = packageId;
   for (const key of MANIFEST_FIELDS) {
     if (entry[key] !== undefined) record[key] = entry[key];
+  }
+  if (entry["files"] !== undefined) {
+    record["files"] = indexFiles(entry["files"], location, problems);
   }
   return record;
 };
@@ -151,6 +199,20 @@ function readVersionEntry(
   const sourcePath = asString(entry["path"]);
   const digest = asString(entry["digest"]);
 
+  if (entry["schema"] !== undefined) {
+    if (entry["schema"] !== TEMPLATE_PACKAGE_SCHEMA) {
+      problems.add(`${location}.schema`, `must be '${TEMPLATE_PACKAGE_SCHEMA}' when present`);
+    }
+  }
+  if (entry["id"] !== undefined) {
+    if (packageId === undefined || entry["id"] !== packageId) {
+      problems.add(
+        `${location}.id`,
+        packageId === undefined ? "must be a string" : `must be '${packageId}' when present`,
+      );
+    }
+  }
+
   if (version === undefined) {
     problems.add(`${location}.version`, "must be a string");
   }
@@ -172,7 +234,7 @@ function readVersionEntry(
   }
 
   const validation = validateTemplatePackage({
-    manifest: manifestRecord(entry, packageId),
+    manifest: manifestRecord(entry, location, packageId, problems),
     limits,
   });
   if (!validation.ok) {
