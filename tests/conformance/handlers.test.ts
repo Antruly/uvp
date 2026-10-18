@@ -780,11 +780,14 @@ describe("the frontend app build at the boundary", () => {
     expect(output["frontend"]).toBe("vue3");
     expect(output["steps_succeeded"]).toBe(true);
     expect(output["built"]).toBe(true);
+    // The service spells npm `npm.cmd` on Windows, which is the only spelling
+    // CreateProcess can start there. The lane runs on both hosts.
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     expect(commands).toEqual([
       "node --version",
-      "npm --version",
-      "npm ci --no-audit --no-fund",
-      "npm run build",
+      `${npm} --version`,
+      `${npm} ci --no-audit --no-fund`,
+      `${npm} run build`,
     ]);
     const steps = output["steps"] as { command: string; succeeded: boolean }[];
     expect(steps.map((step) => step.succeeded)).toEqual([true, true]);
