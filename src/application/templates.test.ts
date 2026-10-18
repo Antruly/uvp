@@ -566,3 +566,38 @@ describe("the routes `uvp init` reports", () => {
     }
   });
 });
+
+describe("the websocket-test template", () => {
+  it("carries the bounded echo log, the echo route, and the console", () => {
+    const source = render("websocket-test", ["websocket"]);
+
+    // The two things this template exists for beyond websocket-echo: a bounded
+    // record of what arrived, and a page that can drive it without another tool.
+    expect(source).toContain("uvcpp_set_threadpool_size(0)");
+    expect(source).toContain("constexpr size_t kMaxLogEntries");
+    expect(source).toContain("g_dropped");
+    expect(source).toContain('app.get("/api/echo-log"');
+    expect(source).toContain('app.websocket("/ws"');
+    expect(source).toContain('app.serve_static("/", "./public")');
+
+    const files = renderTemplate("websocket-test", {
+      name: "svc",
+      port: 8080,
+      features: ["websocket"],
+    });
+    const consoleFile = files.find((file) => file.path === "public/index.html");
+    expect(consoleFile, "websocket-test produced no public/index.html").toBeDefined();
+    expect(consoleFile?.content).toContain("WebSocket test");
+    expect(consoleFile?.content).toContain("/api/echo-log");
+
+    expect(templateRoutes("websocket-test", [])).toEqual([
+      "GET /healthz",
+      "GET /api/echo-log",
+      "WS /ws",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+  });
+});

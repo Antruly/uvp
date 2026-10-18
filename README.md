@@ -148,7 +148,7 @@ That last rule is the one that shapes everything else. A tool that says
 | Task                                                        | Tools                                   |
 | ----------------------------------------------------------- | --------------------------------------- |
 | Check the toolchain and which libuvcpp modules are present  | `uvp_doctor`                            |
-| Scaffold a buildable project (6 templates)                  | `uvp_workspace_create`                  |
+| Scaffold a buildable project (7 templates)                  | `uvp_workspace_create`                  |
 | Configure and build with CMake                              | `uvp_build`                             |
 | Start a service and wait for it to actually answer          | `uvp_run`, `uvp_run_stop`               |
 | Drive HTTP/1.1, HTTP/2, and HTTP/3 requests, and report TLS | `uvp_http_request`                      |
@@ -161,8 +161,8 @@ That last rule is the one that shapes everything else. A tool that says
 | Do all of the above as one supervised pass                  | `uvp_verify`                            |
 | Compare two verification reports and see what moved         | `uvp_bundle_diff`                       |
 
-Templates: `hello-http`, `rest-api`, `websocket-echo`, `soap-service`,
-`static-files`, `http3-service`.
+Templates: `hello-http`, `rest-api`, `websocket-echo`, `websocket-test`,
+`soap-service`, `static-files`, `http3-service`.
 
 Features: `tls`, `http2`, `http3`, `grpc`, `websocket`, `soap`, `db`. Each maps
 to real libuvcpp CMake switches and configuration macros; the mapping is
@@ -187,7 +187,7 @@ uvp is pre-1.0 and under active construction. Being precise about what that
 means is more useful than a percentage:
 
 **Working and verified.** The full closure — describe → generate → build → run →
-probe → evidence — passes against a real libuvcpp 1.7.0 install for all six
+probe → evidence — passes against a real libuvcpp 1.7.0 install for all
 templates. The generated projects build via `find_package(uvcpp 1.7.0 CONFIG)`
 where a CMake package exists and via `pkg-config` where it does not, because the
 prebuilt release archives ship the latter and not the former. The version floor

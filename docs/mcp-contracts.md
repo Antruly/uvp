@@ -73,7 +73,7 @@ this host. `uvp_doctor` never starts a build and never pulls an image.
 ### Workspace
 
 **`uvp_workspace_create`** — Create a libuvcpp workspace.
-Scaffolds a CMake project from one of six templates, at a path you name. It
+Scaffolds a CMake project from one of seven templates, at a path you name. It
 writes files and starts nothing. Refuses to overwrite an existing workspace
 unless told to.
 

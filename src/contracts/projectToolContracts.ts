@@ -41,6 +41,7 @@ export const workspaceCreateContract = defineTool({
         "hello-http",
         "rest-api",
         "websocket-echo",
+        "websocket-test",
         "soap-service",
         "static-files",
         "http3-service",

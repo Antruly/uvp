@@ -134,7 +134,7 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 | 任务                                             | 工具                                    |
 | ------------------------------------------------ | --------------------------------------- |
 | 检查工具链以及存在哪些 libuvcpp 模块             | `uvp_doctor`                            |
-| 生成可编译的工程（6 个模板）                     | `uvp_workspace_create`                  |
+| 生成可编译的工程（7 个模板）                     | `uvp_workspace_create`                  |
 | 用 CMake 配置并编译                              | `uvp_build`                             |
 | 启动服务，并等待它真正能应答                     | `uvp_run`、`uvp_run_stop`               |
 | 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS | `uvp_http_request`                      |
@@ -147,8 +147,8 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 | 把以上全部作为一次托管流程执行                   | `uvp_verify`                            |
 | 对比两份验证报告，看清到底哪里变了               | `uvp_bundle_diff`                       |
 
-模板：`hello-http`、`rest-api`、`websocket-echo`、`soap-service`、`static-files`、
-`http3-service`。
+模板：`hello-http`、`rest-api`、`websocket-echo`、`websocket-test`、`soap-service`、
+`static-files`、`http3-service`。
 
 特性：`tls`、`http2`、`http3`、`grpc`、`websocket`、`soap`、`db`。
 每一项都对应真实存在的 libuvcpp CMake 开关和配置宏；这份映射有完整文档，
@@ -157,7 +157,7 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 多数模板启动的是 `uvcpp_web_app`；`http3-service` 不是。它写在 `uvcpp_http_server` 之上
 —— 1.7.0 里只有这个类型能打开 QUIC 监听 —— 并把同一张路由表同时跑在 TCP 和 HTTP/3 上。
 
-`db` 是唯一会改变模板“存什么”的特性。六个模板里只有 `rest-api` 有存储，所以
+`db` 是唯一会改变模板“存什么”的特性。这些模板里只有 `rest-api` 有存储，所以
 `--features db` 把它的内存 map 换成 libuvcpp 的连接池：连接串来自 `UVP_DATABASE_URL`，
 指向 SQLite、MySQL 或 PostgreSQL，默认落到工作目录下的一个 SQLite 文件。路由、状态码和
 JSON 两者完全一致。在别的模板上声明 `db` 和其它特性一样，只是一条构建要求。
@@ -169,7 +169,7 @@ JSON 两者完全一致。在别的模板上声明 `db` 和其它特性一样，
 uvp 尚未发布 1.0，正在积极建设中。说清楚这意味着什么，比给一个百分比更有用：
 
 **已工作并已验证。** 完整闭环 —— 描述 → 生成 → 构建 → 运行 → 探测 → 证据 ——
-在真实的 libuvcpp 1.7.0 安装上对全部六个模板都通过。生成的工程在存在 CMake
+在真实的 libuvcpp 1.7.0 安装上对全部模板都通过。生成的工程在存在 CMake
 package 时走 `find_package(uvcpp 1.7.0 CONFIG)`，不存在时回退到 `pkg-config`
 —— 因为预编译发布包只带后者、不带前者。两条路径都会强制校验版本下限。
 

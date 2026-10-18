@@ -38,7 +38,8 @@ export const initCommand: CommandSpec = {
       type: "string",
       value: "TEMPLATE",
       description:
-        "hello-http, rest-api, websocket-echo, soap-service, static-files, or http3-service.",
+        "hello-http, rest-api, websocket-echo, websocket-test, soap-service, static-files, or " +
+        "http3-service.",
     },
     {
       name: "port",
@@ -59,7 +60,7 @@ export const initCommand: CommandSpec = {
     },
   ],
   notes: [
-    "rest-api and websocket-echo need a libuvcpp built with UVCPP_BUILD_WEBAPP=ON. Run",
+    "rest-api, websocket-echo, and websocket-test need a libuvcpp built with UVCPP_BUILD_WEBAPP=ON. Run",
     "`uvp doctor` first: init does not check, and the generated code turns a missing module into",
     "one readable compile error rather than a cascade of failures inside libuvcpp's headers.",
     "http3-service needs --features tls,http3, and holds them: HTTP/3 runs on QUIC, which has no",

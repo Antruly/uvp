@@ -223,7 +223,7 @@ feature that is not requested should not appear in your build.
 ### The db module backs exactly one template
 
 `UVCPP_ENABLE_DB` compiles libuvcpp's database layer, and `uvcpp_db_pool` is what
-a generated service opens. Of the six templates, one has a store for it to back:
+a generated service opens. Of the seven templates, one has a store for it to back:
 `rest-api`. `uvp init --template rest-api --features db` replaces that template's
 in-memory map with the pool, and its routes, status codes and JSON stay as they
 are. Declaring `db` on any other web template records the build requirement and

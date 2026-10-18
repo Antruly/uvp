@@ -107,7 +107,7 @@ export CMAKE_PREFIX_PATH="$HOME/.local:$CMAKE_PREFIX_PATH"
 ```
 
 `UVCPP_BUILD_WEB=ON` and `UVCPP_BUILD_WEBAPP=ON` together are what provide the
-WebSocket and web-app modules the `websocket-echo`, `soap-service`, and
+WebSocket and web-app modules the `websocket-echo`, `websocket-test`, `soap-service`, and
 `rest-api` templates need. There is no standalone WebSocket switch. See
 [libuvcpp feature mapping](libuvcpp-features.md#websocket-needs-two-switches-not-one).
 
