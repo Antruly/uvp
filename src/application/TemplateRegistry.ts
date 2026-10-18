@@ -45,6 +45,15 @@ import { resolveTemplateStoreRoot } from "./TemplateStore.js";
  * The response body and the cached file are both capped by `maxBytes` before
  * they are parsed, and the request is aborted after `timeoutMs`. A `200` whose
  * body exceeds the cap is a failure, not a truncated index.
+ *
+ * ## Proxied hosts
+ *
+ * `node:http`/`node:https` do not read `HTTP_PROXY`/`HTTPS_PROXY` unless the
+ * process starts with `NODE_USE_ENV_PROXY=1` (observed on Node 24). On a host
+ * that only reaches the registry through a proxy, the default transport
+ * therefore fails with the connection error and the read is reported as
+ * `undetermined` — never as an empty registry. A caller that needs its own
+ * proxy handling injects a transport.
  */
 
 export const DEFAULT_TEMPLATE_REGISTRY_INDEX_URL =
