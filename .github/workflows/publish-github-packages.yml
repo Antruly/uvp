@@ -1,6 +1,14 @@
 name: Publish to GitHub Packages
 
-# Publishes the scoped mirror `@antruly/uvp-agents` for a release tag, by hand.
+# Publishes the scoped mirror `@antruly/uvp-agents` for a release tag.
+#
+# **When it runs.** The release-please workflow calls this workflow through
+# `workflow_call` when it creates a release, so the mirror follows the tag
+# automatically. `workflow_dispatch` remains for a backfill or a dry run; a
+# manual dispatch names the tag and the first step proves the checkout is
+# exactly that tag. npmjs is not automated: `publish.yml` stays a manual
+# dispatch because trusted publishing is npm's mechanism and the mirror has
+# none.
 #
 # **Why a second name.** GitHub Packages only stores scoped npm packages, and its
 # package names and scopes must be lowercase. The canonical package is
@@ -27,8 +35,9 @@ name: Publish to GitHub Packages
 #
 # **Why it is not a tag trigger.** The same reason `publish.yml` gives:
 # release-please creates the tag with the job's `GITHUB_TOKEN`, and GitHub does
-# not start workflows from events that token causes. A dispatch names the tag,
-# and the first step proves the checkout is exactly that tag.
+# not start workflows from events that token causes. The automatic path is a
+# `workflow_call` from the release-please workflow, which already knows the
+# created tag; the manual path is a `workflow_dispatch` that names the tag.
 #
 # **Bootstrap for tags that predate the helpers.** A tag created before
 # `prepare-github-packages.mjs` and `verify-release-version.mjs` existed cannot
@@ -53,6 +62,22 @@ on:
         default: false
       helpers_ref:
         description: "Bootstrap only: full 40-hex commit on main to take the mirror helper scripts from. Leave empty for tags that contain them."
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag created by release-please"
+        required: true
+        type: string
+      dry_run:
+        description: "Prepare, pack, and inspect without contacting GitHub Packages"
+        required: false
+        type: boolean
+        default: false
+      helpers_ref:
+        description: "Bootstrap only: full 40-hex commit on main to take the mirror helper scripts from"
         required: false
         type: string
         default: ""

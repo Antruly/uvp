@@ -18,6 +18,12 @@ name: Release please
 # There is no tag and no `bootstrap-sha`, so release-please's documented first-run
 # behaviour reads the whole branch history: the first release PR's changelog will
 # cover all of it unless the maintainer records a different choice on #160.
+#
+# When release-please creates a release, the second job calls the GitHub Packages
+# mirror workflow with the new tag. That mirror uses the workflow's own
+# `GITHUB_TOKEN` and `packages: write`, so it follows the release automatically.
+# npmjs is deliberately not automated here: `publish.yml` stays a manual dispatch
+# because trusted publishing is npm's mechanism.
 
 on:
   push:
@@ -35,6 +41,9 @@ jobs:
     name: Open or update the release PR
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     # The release-please action needs to write the release branch, the release
     # PR, and the labels it puts on that PR. Nothing else in this repository
     # takes write access beyond the job that needs it.
@@ -44,7 +53,20 @@ jobs:
       pull-requests: write
     steps:
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish-github-packages:
+    name: Publish the GitHub Packages mirror
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-github-packages.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      dry_run: false

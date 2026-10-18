@@ -223,8 +223,13 @@ The mirror is a distribution convenience, not a second identity:
   attestation; this repository has no observation that GitHub Packages accepts
   it, so the mirror carries no provenance claim.
 
-Dispatch it by hand with the tag release-please created, after the npmjs publish
-or independently of it:
+**Automatic.** When release-please creates a release, the `Release please`
+workflow calls this workflow through `workflow_call` with the new tag. The mirror
+therefore follows the release without a manual dispatch. npmjs is deliberately
+not automated: `publish.yml` stays a manual dispatch, because trusted publishing
+is npm's mechanism and the mirror does not use it.
+
+For a backfill, or to inspect the prepared tarball before uploading:
 
 ```bash
 gh workflow run publish-github-packages.yml -f tag=uvp-agents-<version> -f dry_run=true
