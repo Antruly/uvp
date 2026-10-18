@@ -1,7 +1,12 @@
+import path from "node:path";
+
 import type { z } from "zod";
 
 import { UvpFailure, type UvpErrorCode } from "../domain/errors.js";
+import type { Coverage, Evidence, EvidenceSource } from "../domain/evidence.js";
 import {
+  coverageComplete,
+  coveragePartial,
   createRecorder,
   envelopeOf,
   fileSource,
@@ -43,6 +48,7 @@ import {
   inspectTemplatePackage,
   previewTemplateImport,
   removeTemplatePackage,
+  resolveTemplateStoreRoot,
   TemplateStoreError,
   type InspectedTemplatePackage,
   type StoredTemplatePackage,
@@ -374,6 +380,78 @@ const storeCall = async <T>(origin: "source" | "stored", call: () => Promise<T>)
   }
 };
 
+/**
+ * One record for a template-package observation.
+ *
+ * The template tools look at paths — a store entry, a source directory, an
+ * export target — not at a live process, so the subject is the path and the
+ * sources are what was read or written there. Every field a caller needs to
+ * judge the answer (the digest, the counts, the scan limits) is in `observed`;
+ * the coverage says which part of the path that answer is about.
+ */
+const recordTemplate = (
+  recorder: EvidenceRecorder,
+  init: {
+    readonly subject: Record<string, unknown>;
+    readonly observed: Record<string, unknown>;
+    readonly coverage: Coverage;
+    readonly sources: readonly EvidenceSource[];
+    readonly limitations?: readonly string[];
+  },
+): Evidence => record(recorder, { kind: "template", ...init });
+
+const filesBytes = (files: readonly { readonly bytes: number }[]): number =>
+  files.reduce((total, file) => total + file.bytes, 0);
+
+/**
+ * How much of a package's text the bounded scan examined.
+ *
+ * `complete` claims the stated scope and nothing more: every entry the walk
+ * reached was read. An entry skipped for any reason, or a walk a limit stopped,
+ * makes it `partial` and carries both counts — `scanned` alone must not read as
+ * "everything".
+ */
+const templateScanCoverage = (sourceDir: string, scan: TemplateScanResult): Coverage => {
+  const examined = scan.scanned.length;
+  const total = examined + scan.skipped.length;
+  const scope = `the text of the files under ${sourceDir}`;
+  return scan.skipped.length === 0 && !scan.truncated
+    ? coverageComplete(scope)
+    : coveragePartial(
+        scope,
+        `${String(scan.skipped.length)} entries were not read${
+          scan.truncated ? "; a scan limit stopped the walk" : ""
+        }`,
+        examined,
+        total,
+      );
+};
+
+/**
+ * The question a partial scan leaves open.
+ *
+ * The walk knows what it read and says so; it does not know what is in the
+ * entries it did not read. The per-entry reasons stay in the scan's own
+ * `skipped` list rather than being paraphrased here, so this record cannot
+ * drift from the result the caller receives.
+ */
+const recordTemplateScanUnknown = (
+  recorder: EvidenceRecorder,
+  sourceDir: string,
+  scan: TemplateScanResult,
+  evidence: Evidence,
+): void => {
+  if (scan.skipped.length === 0 && !scan.truncated) return;
+  const question =
+    scan.skipped.length === 0
+      ? `What does the content under ${sourceDir} that a scan limit stopped the walk from reaching contain?`
+      : `What do the ${String(scan.skipped.length)} entries under ${sourceDir} that the scan did not read contain?`;
+  recordUnknown(recorder, question, scan.truncated ? "resource_limit" : "out_of_scope", {
+    blockedBy: "the scan's skipped list names each path and why it was not read",
+    partialEvidence: [evidence.evidence_id],
+  });
+};
+
 export const createToolHandlers = (
   services: UvpServices,
 ): Readonly<Record<string, ToolHandler>> => {
@@ -472,6 +550,38 @@ export const createToolHandlers = (
           }),
         );
 
+        // The store root, not the current directory: a caller who gets an empty
+        // result needs to know which store was empty.
+        const storeRoot = resolveTemplateStoreRoot();
+        recordTemplate(recorder, {
+          subject: { store_root: storeRoot },
+          observed: {
+            store_root: storeRoot,
+            matches: result.matches.length,
+            total_matches: result.total,
+            offset: result.offset,
+            limit: result.limit,
+            truncated: result.truncated,
+            corrupt: result.corrupt.map((entry) => ({
+              path: entry.path,
+              problems: [...entry.problems],
+            })),
+          },
+          // Every package directory the reader accepted was read whole: a
+          // package over a read limit is refused into `corrupt`, not returned
+          // partially. Entries the walk does not treat as store entries are
+          // outside this scope and said so in the limitations.
+          coverage: coverageComplete(`the package directories in the store at ${storeRoot}`),
+          sources: [fileSource(storeRoot)],
+          limitations: [
+            "Entries that are not directories, symbolic links, and dot-prefixed names are not " +
+              "store entries and were not examined.",
+            "Corrupt entries were examined and refused; each one is named in the result.",
+            "Search reads manifests and hashes the package files; it does not scan their text " +
+              "for credential- or PII-shaped content.",
+          ],
+        });
+
         return {
           ...envelopeOf(recorder, {
             tool: templateSearchContract.name,
@@ -515,6 +625,26 @@ export const createToolHandlers = (
       templateGetContract.inputSchema,
       async (input, recorder) => {
         const pkg = await storeCall("stored", () => getTemplatePackage(input.id, input.version));
+        recordTemplate(recorder, {
+          subject: { store_entry: pkg.path, id: pkg.id, version: pkg.version },
+          observed: {
+            id: pkg.id,
+            version: pkg.version,
+            digest: pkg.digest,
+            files: pkg.files.length,
+            bytes: filesBytes(pkg.files),
+            unverified: pkg.unverified,
+          },
+          // The reader walks every file in the stored package and hashes it; a
+          // tree that exceeds a read limit or disagrees with its manifest is
+          // refused, not returned partially.
+          coverage: coverageComplete(`the stored package at ${pkg.path}`),
+          sources: [fileSource(pkg.path, pkg.digest)],
+          limitations: [
+            "The files were read and hashed; their text was not scanned for credential- or " +
+              "PII-shaped content.",
+          ],
+        });
         return {
           ...envelopeOf(recorder, {
             tool: templateGetContract.name,
@@ -532,11 +662,44 @@ export const createToolHandlers = (
     [templateValidateContract.name]: handler(
       templateValidateContract.inputSchema,
       async (input, recorder) => {
+        const sourceDir = path.resolve(input.source_dir);
         const pkg = await storeCall("source", () =>
           inspectTemplatePackage({
             sourceDir: input.source_dir,
             allowUnverified: input.allow_unverified,
           }),
+        );
+        const evidence = recordTemplate(recorder, {
+          subject: { source_dir: sourceDir, id: pkg.id, version: pkg.version },
+          observed: {
+            id: pkg.id,
+            version: pkg.version,
+            digest: pkg.digest,
+            files: pkg.files.length,
+            bytes: filesBytes(pkg.files),
+            unverified: pkg.unverified,
+          },
+          coverage: coverageComplete(`the package's manifest and files under ${sourceDir}`),
+          sources: [fileSource(sourceDir)],
+          limitations: [
+            "The reader examines template.json, the files/ tree, and the manifest-named preview " +
+              "and licence; other top-level files are not part of the package.",
+            "Validation does not compile the package and does not scan its text.",
+          ],
+        });
+        // Validation answers the format question only. The credential/PII scan
+        // is a different question, asked by uvp_template_import; saying so here
+        // keeps an empty `findings`-shaped absence from reading as a clean scan.
+        recordUnknown(
+          recorder,
+          `What credential- or PII-shaped text does the package at ${sourceDir} contain?`,
+          "not_attempted",
+          {
+            blockedBy:
+              "validation establishes the package format only; run uvp_template_import with " +
+              "dry_run to scan the package's text",
+            partialEvidence: [evidence.evidence_id],
+          },
         );
         return {
           ...envelopeOf(recorder, {
@@ -555,12 +718,20 @@ export const createToolHandlers = (
     [templateImportContract.name]: handler(
       templateImportContract.inputSchema,
       async (input, recorder) => {
+        const sourceDir = path.resolve(input.source_dir);
         const scan = await storeCall("source", () => scanTemplatePackage(input.source_dir));
         const scanOutput = templateScanOutput(scan);
         const limitations = [
           "The scan is a bounded locator for credential- and PII-shaped content, not a guarantee that the package is clean.",
           "The package is not compiled; the generated workspace's build is the evidence.",
         ];
+        const scanObserved = {
+          files_scanned: scan.scanned.length,
+          entries_skipped: scan.skipped.length,
+          findings: scan.findings.length,
+          truncated: scan.truncated,
+          limits: { ...scan.limits },
+        };
 
         if (input.dry_run) {
           const preview = await storeCall("source", () =>
@@ -570,6 +741,33 @@ export const createToolHandlers = (
               replace: input.replace,
             }),
           );
+          // The preview reads the store as well as the source, so both are
+          // sources here; the snapshot limitation below says how far that read
+          // can be trusted as a prediction.
+          const storeRoot = resolveTemplateStoreRoot();
+          const evidence = recordTemplate(recorder, {
+            subject: { source_dir: sourceDir, store_root: storeRoot },
+            observed: {
+              id: preview.package.id,
+              version: preview.package.version,
+              digest: preview.package.digest,
+              files: preview.package.files.length,
+              bytes: filesBytes(preview.package.files),
+              dry_run: true,
+              would_import: preview.wouldImport,
+              would_replace: preview.wouldReplace,
+              exists: preview.exists,
+              ...(preview.conflict === undefined ? {} : { conflict: preview.conflict }),
+              scan: scanObserved,
+            },
+            coverage: templateScanCoverage(sourceDir, scan),
+            sources: [fileSource(sourceDir), fileSource(storeRoot)],
+            limitations: [
+              "The conflict check is a snapshot taken without the store lock; another uvp " +
+                "process can change the entry before the import runs.",
+            ],
+          });
+          recordTemplateScanUnknown(recorder, sourceDir, scan, evidence);
           return {
             ...envelopeOf(recorder, {
               tool: templateImportContract.name,
@@ -600,6 +798,38 @@ export const createToolHandlers = (
             allowUnverified: input.allow_unverified,
           }),
         );
+        const evidence = recordTemplate(recorder, {
+          subject: { source_dir: sourceDir, store_entry: imported.package.path },
+          observed: {
+            source_dir: sourceDir,
+            store_entry: imported.package.path,
+            id: imported.package.id,
+            version: imported.package.version,
+            digest: imported.package.digest,
+            files: imported.package.files.length,
+            bytes: filesBytes(imported.package.files),
+            replaced: imported.replaced,
+            ...(imported.retained === undefined ? {} : { retained: imported.retained }),
+            dry_run: false,
+            scan: scanObserved,
+          },
+          coverage: templateScanCoverage(sourceDir, scan),
+          sources: [
+            fileSource(sourceDir),
+            fileSource(imported.package.path, imported.package.digest),
+          ],
+          limitations: [
+            "The scan's completeness describes the package's text, not the store write; the " +
+              "written files are named in the result.",
+            ...(imported.retained === undefined
+              ? []
+              : [
+                  "A trash directory was retained, so cleanup did not complete; its path is in " +
+                    "the result.",
+                ]),
+          ],
+        });
+        recordTemplateScanUnknown(recorder, sourceDir, scan, evidence);
         return {
           ...envelopeOf(recorder, {
             tool: templateImportContract.name,
@@ -624,6 +854,26 @@ export const createToolHandlers = (
             targetDir: input.target_dir,
           }),
         );
+        recordTemplate(recorder, {
+          subject: { target: exported.path, id: exported.id, version: exported.version },
+          observed: {
+            path: exported.path,
+            id: exported.id,
+            version: exported.version,
+            digest: exported.digest,
+            files: exported.files.length,
+            bytes: exported.bytes,
+          },
+          // Every copied file was re-read and compared with the stored digest
+          // before the staging directory was renamed into place, so the target
+          // was examined whole rather than assumed from the copy's success.
+          coverage: coverageComplete(`the exported copy at ${exported.path}`),
+          sources: [fileSource(exported.path, exported.digest)],
+          limitations: [
+            "The stored package was re-verified and copied; its text was not scanned for " +
+              "credential- or PII-shaped content.",
+          ],
+        });
         return {
           ...envelopeOf(recorder, {
             tool: templateExportContract.name,
@@ -652,6 +902,25 @@ export const createToolHandlers = (
         const removed = await storeCall("source", () =>
           removeTemplatePackage(input.id, input.version),
         );
+        recordTemplate(recorder, {
+          subject: {
+            store_entry: removed.removed,
+            id: input.id,
+            ...(input.version === undefined ? {} : { version: input.version }),
+          },
+          observed: {
+            removed: removed.removed,
+            ...(removed.retained === undefined ? {} : { retained: removed.retained }),
+          },
+          // The entry was renamed out of the store before this returned. A
+          // retained trash directory is a cleanup fact, recorded apart from the
+          // removal: it does not put the entry back in the store.
+          coverage: coverageComplete(`the store entry at ${removed.removed}`),
+          sources: [fileSource(removed.removed)],
+          limitations: [
+            "Removal reports the store entry; workspaces generated from it are not inspected.",
+          ],
+        });
         return {
           ...envelopeOf(recorder, {
             tool: templateRemoveContract.name,

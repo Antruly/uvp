@@ -21,6 +21,16 @@ export const evidenceKindSchema = z.enum([
   "assertion",
   "benchmark",
   /**
+   * Evidence about a template package: a stored `id@version`, a source
+   * directory being validated or scanned, or the store's inventory.
+   *
+   * The subject is a filesystem path and the observation is what was read or
+   * written there. Filing it under `build` would claim a build that did not
+   * happen; filing it under `assertion` would claim a check the call did not
+   * make.
+   */
+  "template",
+  /**
    * Evidence about two reports rather than about a live subject.
    *
    * The other kinds are named for what uvp went and looked at. This one is the

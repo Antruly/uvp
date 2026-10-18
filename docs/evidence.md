@@ -81,9 +81,11 @@ interface Evidence {
 their identifiers.
 
 **`kind`** is one of `toolchain`, `build`, `launch`, `exchange`, `capture`,
-`assertion`, `benchmark`, `comparison` — the things uvp produces evidence about.
-Seven of them are named for what uvp went and looked at. `comparison` is the
-exception, and it is the reason the list has a sentence rather than a count: a
+`assertion`, `benchmark`, `template`, `comparison` — the things uvp produces
+evidence about. Eight are named for what uvp went and looked at, including
+`template`, which names a stored package, a source directory, or the store's
+inventory and uses a path as its subject. `comparison` is the exception, and it
+is the reason the list has a sentence rather than a count: a
 comparison of two saved reports observed neither of them live, and every fact in
 it came out of records something else wrote. Filing it under the kind of the
 thing compared would claim an observation that was never made.
