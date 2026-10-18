@@ -321,11 +321,11 @@ Either path leaves you with an ordinary CMake project — walk away from uvp and
 
 ## Troubleshooting
 
-**`uvp: command not found` after `npm install uvp-agents`.** Without `--global`
-the install is local: npm links the executable into `./node_modules/.bin` and does
-not add that directory to `PATH`. On Windows the shell reports this as `'uvp' is
-not recognized as an internal or external command` (or the localized equivalent).
-From that project, run `npx uvp doctor`, or call the linked executable directly —
+**`uvp: command not found`, or on Windows `'uvp' is not recognized as an internal
+or external command` (or the localized equivalent), after `npm install
+uvp-agents`.** Without `--global` the install is local: npm links the executable
+into `./node_modules/.bin` and does not add that directory to `PATH`. From that
+project, run `npx uvp doctor`, or call the linked executable directly —
 `.\node_modules\.bin\uvp.cmd doctor` on Windows, `./node_modules/.bin/uvp doctor`
 on Unix-like hosts. A global install is what puts `uvp` on `PATH`.
 
