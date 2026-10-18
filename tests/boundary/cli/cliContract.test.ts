@@ -998,6 +998,32 @@ describe("a Node frontend selection", () => {
     expect(manifest.frontends).toEqual(["vue3"]);
   });
 
+  it("refuses a frontend build for a workspace that records no app", async () => {
+    const target = join(tmpdir(), `uvp frontend build no app ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke(["init", target, "--name", "svc", "--template", "hello-http"]);
+    expect(init.exit, init.stderr).toBe(EXIT_OK);
+
+    const build = await invoke(["frontend", "build", target, "--json"]);
+    // The question could not be put: there is no frontend project to build.
+    expect(build.exit).toBe(EXIT_WRONG);
+    expect(build.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(build.stderr, "uvp frontend build"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("no Node frontend app");
+    // Nothing was spawned or written.
+    expect(existsSync(join(target, "frontend"))).toBe(false);
+  });
+
+  it("refuses a frontend build for a path that is not a workspace", async () => {
+    const build = await invoke(["frontend", "build", ABSENT_WORKSPACE, "--json"]);
+    expect(build.exit).toBe(EXIT_WRONG);
+    expect(build.stdout.trim()).toBe("");
+    expect(parseUvpError(soleJson(build.stderr, "uvp frontend build")).code).toBe(
+      "workspace_not_found",
+    );
+  });
+
   it("refuses two apps in one workspace", async () => {
     const target = join(tmpdir(), `uvp init two apps ${String(process.pid)}`);
     rmSync(target, { recursive: true, force: true });

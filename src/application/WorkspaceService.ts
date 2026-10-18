@@ -49,6 +49,7 @@ import { tailWithin } from "./evidenceHelpers.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
 import { manifestOf, manifestProblemFailure, readWorkspaceManifest } from "./workspaceManifest.js";
+import { workspaceIdOf } from "./workspaceIdentity.js";
 
 export interface CreatedFile {
   readonly path: string;
@@ -139,13 +140,6 @@ const CANCELLED_RUN_GRACE_MS = 3_000;
  * half a character in the evidence.
  */
 const REPORT_TAIL_UNITS = 4_096;
-
-const workspaceIdOf = (path: string): string => {
-  // Derived, not random: re-opening the same directory must yield the same id,
-  // so an evidence record from an earlier call still refers to this workspace.
-  const digest = sha256(resolve(path));
-  return `wsp_${digest.slice(0, 22)}`;
-};
 
 /** Why a directory could not be listed, in terms a caller can act on. */
 const describeListFailure = (cause: unknown): string => {

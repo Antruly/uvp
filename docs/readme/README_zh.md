@@ -135,6 +135,7 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 | 检查工具链以及存在哪些 libuvcpp 模块             | `uvp_doctor`                            |
 | 生成可编译的工程（7 个模板）                     | `uvp_workspace_create`                  |
 | 用 CMake 配置并编译                              | `uvp_build`                             |
+| 安装并构建生成的 Node 前端应用                   | `uvp_frontend_build`                    |
 | 启动服务，并等待它真正能应答                     | `uvp_run`、`uvp_run_stop`               |
 | 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS | `uvp_http_request`                      |
 | 探测 WebSocket 端点                              | `uvp_websocket_probe`                   |

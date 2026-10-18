@@ -6,7 +6,7 @@ import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_EVENT_PAYLOAD_POLICIES } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
-import { UVP_FRONTEND_SELECTIONS } from "../domain/frontends.js";
+import { UVP_FRONTEND_APPS, UVP_FRONTEND_SELECTIONS } from "../domain/frontends.js";
 import { UVP_MODULES } from "../domain/modules.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
@@ -238,6 +238,91 @@ export const buildContract = defineTool({
     {
       description: "Build a workspace with Ninja",
       input: { path: "/home/dev/svc", generator: "ninja" },
+    },
+  ],
+});
+
+/**
+ * The frontend app build.
+ *
+ * Separate from `uvp_build` because its effects are different, and the
+ * separation is the contract, not a convenience: a caller who asked for a C++
+ * build did not agree to spawn Node or to contact a package registry. It never
+ * runs as part of `uvp_build`, and the generated service starts without it —
+ * answering `/` with a named "not built" response until this succeeds.
+ *
+ * The commands are reported as data. A failed `npm ci` is a result with the
+ * failing step's output, not a transport error, for the same reason a compile
+ * failure is: the answer is the evidence.
+ */
+export const frontendBuildContract = defineTool({
+  name: "uvp_frontend_build",
+  title: "Build a workspace's Node frontend app",
+  description:
+    "Install the locked frontend dependencies and run the framework build for a workspace " +
+    "generated with a Node frontend app (vue3, react, or svelte). Runs `npm ci` and " +
+    "`npm run build` in `frontend/`, then reports each step's exit code and output tails and " +
+    "whether `frontend/dist/index.html` exists. This spawns processes and may fetch packages " +
+    "from the registry named in the committed lockfile. `uvp build` never runs it, and the " +
+    "generated service and C++ build do not need Node.",
+  kind: "build",
+  inputSchema: z.object({
+    path: z.string().min(1),
+    /** Overall budget for the install and the framework build together. */
+    timeout_ms: z.number().int().min(1000).default(600_000),
+  }),
+  outputSchema: z.object({
+    ...toolEnvelopeShape,
+    workspace_id: workspaceIdSchema,
+    frontend: z.enum(UVP_FRONTEND_APPS),
+    frontend_dir: z.string(),
+    output_dir: z.string(),
+    /** `frontend/dist/index.html`: what the generated service checks for at startup. */
+    entry: z.string(),
+    /**
+     * True when the entry exists after the run, whichever run wrote it. A
+     * failed rebuild of an earlier build leaves this true; `steps_succeeded`
+     * is the claim about this run.
+     */
+    built: z.boolean(),
+    /** True when every command that started exited 0. */
+    steps_succeeded: z.boolean(),
+    node_version: z.string(),
+    npm_version: z.string(),
+    steps: z.array(
+      z.object({
+        command: z.string(),
+        args: z.array(z.string()),
+        exit_code: z.number().int().nullable(),
+        signal: z.string().nullable(),
+        timed_out: z.boolean(),
+        duration_ms: z.number().int(),
+        /** The last 4096 characters; `stdout_truncated` says more was captured. */
+        stdout_tail: z.string(),
+        stderr_tail: z.string(),
+        stdout_bytes: z.number().int(),
+        stderr_bytes: z.number().int(),
+        stdout_truncated: z.boolean(),
+        stderr_truncated: z.boolean(),
+        succeeded: z.boolean(),
+      }),
+    ),
+  }),
+  effects: {
+    readsFilesystem: true,
+    // `frontend/node_modules` and `frontend/dist`, both inside the workspace.
+    writesFilesystem: true,
+    // `npm ci` may fetch the packages the lockfile names.
+    network: true,
+    spawnsProcess: true,
+    mutatesTarget: false,
+  },
+  // npm's own output and any registry text in it did not originate with uvp.
+  returnsTargetContent: true,
+  examples: [
+    {
+      description: "Build the Vue app in a generated workspace",
+      input: { path: "/home/dev/svc" },
     },
   ],
 });

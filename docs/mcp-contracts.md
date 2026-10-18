@@ -32,6 +32,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_doctor`           | toolchain |  ●  |     |     |  ●   |     |           |
 | `uvp_workspace_create` | workspace |  ●  |  ●  |     |      |     |           |
 | `uvp_build`            | build     |  ●  |  ●  |     |  ●   |     |     ●     |
+| `uvp_frontend_build`   | build     |  ●  |  ●  |  ●  |  ●   |     |     ●     |
 | `uvp_run`              | runtime   |  ●  |  ●  |  ●  |  ●   |  ●  |     ●     |
 | `uvp_run_stop`         | runtime   |     |     |     |  ●   |  ●  |           |
 | `uvp_verify`           | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
@@ -144,6 +145,22 @@ that follow: the artifacts are linked against the image's libuvcpp at an in-imag
 path and may not start here, and anything the build wrote outside the workspace
 was discarded with the container. `uvp_verify` refuses a container-declared
 workspace with `unsupported_toolchain`, because a pass runs what it builds.
+
+### Frontend build
+
+**`uvp_frontend_build`** — Build a workspace's Node frontend app.
+Runs `npm ci --no-audit --no-fund` and `npm run build` in `frontend/`, then
+reports each step's exit code, duration, and output tail, plus the versions of
+Node and npm it used. `built` reports whether `frontend/dist/index.html` exists
+after the run — the file the generated service checks for at startup — while
+`steps_succeeded` reports whether this run's commands exited `0`. They can
+disagree: a failed rebuild over an earlier output leaves `built` true. `net` and
+`proc` are unconditional because the install may fetch packages from the
+registry named in the committed lockfile and both steps are processes; `mut` is
+not set because everything written stays inside the workspace's `frontend/`.
+`untrusted` because npm's output is npm's words. The build never runs as part
+of `uvp_build`, and it runs on this host even when `uvp.json` names a container
+for the C++ build — the result says so when it does.
 
 ### Runtime
 

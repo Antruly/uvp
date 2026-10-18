@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "019e120fcb7944020e34272d6b427a7fd1c8fcde9d5c5541f72c4807a937bdeb",
-  "tool_count": 15,
+  "digest": "955f7d848694e9e5a40f8aa29e462bfe40f8c18e06d73ffbe5acba3eb3657b75",
+  "tool_count": 16,
   "tools": [
     {
       "name": "uvp_doctor",
@@ -1249,6 +1249,358 @@
           "input": {
             "path": "/home/dev/svc",
             "generator": "ninja"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_frontend_build",
+      "title": "Build a workspace's Node frontend app",
+      "description": "Install the locked frontend dependencies and run the framework build for a workspace generated with a Node frontend app (vue3, react, or svelte). Runs `npm ci` and `npm run build` in `frontend/`, then reports each step's exit code and output tails and whether `frontend/dist/index.html` exists. This spawns processes and may fetch packages from the registry named in the committed lockfile. `uvp build` never runs it, and the generated service and C++ build do not need Node.",
+      "kind": "build",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout_ms": {
+            "default": 600000,
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^wsp_[0-9a-f]{22}$"
+          },
+          "frontend": {
+            "type": "string",
+            "enum": [
+              "vue3",
+              "react",
+              "svelte"
+            ]
+          },
+          "frontend_dir": {
+            "type": "string"
+          },
+          "output_dir": {
+            "type": "string"
+          },
+          "entry": {
+            "type": "string"
+          },
+          "built": {
+            "type": "boolean"
+          },
+          "steps_succeeded": {
+            "type": "boolean"
+          },
+          "node_version": {
+            "type": "string"
+          },
+          "npm_version": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "exit_code": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "signal": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timed_out": {
+                  "type": "boolean"
+                },
+                "duration_ms": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "stdout_tail": {
+                  "type": "string"
+                },
+                "stderr_tail": {
+                  "type": "string"
+                },
+                "stdout_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "stderr_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "stdout_truncated": {
+                  "type": "boolean"
+                },
+                "stderr_truncated": {
+                  "type": "boolean"
+                },
+                "succeeded": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "command",
+                "args",
+                "exit_code",
+                "signal",
+                "timed_out",
+                "duration_ms",
+                "stdout_tail",
+                "stderr_tail",
+                "stdout_bytes",
+                "stderr_bytes",
+                "stdout_truncated",
+                "stderr_truncated",
+                "succeeded"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "workspace_id",
+          "frontend",
+          "frontend_dir",
+          "output_dir",
+          "entry",
+          "built",
+          "steps_succeeded",
+          "node_version",
+          "npm_version",
+          "steps"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": true,
+        "spawnsProcess": true,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Build the Vue app in a generated workspace",
+          "input": {
+            "path": "/home/dev/svc"
           }
         }
       ]

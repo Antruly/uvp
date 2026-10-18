@@ -266,8 +266,10 @@ build` in `frontend/` and restart; the template's exact routes answer
 normally either way, because the static root is registered after them.
 
 ```bash
-cd frontend && npm ci && npm run build   # writes frontend/dist/
+uvp frontend build ./svc   # npm ci + npm run build in frontend/, writes frontend/dist/
 ```
+
+The same thing by hand is `cd frontend && npm ci && npm run build`.
 
 A workspace selects at most one frontend app, and an app and a static skin
 cannot be combined: both own the document root. Those refusals, and the
@@ -336,6 +338,44 @@ rather than a build on this host. `uvp verify` refuses a container-declared
 workspace with `unsupported_toolchain` before compiling anything — a pass runs
 what it builds, and a binary built in an image carries an in-image `RUNPATH` —
 so checking one on this host means `uvp verify ./svc --toolchain local`.
+
+## `uvp frontend build`
+
+```bash
+uvp frontend build ./svc
+uvp frontend build ./svc --timeout 1200000 --json
+```
+
+The explicit build for a workspace generated with a Node frontend app. It runs
+`npm ci --no-audit --no-fund` and then `npm run build` in `frontend/`, and
+reports each step's exit code, duration, and the last 4096 characters of its
+output. It never runs as part of `uvp build`, and nothing else in uvp needs
+Node.
+
+The tool call succeeds even when the build does not: `steps_succeeded` is
+`false`, the CLI exits `1`, and the failing step's output tail says why. `2` is
+reserved for a question that could not be put — a path that is not a workspace,
+a workspace whose `uvp.json` records no app, or a `frontend/` project missing
+its `package.json` or its committed `package-lock.json`.
+
+`built` is a claim about the filesystem, not about this run: it is true when
+`frontend/dist/index.html` exists after the build, which can be a leftover from
+an earlier build when this run failed. `steps_succeeded` is the claim about
+this run, and the two together are what the verdict reads.
+
+Node and npm are checked before anything is installed: a `node --version` or
+`npm --version` that cannot be started, exits non-zero, or prints no version is
+a `missing_requirement` naming the executable, not a failed build. The
+generated project asks for Node 22.19 or newer.
+
+Effects: reads and writes the filesystem (only inside `frontend/`: its
+`node_modules/` and `dist/`), spawns processes, and may contact the registry
+named in the lockfile. It runs on this host even when `uvp.json` names a
+container for the C++ build; the result says so when it does.
+
+A framework build that exits `0` without producing `frontend/dist/index.html`
+is reported as such: `steps_succeeded` is true and `built` is false, which
+means the project's output directory was changed from the generated default.
 
 ## `uvp run` and `uvp stop`
 

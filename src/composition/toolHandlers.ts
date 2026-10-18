@@ -13,6 +13,7 @@ import { doctorContract } from "../contracts/toolchainToolContracts.js";
 import {
   bundleDiffContract,
   buildContract,
+  frontendBuildContract,
   runContract,
   runStopContract,
   verifyContract,
@@ -407,6 +408,104 @@ export const createToolHandlers = (
           : {}),
       };
     }),
+
+    [frontendBuildContract.name]: handler(
+      frontendBuildContract.inputSchema,
+      async (input, recorder, context) => {
+        // Read for the limitation below, not for the build: the frontend build
+        // runs on this host even when the workspace asks for a container C++
+        // build, and a caller should not infer otherwise from the manifest.
+        const manifest = manifestOf(await readWorkspaceManifest(input.path));
+        const built = await services.frontendBuild.build({
+          path: input.path,
+          timeoutMs: input.timeout_ms,
+          signal: context.signal,
+        });
+        const succeeded = built.stepsSucceeded && built.built;
+
+        record(recorder, {
+          kind: "build",
+          subject: { workspace_id: built.workspaceId, build_dir: built.outputDir },
+          observed: {
+            frontend: built.frontend,
+            steps_succeeded: built.stepsSucceeded,
+            built: built.built,
+            node_version: built.nodeVersion,
+            npm_version: built.npmVersion,
+            steps: built.steps.map((step) => ({
+              command: [step.command, ...step.args].join(" "),
+              exit_code: step.exitCode,
+              timed_out: step.timedOut,
+              duration_ms: step.durationMs,
+            })),
+          },
+          coverage: { scope: "frontend build", status: "complete" },
+          sources: built.steps.map((step) => ({
+            kind: "command" as const,
+            ref: [step.command, ...step.args].join(" "),
+          })),
+          limitations: built.stepsSucceeded
+            ? built.built
+              ? []
+              : [
+                  "Every command exited 0 but frontend/dist/index.html was not found; the " +
+                    "project's build output directory may have been changed from the default.",
+                ]
+            : built.built
+              ? [
+                  "frontend/dist/index.html exists, but this run did not produce it; it may be " +
+                    "left over from an earlier build.",
+                ]
+              : ["The frontend build did not succeed; the failing step's output says why."],
+        });
+
+        return {
+          ...envelopeOf(recorder, {
+            tool: frontendBuildContract.name,
+            provider: services.primary.identity(),
+            limitations: [
+              ...(manifest?.toolchain?.kind === "container"
+                ? [
+                    "The frontend build ran on this host with this host's Node, not inside " +
+                      `the container uvp.json names (${manifest.toolchain.image}).`,
+                  ]
+                : []),
+              ...(succeeded
+                ? [
+                    "A built frontend is not a running service. Start it with uvp_run and " +
+                      "request / to observe the page.",
+                  ]
+                : []),
+              ...(context.limitations ?? []),
+            ],
+          }),
+          workspace_id: built.workspaceId,
+          frontend: built.frontend,
+          frontend_dir: built.frontendDir,
+          output_dir: built.outputDir,
+          entry: built.entry,
+          built: built.built,
+          steps_succeeded: built.stepsSucceeded,
+          node_version: built.nodeVersion,
+          npm_version: built.npmVersion,
+          steps: built.steps.map((step) => ({
+            command: step.command,
+            args: [...step.args],
+            exit_code: step.exitCode,
+            signal: step.signal,
+            timed_out: step.timedOut,
+            duration_ms: step.durationMs,
+            stdout_tail: step.stdoutTail,
+            stderr_tail: step.stderrTail,
+            stdout_bytes: step.stdoutBytes,
+            stderr_bytes: step.stderrBytes,
+            stdout_truncated: step.stdoutTruncated,
+            stderr_truncated: step.stderrTruncated,
+            succeeded: step.succeeded,
+          })),
+        };
+      },
+    ),
 
     [runContract.name]: handler(runContract.inputSchema, async (input, recorder, context) => {
       const run = await services.workspace.run({

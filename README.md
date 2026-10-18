@@ -160,6 +160,7 @@ That last rule is the one that shapes everything else. A tool that says
 | Check the toolchain and which libuvcpp modules are present  | `uvp_doctor`                            |
 | Scaffold a buildable project (7 templates)                  | `uvp_workspace_create`                  |
 | Configure and build with CMake                              | `uvp_build`                             |
+| Install and build a generated Node frontend app             | `uvp_frontend_build`                    |
 | Start a service and wait for it to actually answer          | `uvp_run`, `uvp_run_stop`               |
 | Drive HTTP/1.1, HTTP/2, and HTTP/3 requests, and report TLS | `uvp_http_request`                      |
 | Probe a WebSocket endpoint                                  | `uvp_websocket_probe`                   |

@@ -12,6 +12,11 @@ import { z } from "zod";
 
 import { ASSERTION_KINDS } from "../../src/application/assertions.js";
 import type {
+  CommandOutcome,
+  CommandRequest,
+  CommandRunner,
+} from "../../src/application/CommandRunner.js";
+import type {
   NativeProbeAvailability,
   NativeWebSocketProbe,
 } from "../../src/application/NativeWebSocketProbe.js";
@@ -712,6 +717,111 @@ describe("the static frontend selection at the boundary", () => {
       }),
     ).toBe("invalid_request");
     await expect(access(path)).rejects.toThrow();
+  });
+});
+
+describe("the frontend app build at the boundary", () => {
+  const outcome = (patch: Partial<CommandOutcome> = {}): CommandOutcome => ({
+    command: "npm",
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    aborted: false,
+    durationMs: 1,
+    stdout: "",
+    stderr: "",
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    ...patch,
+  });
+
+  const callFrontend = async (
+    runner: CommandRunner,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const services = createUvpServices({
+      providers: [createFakeToolchain()],
+      now: FROZEN_CLOCK,
+      frontendRunner: runner,
+    });
+    return await handlerFor(createToolHandlers(services), "uvp_frontend_build")(input, {
+      signal: harness.signal,
+    });
+  };
+
+  it("runs the locked install and the framework build, and reports the entry", async () => {
+    const path = join(harness.workspace, "..", "app-build");
+    temporaryRoots.push(path);
+    await call("uvp_workspace_create", {
+      path,
+      name: "app-build",
+      template: "hello-http",
+      features: [],
+      frontends: ["vue3"],
+    });
+
+    const commands: string[] = [];
+    const runner: CommandRunner = async (request: CommandRequest) => {
+      commands.push([request.command, ...request.args].join(" "));
+      if (request.args[0] === "--version") {
+        return outcome({ stdout: request.command === "node" ? "v24.21.0\n" : "11.16.0\n" });
+      }
+      if (request.args[0] === "run") {
+        await mkdir(join(path, "frontend", "dist"), { recursive: true });
+        await writeFile(join(path, "frontend", "dist", "index.html"), "<!doctype html>\n");
+      }
+      return outcome({ stdout: "ok\n" });
+    };
+
+    const output = await callFrontend(runner, { path });
+    expectConforms("uvp_frontend_build", output);
+    expect(output["frontend"]).toBe("vue3");
+    expect(output["steps_succeeded"]).toBe(true);
+    expect(output["built"]).toBe(true);
+    expect(commands).toEqual([
+      "node --version",
+      "npm --version",
+      "npm ci --no-audit --no-fund",
+      "npm run build",
+    ]);
+    const steps = output["steps"] as { command: string; succeeded: boolean }[];
+    expect(steps.map((step) => step.succeeded)).toEqual([true, true]);
+  });
+
+  it("reports a failing install as a result with the step's own output", async () => {
+    const path = join(harness.workspace, "..", "app-build-fails");
+    temporaryRoots.push(path);
+    await call("uvp_workspace_create", {
+      path,
+      name: "app-build-fails",
+      template: "hello-http",
+      features: [],
+      frontends: ["react"],
+    });
+
+    const runner: CommandRunner = async (request) =>
+      request.args[0] === "--version"
+        ? outcome({ stdout: request.command === "node" ? "v24.21.0\n" : "11.16.0\n" })
+        : request.args[0] === "ci"
+          ? outcome({ exitCode: 1, stderr: "npm ERR! code EUSAGE\n" })
+          : outcome();
+
+    const output = await callFrontend(runner, { path });
+    expectConforms("uvp_frontend_build", output);
+    expect(output["steps_succeeded"]).toBe(false);
+    expect(output["built"]).toBe(false);
+    const steps = output["steps"] as { stderr_tail: string }[];
+    // The framework build is never started after a failed install.
+    expect(steps).toHaveLength(1);
+    expect(steps[0]?.stderr_tail).toContain("npm ERR! code EUSAGE");
+  });
+
+  it("refuses a workspace that records no Node frontend app", async () => {
+    expect(await failureCodeOf("uvp_frontend_build", { path: harness.workspace })).toBe(
+      "invalid_request",
+    );
   });
 });
 

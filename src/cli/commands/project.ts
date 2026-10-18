@@ -205,6 +205,38 @@ export const buildCommand: CommandSpec = {
   verdict: (output) => (bool(output["succeeded"]) === true ? undefined : EXIT_NO),
 };
 
+export const frontendBuildCommand: CommandSpec = {
+  path: ["frontend", "build"],
+  tool: "uvp_frontend_build",
+  summary: "Install and build a workspace's Node frontend app.",
+  usage: "uvp frontend build PATH [--timeout MS] [--json]",
+  positionals: [{ name: "PATH", description: "Workspace directory." }],
+  flags: [
+    {
+      name: "timeout",
+      type: "number",
+      value: "MS",
+      description: "Overall budget for `npm ci` and `npm run build` together. Default 600000.",
+    },
+  ],
+  notes: [
+    "This runs `npm ci` and `npm run build` in frontend/, so it starts processes and may",
+    "fetch packages from the registry named in the committed lockfile.",
+    "`uvp build` never runs it. The generated service starts without it and answers GET / with",
+    "503 until frontend/dist/index.html exists.",
+    "A failed step exits 1 and prints its output tail. It is not an error: the install or the",
+    "framework's build answered no, and the output says why.",
+  ],
+  input: (parsed) => {
+    const path = requirePositional(parsed, 0, "a workspace path", "uvp frontend build ./svc");
+    return { path, ...optional("timeout_ms", asNumber(parsed, "timeout")) };
+  },
+  verdict: (output) =>
+    bool(output["steps_succeeded"]) === true && bool(output["built"]) === true
+      ? undefined
+      : EXIT_NO,
+};
+
 export const runCommand: CommandSpec = {
   path: ["run"],
   tool: "uvp_run",

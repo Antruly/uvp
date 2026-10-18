@@ -178,6 +178,53 @@ export const renderBuild = (output: Record<string, unknown>): string[] => {
   return lines;
 };
 
+/**
+ * The explicit Node frontend build.
+ *
+ * The first line answers "is there a page to serve now", because that is what
+ * the caller will do next; the steps follow as evidence, with the failing
+ * step's own output, not a paraphrase of it.
+ */
+export const renderFrontendBuild = (output: Record<string, unknown>): string[] => {
+  const stepsSucceeded = bool(output["steps_succeeded"]) === true;
+  const built = bool(output["built"]) === true;
+  const lines = [
+    row(
+      "frontend",
+      `${str(output["frontend"])}  ${stepsSucceeded && built ? "built" : "not built"}`,
+    ),
+    row("output", `${str(output["output_dir"])}${built ? "" : "  (no dist/index.html)"}`),
+    row(
+      "tools",
+      `node ${str(output["node_version"], "?")}  npm ${str(output["npm_version"], "?")}`,
+    ),
+  ];
+  for (const step of list(output["steps"])) {
+    const command = [str(at(step, "command")), ...strings(at(step, "args"))].join(" ");
+    const exit = num(at(step, "exit_code"));
+    const succeeded = bool(at(step, "succeeded")) === true;
+    lines.push(
+      row(
+        "step",
+        `${command}  ${
+          succeeded
+            ? "ok"
+            : `failed (exit ${exit === undefined ? "none" : String(exit)}${
+                bool(at(step, "timed_out")) === true ? ", timed out" : ""
+              })`
+        }  ${millis(num(at(step, "duration_ms")) ?? 0)}`,
+      ),
+    );
+    // The failing step's own words. A passing step's output is still in the
+    // result for a caller that asks with --json; printing it here would bury
+    // the failure.
+    if (succeeded) continue;
+    const tail = str(at(step, "stderr_tail")).trim() || str(at(step, "stdout_tail")).trim();
+    for (const line of tail.split(/\r?\n/u)) lines.push(`  │ ${line}`);
+  }
+  return lines;
+};
+
 const diagnosticLine = (diagnostic: unknown): string => {
   const file = str(at(diagnostic, "file"), "<toolchain>");
   const line = num(at(diagnostic, "line"));
