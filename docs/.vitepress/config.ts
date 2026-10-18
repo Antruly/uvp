@@ -35,6 +35,7 @@ export default defineConfig({
         collapsed: true,
         items: [
           { text: "MCP contracts", link: "/mcp-contracts" },
+          { text: "Template packages", link: "/template-packages" },
           { text: "libuvcpp feature mapping", link: "/libuvcpp-features" },
           { text: "First-release support matrix", link: "/support-matrix" },
           { text: "Release notes", link: "/release-notes" },

@@ -78,7 +78,12 @@ export interface TemplatePackageLimits {
   readonly maxNameLength: number;
   readonly maxDescriptionLength: number;
   readonly maxTags: number;
+  readonly maxTagLength: number;
   readonly maxIdLength: number;
+  readonly maxAuthorLength: number;
+  readonly maxRevisionLength: number;
+  readonly maxLicenseNameLength: number;
+  readonly maxSpdxLength: number;
 }
 
 export const DEFAULT_TEMPLATE_PACKAGE_LIMITS: TemplatePackageLimits = {
@@ -89,7 +94,12 @@ export const DEFAULT_TEMPLATE_PACKAGE_LIMITS: TemplatePackageLimits = {
   maxNameLength: 80,
   maxDescriptionLength: 2000,
   maxTags: 20,
+  maxTagLength: 32,
   maxIdLength: 64,
+  maxAuthorLength: 120,
+  maxRevisionLength: 120,
+  maxLicenseNameLength: 80,
+  maxSpdxLength: 64,
 };
 
 export interface TemplatePackageVariable {
@@ -105,7 +115,11 @@ export interface TemplatePackageRequires {
 }
 
 export interface TemplatePackageLicense {
-  /** An SPDX identifier or expression. Its existence is not checked here. */
+  /**
+   * A single SPDX identifier such as `MIT` or `Apache-2.0`, with an optional
+   * trailing `+`. Expressions (`MIT OR Apache-2.0`) are not accepted; the
+   * existence of the identifier is not checked here.
+   */
   readonly spdx?: string;
   /** A free-text licence name, for a licence that has no SPDX identifier. */
   readonly name?: string;
@@ -177,6 +191,13 @@ export type TemplatePackageValidation =
       readonly manifest: TemplatePackageManifest;
       /** `sha256:<hex>` over the RFC 8785 canonical manifest. */
       readonly digest: string;
+      /**
+       * Whether the caller supplied a listing of `files/`.
+       *
+       * `false` means the validator examined the declaration only: the
+       * manifest is well-formed, but nothing says the tree matches it.
+       */
+      readonly filesObserved: boolean;
       readonly problems: readonly [];
     }
   | { readonly ok: false; readonly problems: readonly TemplatePackageProblem[] };
@@ -250,6 +271,19 @@ const hasControlCharacter = (value: string): boolean => {
 };
 
 /**
+ * Why `value` cannot be a single-line display field (a package name,
+ * description, or author), or undefined.
+ *
+ * These strings are shown in search results and reports. A control character
+ * can rewrite the line a terminal has already written, so a package could make
+ * a result look like a different one; refusing them keeps the display honest
+ * rather than relying on every consumer to sanitise it. Newlines are refused
+ * too: these fields are one line, and a description is not a document.
+ */
+export const templatePackageTextProblem = (value: string): string | undefined =>
+  hasControlCharacter(value) ? "contains a control character" : undefined;
+
+/**
  * Why `path` cannot be a package-relative file path, or undefined.
  *
  * Paths are interpreted on every host the package may be extracted or built on,
@@ -268,8 +302,12 @@ export const templatePackagePathProblem = (
   if (path.startsWith("/") || /^[A-Za-z]:/u.test(path) || path.startsWith("~")) {
     return "must be relative to the package's files/ directory";
   }
+  if (path === "files" || path.startsWith("files/")) {
+    return "must not name the files/ directory, which these paths are already relative to";
+  }
   if (path.includes("\\")) return "must use '/' as the separator, not '\\'";
-  if (hasControlCharacter(path)) return "contains a control character";
+  const textProblem = templatePackageTextProblem(path);
+  if (textProblem !== undefined) return textProblem;
   if (/[<>:"|?*]/u.test(path)) return "contains a character that is not portable to Windows";
   for (const segment of path.split("/")) {
     if (segment.length === 0) return "contains an empty path segment";
