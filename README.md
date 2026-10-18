@@ -20,11 +20,9 @@
 </div>
 
 > [!IMPORTANT]
-> uvp is distributed from [Antruly/uvp](https://github.com/Antruly/uvp). The
-> npm package name `uvp-agents` is reserved for the first release and is **not
-> yet published** — until it is, install from a source checkout. A similar
-> repository name or a copied README does not establish that a download is
-> official.
+> uvp is distributed from [Antruly/uvp](https://github.com/Antruly/uvp) and
+> published on npm as `uvp-agents`. A similar repository name or a copied README
+> does not establish that a download is official.
 
 ---
 
@@ -76,10 +74,10 @@ uvp doctor --json
 ### Set up your agent
 
 ```bash
-npx uvp-agents setup      # not yet published; see the note above
+npx uvp-agents setup
 ```
 
-Until the first release, run from a checkout:
+To run from a source checkout instead:
 
 ```bash
 git clone https://github.com/Antruly/uvp
@@ -254,19 +252,28 @@ which is the only thing that separates a store from a handler that answers
 nothing else installed; MySQL and PostgreSQL go through the same generated code
 and the same driver-loading path, and are not claimed as observed.
 
+**Template packages (0.3.0).** This release defines `uvp.template/1`, a standard
+package format for templates, and ships the local store, deterministic search,
+inspect/export, and a bounded secret/PII scan as application modules. It also
+adds a read client for the `uvp.registry/1` index used by the official registry,
+[Antruly/uvp-templates](https://github.com/Antruly/uvp-templates). The CLI and MCP
+surface for packages — `uvp template ...` and `uvp init --template-package` — is
+the next increment; 0.3.0 does not expose those commands yet, and the registry
+does not claim a build-verified package until its runtime lane is enabled.
+
 **In progress.** The web toolbox — request, WebSocket probe, SOAP call, load
 test, capture, assertions — works against any service, not only ones uvp
 generates. The toolchain provider _port_ has two implementations: `local` and
 `container`. The `remote-ssh` provider is not written; it is blocked on a real
 verification route rather than on appetite.
 
-**In progress.** Release automation: `release-please-config.json`, the
-conventional-commit gate on pull request titles, and the workflow that runs
-release-please (`.github/workflows/release-please.yml`, added in #177 for #160)
-exist, but no
-version has been cut, so the package is installed from a clone or a tarball.
-Regenerating the derived files on the release PR is still a maintainer step, by
-the recorded decision on #160.
+**Releases.** `uvp-agents@0.2.0` was the first published release; `0.3.0` is the
+current release prepared by release-please. The conventional-commit gate on pull
+request titles and the release-please workflow
+(`.github/workflows/release-please.yml`, added in #177 for #160) produce the
+release PR. Regenerating the derived files on the release PR remains a
+maintainer step, by the recorded decision on #160; the publish workflow is
+dispatched by hand from the release tag.
 
 The Windows `local-msvc` lane has landed and runs in CI. It exercises the
 database refusal case. The parser reads MSVC's `LNK` shape, but only against
