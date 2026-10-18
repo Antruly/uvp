@@ -18,6 +18,10 @@ import {
   templateRoutes,
   type TemplateId,
 } from "./templates.js";
+import {
+  UVP_EVENT_PAYLOAD_POLICIES,
+  isUvpEventPayloadPolicy,
+} from "../domain/eventPayloadPolicy.js";
 import type { UvpFeature } from "../domain/features.js";
 import {
   UVP_MODULES,
@@ -278,6 +282,13 @@ export class WorkspaceService {
      * refusal to a cast somewhere upstream instead of a named error here.
      */
     modules?: readonly string[] | undefined;
+    /**
+     * What the evidence log keeps of a message payload.
+     *
+     * A string for the same reason `modules` is: this is where an unknown value
+     * is refused with a named error, not left to a cast upstream.
+     */
+    eventPayloads?: string | undefined;
   }): Promise<CreateWorkspaceResult> {
     const root = resolve(input.path);
 
@@ -406,11 +417,43 @@ export class WorkspaceService {
       });
     }
 
+    // The payload policy is a fact about the evidence log, so asking for it
+    // without that module would either be ignored (a request the workspace does
+    // not carry) or silently add the module (a selection the caller did not
+    // make). It is refused instead, with the flag that would make it meaningful.
+    if (input.eventPayloads !== undefined) {
+      if (!isUvpEventPayloadPolicy(input.eventPayloads)) {
+        throw new UvpFailure({
+          code: "invalid_request",
+          message:
+            `Unknown event payload policy: ${input.eventPayloads}. ` +
+            `Known policies: ${UVP_EVENT_PAYLOAD_POLICIES.join(", ")}.`,
+          remediation: {
+            action: `Pass --event-payloads ${UVP_EVENT_PAYLOAD_POLICIES.join(" or ")}.`,
+          },
+          details: { event_payloads: input.eventPayloads, known: [...UVP_EVENT_PAYLOAD_POLICIES] },
+        });
+      }
+      if (!modules.includes("evidence-log")) {
+        throw new UvpFailure({
+          code: "invalid_request",
+          message:
+            `The event payload policy applies to the evidence-log module, which this request does ` +
+            `not select: --event-payloads ${input.eventPayloads} would change nothing.`,
+          remediation: {
+            action: "Add evidence-log to --modules, or drop the event payload option.",
+          },
+          details: { modules: [...modules], event_payloads: input.eventPayloads },
+        });
+      }
+    }
+
     const files = renderTemplate(input.template, {
       name: input.name,
       port: input.port,
       features: input.features,
       modules,
+      ...(input.eventPayloads === undefined ? {} : { eventPayloads: input.eventPayloads }),
     });
 
     const created: CreatedFile[] = [];

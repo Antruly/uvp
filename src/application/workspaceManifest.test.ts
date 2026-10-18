@@ -307,6 +307,32 @@ describe("the module list", () => {
   });
 });
 
+describe("the evidence payload policy", () => {
+  it("round-trips the policy the generator compiled into the source", async () => {
+    const root = await writeWorkspace("hello-http", [], ["evidence-log"]);
+    const manifest = await manifestAt(root);
+    expect(manifest?.evidence).toEqual({ payloads: "summary" });
+  });
+
+  it("keeps a manifest that records no evidence policy valid", async () => {
+    const manifest = await manifestAt(await manifestRoot({ name: "svc" }));
+    expect(manifest?.evidence).toBeUndefined();
+  });
+
+  it.each([
+    ["an `evidence` that is not an object", { name: "svc", evidence: "summary" }],
+    ["an unknown policy", { name: "svc", evidence: { payloads: "retain-all" } }],
+    ["an `evidence` with no policy", { name: "svc", evidence: {} }],
+  ])("refuses %s rather than assuming the default", async (_label, body) => {
+    // The default is a fact about what the source was generated with. Answering
+    // it for a file that declared something else would describe collection that
+    // may not have happened the way the file says.
+    const read = await readWorkspaceManifest(await manifestRoot(body));
+    expect(read.state).toBe("unreadable");
+    expect(manifestProblemOf(read)).toContain("evidence");
+  });
+});
+
 describe("the fields a manifest carries", () => {
   it("reads every field it states, and derives the transport from the features", async () => {
     const root = await manifestRoot({

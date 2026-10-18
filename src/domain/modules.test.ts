@@ -52,8 +52,16 @@ describe("canonical order", () => {
 });
 
 describe("template defaults", () => {
-  it("is the full set for websocket-test and nothing for every other template", () => {
-    expect(defaultModules("websocket-test")).toEqual(UVP_MODULES);
+  it("is the template's previous fixed set, which a new module must not widen", () => {
+    // `evidence-log` is opt-in: adding it to the vocabulary must not change what
+    // an existing template generates, so this is deliberately not UVP_MODULES.
+    expect(defaultModules("websocket-test")).toEqual([
+      "health",
+      "echo-log",
+      "websocket-echo",
+      "static-console",
+    ]);
+    expect(defaultModules("websocket-test")).not.toContain("evidence-log");
     for (const template of [
       "hello-http",
       "rest-api",
@@ -97,6 +105,26 @@ describe("module dependencies", () => {
     expect(
       moduleDependencyProblem(["websocket-echo", "echo-log", "static-console"]),
     ).toBeUndefined();
+  });
+});
+
+describe("the evidence log", () => {
+  it("is a standalone module with its own route and no feature requirement", () => {
+    expect(UVP_MODULES).toContain("evidence-log");
+    expect(moduleFeatureProblem(["evidence-log"], [])).toBeUndefined();
+    expect(moduleDependencyProblem(["evidence-log"])).toBeUndefined();
+    expect(
+      moduleRouteConflictProblem(["evidence-log"], "hello-http", [
+        "GET /hello",
+        "GET /api/echo-log",
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("conflicts with a template that already serves its exact route", () => {
+    expect(moduleRouteConflictProblem(["evidence-log"], "rest-api", ["GET /api/events"])).toContain(
+      "GET /api/events",
+    );
   });
 });
 

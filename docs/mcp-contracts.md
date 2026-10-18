@@ -78,13 +78,22 @@ writes files and starts nothing. Refuses to overwrite an existing workspace
 unless told to.
 
 `modules` composes uvp's application pieces — `health`, `echo-log`,
-`websocket-echo`, `static-console` — into the template. Omit it to get the
-template's default: `websocket-test` composes all four, every other template
-none. The result reports the resolved `modules` beside `routes`, and records the
+`evidence-log`, `websocket-echo`, `static-console` — into the template. `evidence-log`
+records HTTP requests and the messages the `websocket-echo` route receives; a
+WebSocket route a template already serves is not instrumented. Omit it
+to get the template's default: `websocket-test` composes the other four, every
+other template none; `evidence-log` is opt-in everywhere. The result reports the
+resolved `modules` beside `routes`, and records the
 selection in `uvp.json` when it differs from that default. An unknown or repeated
 name, a module whose feature was not requested, a module whose composed modules
 are missing, and a module whose exact route the template already serves are
 refused before any file is written.
+
+`event_payloads` chooses what the `evidence-log` module keeps of a text message:
+`summary` (the default) keeps its length and an FNV-1a hash, `verbatim` keeps the
+text itself. The policy is compiled into the service, recorded in `uvp.json`, and
+reported by `GET /api/events`; asking for it without `evidence-log` is refused,
+because it would describe a log the workspace does not have.
 
 ### Build
 

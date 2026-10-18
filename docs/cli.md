@@ -140,19 +140,31 @@ library.
 libuvcpp build switches: a feature says what the library was built with, a module
 says what uvp writes into `src/main.cpp`.
 
-| Module           | What it adds                                                           |
-| ---------------- | ---------------------------------------------------------------------- |
-| `health`         | `GET /healthz` answering `{"status":"ok"}`                             |
-| `echo-log`       | a bounded in-memory log of arriving messages, with `GET /api/echo-log` |
-| `websocket-echo` | `WS /ws`, echoing text and binary frames and reporting ping/close      |
-| `static-console` | `public/index.html`, a page that drives the echo route and the log     |
+| Module           | What it adds                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `health`         | `GET /healthz` answering `{"status":"ok"}`                                         |
+| `echo-log`       | a bounded in-memory log of arriving messages, with `GET /api/echo-log`             |
+| `evidence-log`   | a bounded log of HTTP requests and of messages on `WS /ws`, with `GET /api/events` |
+| `websocket-echo` | `WS /ws`, echoing text and binary frames and reporting ping/close                  |
+| `static-console` | `public/index.html`, a page that drives the echo route and the log                 |
 
 ```bash
 uvp init ./svc --name svc --template websocket-test --modules health,echo-log
 ```
 
-`websocket-test` is the four modules by default; every other template composes
-none unless you ask, and the routes it already serves stay. Some combinations are
+`websocket-test` composes `health`, `echo-log`, `websocket-echo` and
+`static-console` by default; every other template composes none unless you ask,
+and the routes it already serves stay. `evidence-log` is opt-in everywhere,
+including `websocket-test`, so the module layer does not change what a template
+generated before it existed. Its endpoint reports the event schema, the
+retention window, the counters, and the payload policy along with the events:
+text payloads are kept as a length and an FNV-1a hash, and binary payloads as a
+short hex prefix, because the log is meant to correlate traffic rather than to
+retain message bodies. Message events are the ones the `websocket-echo` module's
+`WS /ws` route receives; a WebSocket route a template already serves is not
+instrumented. `--event-payloads verbatim` keeps the text itself
+instead; the policy is compiled into the service and recorded in `uvp.json`, and
+asking for it without `evidence-log` is refused rather than quietly ignored. Some combinations are
 refused before a file is written: an unknown or repeated name, `websocket-echo`
 without `--features websocket`, `static-console` without the two modules its page
 drives, and a module whose exact route the template already registers (`health`

@@ -4,6 +4,7 @@ import { defineTool } from "./toolContractTypes.js";
 import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { uvpRemediationSchema } from "../domain/errors.js";
+import { UVP_EVENT_PAYLOAD_POLICIES } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import { UVP_MODULES } from "../domain/modules.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
@@ -66,10 +67,20 @@ export const workspaceCreateContract = defineTool({
       .optional()
       .describe(
         "Application modules to compose into the generated service. Absent means the template's " +
-          "own default: `websocket-test` composes all four, every other template none. " +
+          "own default: `websocket-test` composes `health`, `echo-log`, `websocket-echo` and " +
+          "`static-console`, and every other template none; `evidence-log` is opt-in everywhere. " +
           "`websocket-echo` needs the `websocket` feature, and `static-console` composes " +
           "`websocket-echo` and `echo-log`. A module whose exact route the template already " +
           "serves is refused, as is any module on `http3-service`.",
+      ),
+    event_payloads: z
+      .enum(UVP_EVENT_PAYLOAD_POLICIES)
+      .optional()
+      .describe(
+        "What the evidence log keeps of a text message payload. `summary` (the default) keeps " +
+          "the length and an FNV-1a hash, so the log can correlate messages without retaining " +
+          "their bodies; `verbatim` keeps the text itself. Recorded in `uvp.json` and reported " +
+          "by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
       ),
     force: z
       .boolean()

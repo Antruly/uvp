@@ -514,6 +514,52 @@ describe("workspace creation", () => {
   });
 });
 
+describe("the evidence payload policy at the boundary", () => {
+  it("compiles the requested policy into the source and the manifest", async () => {
+    const path = join(harness.workspace, "..", "evidence-verbatim");
+    temporaryRoots.push(path);
+
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "evidence",
+      template: "hello-http",
+      features: ["websocket"],
+      port: 8080,
+      modules: ["evidence-log", "websocket-echo"],
+      event_payloads: "verbatim",
+    });
+    expectConforms("uvp_workspace_create", output);
+    expect(output["modules"]).toEqual(["evidence-log", "websocket-echo"]);
+
+    const source = await readFile(join(path, "src", "main.cpp"), "utf8");
+    expect(source).toContain('kEvidencePayloadPolicy = "verbatim"');
+    expect(source).not.toContain("EvidenceTextSummary");
+
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as {
+      evidence?: { payloads?: string };
+    };
+    expect(manifest.evidence).toEqual({ payloads: "verbatim" });
+  });
+
+  it("refuses the policy without the module it describes", async () => {
+    const path = join(harness.workspace, "..", "evidence-without-module");
+    temporaryRoots.push(path);
+
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "nomodule",
+        template: "hello-http",
+        features: [],
+        event_payloads: "summary",
+      }),
+    ).toBe("invalid_request");
+    // An option that would change nothing is refused before a file is written,
+    // not accepted and silently dropped.
+    await expect(access(path)).rejects.toThrow();
+  });
+});
+
 describe("build", () => {
   it("reports a failing build as diagnostics rather than as an error", async () => {
     // The distinction the project turns on: a compiler that rejected the code is
