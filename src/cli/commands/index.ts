@@ -10,6 +10,7 @@ import {
 } from "./project.js";
 import { doctorCommand } from "./toolchain.js";
 import { initCommand } from "./workspace.js";
+import { templateCommands } from "./template.js";
 import {
   assertCommand,
   captureReadCommand,
@@ -36,6 +37,7 @@ import { mcpCommand, setupCommand } from "./mcp.js";
 export const COMMANDS: readonly CommandSpec[] = [
   doctorCommand,
   initCommand,
+  ...templateCommands,
   buildCommand,
   frontendBuildCommand,
   runCommand,

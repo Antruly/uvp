@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "955f7d848694e9e5a40f8aa29e462bfe40f8c18e06d73ffbe5acba3eb3657b75",
-  "tool_count": 16,
+  "digest": "da60a49ef9a10d5a9ecdbda13449298980c8f5a03e8c991fb577aa6356365524",
+  "tool_count": 22,
   "tools": [
     {
       "name": "uvp_doctor",
@@ -846,6 +846,2306 @@
             "name": "svc",
             "template": "rest-api",
             "port": 8080
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_search",
+      "title": "Search the local template store",
+      "description": "Search the locally installed `uvp.template/1` packages by category, framework, tags, required libuvcpp features, exact version, or free text. Returns every matching package up to a page with the metadata needed to choose between them, what matched, and a deterministic score. By default only the latest version of each id is returned. Metadata only: no file bytes, no network, and no model call.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "text": {
+            "description": "Free text over id, name, description, framework, category, tags, and features.",
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "frontend",
+              "backend",
+              "fullstack",
+              "module"
+            ]
+          },
+          "framework": {
+            "type": "string",
+            "enum": [
+              "h5",
+              "vue3",
+              "react",
+              "svelte",
+              "alpine",
+              "htmx"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tag_mode": {
+            "default": "all",
+            "description": "Every tag must match for `all`; at least one for `any`.",
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "features": {
+            "description": "Features the package must require in its manifest.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tls",
+                "http2",
+                "http3",
+                "grpc",
+                "websocket",
+                "soap",
+                "db"
+              ]
+            }
+          },
+          "version": {
+            "description": "Return exactly this version, across ids.",
+            "type": "string"
+          },
+          "all_versions": {
+            "default": false,
+            "description": "Return every version; the default is the latest per id.",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "frontend",
+                    "backend",
+                    "fullstack",
+                    "module"
+                  ]
+                },
+                "framework": {
+                  "type": "string",
+                  "enum": [
+                    "h5",
+                    "vue3",
+                    "react",
+                    "svelte",
+                    "alpine",
+                    "htmx"
+                  ]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "requires": {
+                  "type": "object",
+                  "properties": {
+                    "uvp": {
+                      "type": "string"
+                    },
+                    "libuvcpp": {
+                      "type": "string"
+                    },
+                    "features": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "tls",
+                          "http2",
+                          "http3",
+                          "grpc",
+                          "websocket",
+                          "soap",
+                          "db"
+                        ]
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "license": {
+                  "type": "object",
+                  "properties": {
+                    "spdx": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "author": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "author",
+                    "createdAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "preview": {
+                  "type": "string"
+                },
+                "unverified": {
+                  "type": "boolean"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "file_count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "score": {
+                  "type": "number"
+                },
+                "matched_on": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "version",
+                "name",
+                "category",
+                "unverified",
+                "digest",
+                "file_count",
+                "score",
+                "matched_on"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "corrupt": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "problems": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "path",
+                "problems"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "matches",
+          "total",
+          "offset",
+          "limit",
+          "truncated",
+          "corrupt"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Find a WebSocket-capable frontend package",
+          "input": {
+            "category": "fullstack",
+            "features": [
+              "websocket"
+            ],
+            "limit": 10
+          }
+        },
+        {
+          "description": "Find packages tagged dashboard or admin",
+          "input": {
+            "tags": [
+              "dashboard",
+              "admin"
+            ],
+            "tag_mode": "any"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_get",
+      "title": "Read a stored template package",
+      "description": "Read one exact `id@version` from the local template store. Re-verifies every file against the manifest, then returns the manifest fields, the file list with digests and byte counts, the store path, and whether the package was admitted as unverified. A missing package and a corrupt package are different failures.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Package id, a lowercase slug such as `acme-dashboard`."
+          },
+          "version": {
+            "type": "string",
+            "description": "An exact package version; ranges are not accepted."
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "frontend",
+              "backend",
+              "fullstack",
+              "module"
+            ]
+          },
+          "framework": {
+            "type": "string",
+            "enum": [
+              "h5",
+              "vue3",
+              "react",
+              "svelte",
+              "alpine",
+              "htmx"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "object",
+            "properties": {
+              "uvp": {
+                "type": "string"
+              },
+              "libuvcpp": {
+                "type": "string"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "tls",
+                    "http2",
+                    "http3",
+                    "grpc",
+                    "websocket",
+                    "soap",
+                    "db"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "license": {
+            "type": "object",
+            "properties": {
+              "spdx": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file"
+            ],
+            "additionalProperties": false
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "author",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          },
+          "digest": {
+            "type": "string",
+            "description": "The package digest over the manifest's canonical JSON."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path relative to the package's `files/` directory."
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "digest": {
+                  "type": "string",
+                  "description": "`sha256:` and 64 lowercase hex characters."
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "preview": {
+            "type": "string"
+          },
+          "unverified": {
+            "type": "boolean",
+            "description": "True only when the package was admitted without licence or provenance."
+          },
+          "path": {
+            "type": "string",
+            "description": "The directory the store holds this package in."
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "id",
+          "version",
+          "name",
+          "category",
+          "digest",
+          "files",
+          "unverified",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Read acme-dashboard 1.2.0",
+          "input": {
+            "id": "acme-dashboard",
+            "version": "1.2.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_validate",
+      "title": "Validate a template package directory",
+      "description": "Validate a package directory against `uvp.template/1` exactly as an import would, without writing anything. Returns the manifest, the observed file list, and the package digest. A package whose only problems are licence/provenance is admitted only when allow_unverified is set. It does not check whether the package is already installed.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "source_dir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the package directory."
+          },
+          "allow_unverified": {
+            "default": false,
+            "description": "Admit a package whose only problems are licence/provenance, marked unverified.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_dir"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "frontend",
+              "backend",
+              "fullstack",
+              "module"
+            ]
+          },
+          "framework": {
+            "type": "string",
+            "enum": [
+              "h5",
+              "vue3",
+              "react",
+              "svelte",
+              "alpine",
+              "htmx"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "object",
+            "properties": {
+              "uvp": {
+                "type": "string"
+              },
+              "libuvcpp": {
+                "type": "string"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "tls",
+                    "http2",
+                    "http3",
+                    "grpc",
+                    "websocket",
+                    "soap",
+                    "db"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "license": {
+            "type": "object",
+            "properties": {
+              "spdx": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file"
+            ],
+            "additionalProperties": false
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "author",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          },
+          "digest": {
+            "type": "string",
+            "description": "The package digest over the manifest's canonical JSON."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path relative to the package's `files/` directory."
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "digest": {
+                  "type": "string",
+                  "description": "`sha256:` and 64 lowercase hex characters."
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "preview": {
+            "type": "string"
+          },
+          "unverified": {
+            "type": "boolean",
+            "description": "True only when the package was admitted without licence or provenance."
+          },
+          "source_dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "id",
+          "version",
+          "name",
+          "category",
+          "digest",
+          "files",
+          "unverified",
+          "source_dir"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": false,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Validate a package before importing it",
+          "input": {
+            "source_dir": "/home/dev/acme-dashboard"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_import",
+      "title": "Import a template package",
+      "description": "Validate, scan, and import a package directory into the local store. `dry_run` returns the validation and scan without writing. An existing id@version is refused unless `replace` is explicit. `allow_unverified` admits a package whose only problems are licence/provenance, marks it unverified, and is never the default. The scan is a bounded locator for credential- and PII-shaped content, not a guarantee that the package is clean.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "source_dir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the package directory."
+          },
+          "replace": {
+            "default": false,
+            "description": "Replace an existing id@version explicitly; never implicit.",
+            "type": "boolean"
+          },
+          "allow_unverified": {
+            "default": false,
+            "description": "Admit a package whose only problems are licence/provenance.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Validate and scan without writing to the store.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_dir"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "frontend",
+              "backend",
+              "fullstack",
+              "module"
+            ]
+          },
+          "framework": {
+            "type": "string",
+            "enum": [
+              "h5",
+              "vue3",
+              "react",
+              "svelte",
+              "alpine",
+              "htmx"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "object",
+            "properties": {
+              "uvp": {
+                "type": "string"
+              },
+              "libuvcpp": {
+                "type": "string"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "tls",
+                    "http2",
+                    "http3",
+                    "grpc",
+                    "websocket",
+                    "soap",
+                    "db"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "license": {
+            "type": "object",
+            "properties": {
+              "spdx": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file"
+            ],
+            "additionalProperties": false
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "author",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          },
+          "digest": {
+            "type": "string",
+            "description": "The package digest over the manifest's canonical JSON."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path relative to the package's `files/` directory."
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "digest": {
+                  "type": "string",
+                  "description": "`sha256:` and 64 lowercase hex characters."
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "preview": {
+            "type": "string"
+          },
+          "unverified": {
+            "type": "boolean",
+            "description": "True only when the package was admitted without licence or provenance."
+          },
+          "path": {
+            "description": "Present when the package was written to the store.",
+            "type": "string"
+          },
+          "replaced": {
+            "type": "boolean"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "retained": {
+            "description": "A trash directory whose cleanup failed.",
+            "type": "string"
+          },
+          "scan": {
+            "type": "object",
+            "properties": {
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "rule": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "credential",
+                        "pii"
+                      ]
+                    },
+                    "redacted": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "line",
+                    "rule",
+                    "kind",
+                    "redacted"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "scanned": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "skipped": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "limits": {
+                "type": "object",
+                "properties": {
+                  "maxFiles": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "maxFileBytes": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "maxTotalBytes": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "maxFindings": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "maxFiles",
+                  "maxFileBytes",
+                  "maxTotalBytes",
+                  "maxFindings"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "findings",
+              "scanned",
+              "skipped",
+              "truncated",
+              "limits"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "id",
+          "version",
+          "name",
+          "category",
+          "digest",
+          "files",
+          "unverified",
+          "replaced",
+          "dry_run",
+          "scan"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Check a package without installing it",
+          "input": {
+            "source_dir": "/home/dev/acme-dashboard",
+            "dry_run": true
+          }
+        },
+        {
+          "description": "Install or replace a package after validating it",
+          "input": {
+            "source_dir": "/home/dev/acme-dashboard",
+            "replace": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_export",
+      "title": "Export a stored template package",
+      "description": "Copy one stored id@version to a directory. The target must be absent or empty; a non-empty target is refused. The copy is staged and every exported file is re-verified against the manifest before success is reported, so a failed export leaves no partial package at the target.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Package id, a lowercase slug such as `acme-dashboard`."
+          },
+          "version": {
+            "type": "string",
+            "description": "An exact package version; ranges are not accepted."
+          },
+          "target_dir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Destination directory; must be absent or empty."
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "target_dir"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path relative to the package's `files/` directory."
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "digest": {
+                  "type": "string",
+                  "description": "`sha256:` and 64 lowercase hex characters."
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "path",
+          "id",
+          "version",
+          "digest",
+          "files",
+          "bytes"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Export a package for inspection",
+          "input": {
+            "id": "acme-dashboard",
+            "version": "1.2.0",
+            "target_dir": "/home/dev/exported"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_remove",
+      "title": "Remove a stored template package",
+      "description": "Remove one id@version, or every version of an id when version is omitted, from the local store. The tree moves through quarantine; a failed cleanup is reported as `retained` rather than treated as success. This does not touch any generated workspace.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Package id, a lowercase slug such as `acme-dashboard`."
+          },
+          "version": {
+            "description": "Omit to remove every version of the id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "removed": {
+            "type": "string"
+          },
+          "retained": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "removed"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": false,
+        "spawnsProcess": false,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "returns_target_content": false,
+      "examples": [
+        {
+          "description": "Remove one version",
+          "input": {
+            "id": "acme-dashboard",
+            "version": "1.2.0"
+          }
+        },
+        {
+          "description": "Remove every version of an id",
+          "input": {
+            "id": "acme-dashboard"
           }
         }
       ]

@@ -49,12 +49,16 @@ export type TemplateScanRule =
   | "email"
   | "phone";
 
+/** Whether a finding is a credential or personal data. */
+export type TemplateScanFindingKind = "credential" | "pii";
+
 export interface TemplateScanFinding {
   /** Relative to the scanned directory, `/`-separated. */
   readonly path: string;
   /** 1-based line in the file as read (UTF-8 decoded). */
   readonly line: number;
   readonly rule: TemplateScanRule;
+  readonly kind: TemplateScanFindingKind;
   /** The matched shape with the sensitive part masked. Never the secret itself. */
   readonly redacted: string;
 }
@@ -99,6 +103,7 @@ export interface TemplateScanResult {
 
 interface ScanRule {
   readonly rule: TemplateScanRule;
+  readonly kind: TemplateScanFindingKind;
   readonly pattern: RegExp;
   readonly redact: (match: string, groups: readonly string[]) => string;
 }
@@ -106,31 +111,37 @@ interface ScanRule {
 const SCAN_RULES: readonly ScanRule[] = [
   {
     rule: "private_key",
+    kind: "credential",
     pattern: /-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----/u,
     redact: () => "-----BEGIN … PRIVATE KEY-----",
   },
   {
     rule: "aws_access_key",
+    kind: "credential",
     pattern: /\bAKIA[0-9A-Z]{16}\b/u,
     redact: (match) => `${match.slice(0, 4)}…`,
   },
   {
     rule: "github_token",
+    kind: "credential",
     pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/u,
     redact: (match) => `${match.slice(0, 4)}…`,
   },
   {
     rule: "slack_token",
+    kind: "credential",
     pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/u,
     redact: (match) => `${match.slice(0, 5)}…`,
   },
   {
     rule: "provider_token",
+    kind: "credential",
     pattern: /\bsk-[A-Za-z0-9]{20,}\b/u,
     redact: (match) => `${match.slice(0, 3)}…`,
   },
   {
     rule: "secret_assignment",
+    kind: "credential",
     // `NAME = value` where the name says it holds a credential, and the value
     // is long enough to be one rather than a placeholder. Case-insensitive:
     // `.env` files conventionally spell these names in lowercase.
@@ -140,6 +151,7 @@ const SCAN_RULES: readonly ScanRule[] = [
   },
   {
     rule: "home_path",
+    kind: "pii",
     // The user name may end the path: `HOME=/home/alice` is the leak shape as
     // much as `/home/alice/projects` is. The lookahead stops the match at the
     // end of the name without requiring a component below it. `\/home\/` still
@@ -149,6 +161,7 @@ const SCAN_RULES: readonly ScanRule[] = [
   },
   {
     rule: "email",
+    kind: "pii",
     pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/u,
     redact: (match) => {
       const at = match.indexOf("@");
@@ -157,6 +170,7 @@ const SCAN_RULES: readonly ScanRule[] = [
   },
   {
     rule: "phone",
+    kind: "pii",
     // International format only: a leading `+` is what separates a phone number
     // from the dates, versions, and numeric constants that fill source code.
     pattern: /\+[1-9]\d{1,3}(?:[ .-]?\d{2,4}){2,4}\b/u,
@@ -194,6 +208,7 @@ const findingsForFile = (
           path: relative,
           line: index + 1,
           rule: rule.rule,
+          kind: rule.kind,
           redacted: rule.redact(match[0], match.slice(1)),
         });
         if (match[0].length === 0) pattern.lastIndex += 1;
