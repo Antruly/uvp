@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import { LIBUVCPP_BASELINE, TEMPLATE_IDS } from "../../src/application/templates.js";
+import { TEMPLATE_IDS } from "../../src/application/templates.js";
+import { LIBUVCPP_BASELINE } from "../../src/domain/libuvcpp.js";
 import type { TemplateId } from "../../src/application/templates.js";
 import { EXIT_OK } from "../../src/cli/exitCodes.js";
 import {

@@ -1,4 +1,5 @@
 import { FEATURE_REQUIREMENTS } from "./ToolchainProvider.js";
+import { LIBUVCPP_BASELINE } from "../domain/libuvcpp.js";
 import type { UvpFeature } from "../domain/features.js";
 
 /**
@@ -147,9 +148,6 @@ export interface GeneratedFile {
   readonly path: string;
   readonly content: string;
 }
-
-/** The libuvcpp version a generated workspace declares and requires. */
-export const LIBUVCPP_BASELINE = "1.7.0";
 
 /**
  * A compile-time guard.

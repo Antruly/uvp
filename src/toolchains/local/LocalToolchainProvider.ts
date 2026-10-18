@@ -952,9 +952,15 @@ class LocalToolchainClient implements ToolchainClient {
     // — passed no prefix, so the whole closure failed at configure for exactly
     // those users while `uvp build`, which did pass one, worked. Deciding here
     // means no caller can forget.
-    const libuvcppPrefix =
-      request.libuvcppPrefix ??
-      (await findLibuvcpp(request.workspacePath, request.signal)).installPrefix;
+    // Kept as a result, not folded into the prefix: whether discovery found an
+    // install is what lets the configure failure below carry the libuvcpp remedy
+    // when CMake's message does not name the package. A caller that passed a
+    // prefix did not ask discovery, so there is no answer to pass on.
+    const discovered =
+      request.libuvcppPrefix === undefined
+        ? await findLibuvcpp(request.workspacePath, request.signal)
+        : undefined;
+    const libuvcppPrefix = request.libuvcppPrefix ?? discovered?.installPrefix;
     const configureStart = Date.now();
     const jobs = request.jobs === undefined ? [] : ["-j", String(request.jobs)];
     const configure = await this.run({
@@ -980,7 +986,9 @@ class LocalToolchainClient implements ToolchainClient {
 
     const commands = [configure.command];
     const diagnostics: BuildDiagnostic[] = [
-      ...parseDiagnostics(configure.stdout, configure.stderr, "configure"),
+      ...parseDiagnostics(configure.stdout, configure.stderr, "configure", {
+        ...(discovered === undefined ? {} : { libuvcppFound: discovered.found }),
+      }),
     ];
 
     if (configure.exitCode !== 0 || request.configureOnly) {

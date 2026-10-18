@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { LIBUVCPP_BASELINE, LIBUVCPP_RELEASES_URL } from "../domain/libuvcpp.js";
 import { DoctorService, headerProbeAt } from "./DoctorService.js";
 import { createRecorder } from "./evidenceHelpers.js";
 import type { CompilerDescriptor, LibuvcppBuild, ToolchainProvider } from "./ToolchainProvider.js";
@@ -276,5 +277,54 @@ describe("the report's account of where a compiler was found", () => {
   it("leaves the question absent when the provider did not ask it", async () => {
     const [compiler] = await compilersOf([{ id: "gcc", path: "/usr/bin/g++" }]);
     expect(compiler).not.toHaveProperty("on_path");
+  });
+});
+
+/**
+ * The remedy for "there is no libuvcpp here".
+ *
+ * A report that says `found: false` and stops is a fact with no next step: the
+ * caller learns the library is missing but not where the floor, the release URL,
+ * or the environment variables are. The remedy is stated only with the negative
+ * finding — an install that was found has nothing to install, and advice there
+ * would read as a problem.
+ */
+describe("the remedy on a missing libuvcpp", () => {
+  const reportWith = async (found: boolean) => {
+    const libuvcpp: LibuvcppBuild = found
+      ? {
+          found: true,
+          version: "1.7.0",
+          versionSource: "pkgconfig",
+          installPrefix: "/opt/uvcpp",
+          modules: [],
+        }
+      : { found: false, modules: [] };
+    const provider = createFakeToolchain({ libuvcpp });
+    const service = new DoctorService({
+      providers: [provider],
+      toolchainFor: () => provider,
+      headerProbe: async () => false,
+    });
+    return await service.doctor({}, createRecorder(), new AbortController().signal);
+  };
+
+  it("names the version floor, the release URL, and the environment variables", async () => {
+    const report = await reportWith(false);
+
+    expect(report.libuvcpp.found).toBe(false);
+    const remediation = report.libuvcpp.remediation;
+    expect(remediation?.action).toContain(LIBUVCPP_BASELINE);
+    expect(remediation?.action).toContain(LIBUVCPP_RELEASES_URL);
+    expect(remediation?.action).toContain("UVCPP_ROOT");
+    expect(remediation?.action).toContain("PKG_CONFIG_PATH");
+    expect(remediation?.docs).toBe("docs/installation.md#libuvcpp");
+  });
+
+  it("is absent when an install was found", async () => {
+    const report = await reportWith(true);
+
+    expect(report.libuvcpp.found).toBe(true);
+    expect(report.libuvcpp.remediation).toBeUndefined();
   });
 });

@@ -63,6 +63,42 @@ const CMAKE_MODULE_ERROR = [
 ].join("\n");
 
 /**
+ * CMake 3.28, from the generated project's pkg-config fallback with no `uvcpp`
+ * install on `PKG_CONFIG_PATH` — captured on this host on 2026-10-18 with the
+ * template's own `pkg_check_modules(UVCPP REQUIRED IMPORTED_TARGET
+ * "uvcpp>=1.7.0")`.
+ *
+ * This is the named form: the package list says `uvcpp>=1.7.0`, so the remedy can
+ * be attached without knowing anything else about the build.
+ */
+const CMAKE_UVCPP_PACKAGE_MISSING = [
+  "CMake Error at /usr/share/cmake-3.28/Modules/FindPkgConfig.cmake:619 (message):",
+  "  The following required packages were not found:",
+  "",
+  "   - uvcpp>=1.7.0",
+  "",
+  "Call Stack (most recent call first):",
+  "  /usr/share/cmake-3.28/Modules/FindPkgConfig.cmake:841 (_pkg_check_modules_internal)",
+  "  CMakeLists.txt:5 (pkg_check_modules)",
+  "",
+  "",
+  "-- Configuring incomplete, errors occurred!",
+].join("\n");
+
+/**
+ * CMake 3.20's FindPkgConfig, quoted from the reporter's CentOS 8 host on #218.
+ *
+ * Unlike the 3.28 form this sentence names no package, so it cannot identify
+ * `uvcpp` on its own; the caller's discovery answer is what turns it into a
+ * libuvcpp remedy.
+ */
+const CMAKE_UNNAMED_REQUIRED_PACKAGE = [
+  "CMake Error at /usr/share/cmake/Modules/FindPkgConfig.cmake:556 (message):",
+  "  A required package was not found",
+  "",
+].join("\n");
+
+/**
  * CMake 3.28, from a `find_package(PkgConfig REQUIRED)` with no usable
  * `pkg-config` executable — captured on this host by forcing
  * `PKG_CONFIG_EXECUTABLE` to `NOTFOUND`.
@@ -397,6 +433,49 @@ describe("CMake's own diagnostics", () => {
     const said = parseDiagnostics("", CMAKE_MODULE_ERROR, "configure");
 
     expect(said[0]?.remediation).toBeUndefined();
+  });
+
+  it("attaches the libuvcpp remedy when the missing package list names uvcpp", () => {
+    const said = parseDiagnostics("", CMAKE_UVCPP_PACKAGE_MISSING, "configure");
+
+    expect(said).toHaveLength(1);
+    const [only] = said;
+    // CMake's words survive; the remedy is beside them, not instead of them.
+    expect(only?.message).toContain("The following required packages were not found:");
+    expect(only?.message).toContain("uvcpp>=1.7.0");
+    expect(only?.remediation?.action).toContain("1.7.0");
+    expect(only?.remediation?.action).toContain("https://github.com/Antruly/libuvcpp/releases");
+    expect(only?.remediation?.action).toContain("UVCPP_ROOT");
+    expect(only?.remediation?.docs).toBe("docs/installation.md#libuvcpp");
+  });
+
+  it("does not read a package whose name merely starts with uvcpp as uvcpp", () => {
+    // `uvcpp-absent` is a different package. Treating it as libuvcpp would send
+    // the caller to install something they may already have.
+    const said = parseDiagnostics("", CMAKE_MODULE_ERROR, "configure");
+
+    expect(said[0]?.remediation).toBeUndefined();
+  });
+
+  it("attaches the libuvcpp remedy to the unnamed form only when discovery found none", () => {
+    // CMake 3.20's sentence names no package. Discovery's negative answer is the
+    // second observation that makes it this workspace's uvcpp requirement.
+    const missing = parseDiagnostics("", CMAKE_UNNAMED_REQUIRED_PACKAGE, "configure", {
+      libuvcppFound: false,
+    });
+    expect(missing[0]?.remediation?.action).toContain(
+      "https://github.com/Antruly/libuvcpp/releases",
+    );
+
+    // A found install says nothing about what CMake was missing; neither does a
+    // caller that did not look (the container build, whose install is in the
+    // image). Both stay without a remedy rather than guessing.
+    const found = parseDiagnostics("", CMAKE_UNNAMED_REQUIRED_PACKAGE, "configure", {
+      libuvcppFound: true,
+    });
+    expect(found[0]?.remediation).toBeUndefined();
+    const unexamined = parseDiagnostics("", CMAKE_UNNAMED_REQUIRED_PACKAGE, "configure");
+    expect(unexamined[0]?.remediation).toBeUndefined();
   });
 
   it("reads the location-less form, which is one diagnostic on one line", () => {

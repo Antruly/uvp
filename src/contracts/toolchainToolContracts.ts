@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import { verdictStatusSchema } from "../domain/verdict.js";
 import { defineTool } from "./toolContractTypes.js";
@@ -108,6 +109,14 @@ export const doctorContract = defineTool({
       /** Module switches as recorded by that build's uvcpp_config.h. */
       modules: z.array(z.string()),
       note: z.string().optional(),
+      /**
+       * How to get an install, present only when none was found.
+       *
+       * The same `{ action, docs }` shape an error and a build diagnostic carry,
+       * because it is the same advice: the release URL, the version floor, and
+       * the environment variables that make the install discoverable.
+       */
+      remediation: uvpRemediationSchema.optional(),
     }),
     /**
      * The feature verdicts, stated rather than left to be inferred.

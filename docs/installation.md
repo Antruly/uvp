@@ -356,7 +356,10 @@ be on `PATH` is `<prefix>/bin` on Unix-like hosts, and the prefix directory itse
 on Windows — commonly `%APPDATA%\npm`.
 
 **`libuvcpp not found` at configure time.** Neither discovery route answered.
-`CMAKE_PREFIX_PATH` for a CMake install, `PKG_CONFIG_PATH` for a release archive.
+`uvp doctor` reports the missing install with the release URL, the 1.7.0 floor,
+and the environment variables to set. The generated project looks for
+`CMAKE_PREFIX_PATH` (a CMake install) or `PKG_CONFIG_PATH` (a release archive);
+[libuvcpp](#libuvcpp) has both install routes.
 
 **`uvp doctor` names a shared library and still reports `found: false`.** The
 runtime package is installed without the development one — `libuvcpp1` rather

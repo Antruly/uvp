@@ -61,6 +61,14 @@ export const renderDoctor = (output: Record<string, unknown>): string[] => {
     );
   } else {
     lines.push(row("libuvcpp", "not found"));
+    // The remedy is the reason this line is actionable: "not found" alone sends
+    // the reader to the library's name and nowhere to get it.
+    const remedy = obj(libuvcpp["remediation"]);
+    const action = str(remedy["action"]);
+    if (action !== "") {
+      const docs = str(remedy["docs"]);
+      lines.push(row("remedy", `${action}${docs === "" ? "" : `  (${docs})`}`));
+    }
   }
   const note = str(libuvcpp["note"]);
   if (note !== "") lines.push(row("note", oneLine(note)));
