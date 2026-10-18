@@ -274,14 +274,22 @@ const problemsOf = (failure: {
 }): readonly string[] =>
   failure.problems.map((problem) => `${problem.location}: ${problem.message}`);
 
+const isTrustLocation = (location: string): boolean =>
+  location === "license" ||
+  location.startsWith("license.") ||
+  location === "provenance" ||
+  location.startsWith("provenance.");
+
 const onlyTrustProblems = (problems: readonly { location: string; message: string }[]): boolean =>
-  problems.every(
-    (problem) =>
-      problem.location === "license" ||
-      problem.location.startsWith("license.") ||
-      problem.location === "provenance" ||
-      problem.location.startsWith("provenance."),
-  );
+  problems.every((problem) => isTrustLocation(problem.location));
+
+/** `details` are `problemsOf`'s rendering: `${location}: ${message}`. */
+const trustOnlyDetails = (details: readonly string[]): boolean =>
+  details.length > 0 &&
+  details.every((detail) => {
+    const separator = detail.indexOf(": ");
+    return separator > 0 && isTrustLocation(detail.slice(0, separator));
+  });
 
 interface FileWalk {
   readonly observations: readonly TemplatePackageFileObservation[];
@@ -487,24 +495,66 @@ interface StoreMetadata {
 const metadataPath = (root: string, id: string, version: string): string =>
   path.join(root, META_NAME, id, `${version}.json`);
 
+/** The three answers a store record can give; see `readStoreMetadata`. */
+type StoreMetadataRead =
+  | { readonly kind: "read"; readonly metadata: StoreMetadata }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unreadable"; readonly reason: string };
+
+/**
+ * Read the store's own record for a package: the digest it wrote and whether it
+ * admitted the package unverified (Q6).
+ *
+ * Three answers, not two. `absent` is an observation the caller acts on: a
+ * strict package needs no record, and a package imported unverified without one
+ * fails closed. A record that exists but cannot be read is `unreadable`, not
+ * absent — treating it as absent would let a package whose only problems are
+ * licence/provenance be refused with a claim about its manifest, when the real
+ * problem is the record. Content that parses but is not a valid record keeps
+ * reading as absent for now; whether that too should be named is an open scope
+ * question on #253.
+ */
 const readStoreMetadata = async (
   root: string,
   id: string,
   version: string,
-): Promise<StoreMetadata | undefined> => {
+): Promise<StoreMetadataRead> => {
+  const record = metadataPath(root, id, version);
+  let text: string;
+  try {
+    text = await readFile(record, "utf8");
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return { kind: "absent" };
+    return { kind: "unreadable", reason: ioError(`could not read ${record}`, error).message };
+  }
   let raw: unknown;
   try {
-    raw = JSON.parse(await readFile(metadataPath(root, id, version), "utf8"));
+    raw = JSON.parse(text);
   } catch {
-    return undefined;
+    return { kind: "absent" };
   }
-  if (!isRecord(raw)) return undefined;
-  if (raw["schema"] !== STORE_METADATA_SCHEMA) return undefined;
-  if (raw["id"] !== id || raw["version"] !== version) return undefined;
+  if (!isRecord(raw)) return { kind: "absent" };
+  if (raw["schema"] !== STORE_METADATA_SCHEMA) return { kind: "absent" };
+  if (raw["id"] !== id || raw["version"] !== version) return { kind: "absent" };
   if (typeof raw["digest"] !== "string" || typeof raw["unverified"] !== "boolean") {
-    return undefined;
+    return { kind: "absent" };
   }
-  return { digest: raw["digest"], unverified: raw["unverified"] };
+  return { kind: "read", metadata: { digest: raw["digest"], unverified: raw["unverified"] } };
+};
+
+/**
+ * A package whose only validation problems are licence/provenance was refused
+ * because the record that could have admitted it could not be read; name the
+ * record instead of the package. Any other failure stands on its own.
+ */
+const recordFailureOf = (
+  read: StoreMetadataRead,
+  error: unknown,
+): TemplateStoreError | undefined => {
+  if (read.kind !== "unreadable") return undefined;
+  if (!(error instanceof TemplateStoreError) || error.code !== "invalid_package") return undefined;
+  if (!trustOnlyDetails(error.details)) return undefined;
+  return new TemplateStoreError("io_error", read.reason);
 };
 
 interface StagedStoreMetadata {
@@ -759,10 +809,15 @@ export const getTemplatePackage = async (
     throw new TemplateStoreError("not_found", `${id}@${version} is not in the store`);
   }
   const metadata = await readStoreMetadata(root, id, version);
-  const validated = await readPackageDirectory(target, {
-    limits: options.limits ?? DEFAULT_TEMPLATE_PACKAGE_LIMITS,
-    allowUnverified: metadata?.unverified === true,
-  });
+  let validated: ValidatedPackage;
+  try {
+    validated = await readPackageDirectory(target, {
+      limits: options.limits ?? DEFAULT_TEMPLATE_PACKAGE_LIMITS,
+      allowUnverified: metadata.kind === "read" && metadata.metadata.unverified,
+    });
+  } catch (error) {
+    throw recordFailureOf(metadata, error) ?? error;
+  }
   return toStored(validated, target);
 };
 
@@ -800,16 +855,19 @@ export const listTemplatePackages = async (
       try {
         const validated = await readPackageDirectory(packagePath, {
           limits: options.limits ?? DEFAULT_TEMPLATE_PACKAGE_LIMITS,
-          allowUnverified: metadata?.unverified === true,
+          allowUnverified: metadata.kind === "read" && metadata.metadata.unverified,
         });
         packages.push(toStored(validated, packagePath));
       } catch (error) {
+        const recordFailure = recordFailureOf(metadata, error);
         corrupt.push({
           path: packagePath,
           problems:
-            error instanceof TemplateStoreError && error.details.length > 0
-              ? [...error.details]
-              : [error instanceof Error ? error.message : String(error)],
+            recordFailure !== undefined
+              ? [recordFailure.message]
+              : error instanceof TemplateStoreError && error.details.length > 0
+                ? [...error.details]
+                : [error instanceof Error ? error.message : String(error)],
         });
       }
     }
