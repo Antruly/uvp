@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -378,15 +378,37 @@ export class LocalToolchainProvider implements ToolchainProvider {
  * what uvp's own instructions tell a user to do.
  *
  * The first root that has either a `UVCPP_*` config header or a CMake package
- * file wins, and the search order is the caller's environment first. The note
- * for "found nothing" names the two ways to fix that, because that is the only
- * thing a caller can do about it.
+ * file under `lib/` or `lib64/` wins, and the search order is the caller's
+ * environment first. The note for "found nothing" names the available fixes;
+ * when a shared library was found without the files that go with it, it names
+ * the library and the development package, because "install libuvcpp" is not
+ * useful advice to someone who installed half of it.
  */
 const findLibuvcpp = async (
   workspacePath: string | undefined,
   signal: AbortSignal,
+): Promise<LibuvcppBuild> => await discoverLibuvcpp(libuvcppSearchRoots(workspacePath), signal);
+
+/**
+ * The answer for a list of candidate roots.
+ *
+ * Separate from the environment lookup so it can be exercised against roots a
+ * test controls: the found-nothing branch is only reached when *no* root has an
+ * install, and whether a developer's own machine has one under `/usr` is not
+ * something a test may depend on. The provider still calls it with the same
+ * search roots it always did.
+ */
+export const discoverLibuvcpp = async (
+  roots: readonly string[],
+  signal: AbortSignal,
 ): Promise<LibuvcppBuild> => {
-  for (const root of libuvcppSearchRoots(workspacePath)) {
+  // The first shared library found under a prefix that has no usable
+  // development files. Named in the found-nothing note, because "no libuvcpp
+  // installation found" is a misleading answer to someone who installed the
+  // runtime package: the library is there, and the package that carries the
+  // headers and the CMake package is the thing to install.
+  let sharedLibrary: string | undefined;
+  for (const root of roots) {
     // Not `found: false`. Every root below could hold an install, and stopping
     // the search at the first one turns "I stopped looking" into "there is
     // nothing here" — with a note in `limitations` that the caller reading
@@ -402,11 +424,14 @@ const findLibuvcpp = async (
     const modules = await readModules(root);
     const hasConfig =
       (modules?.length ?? 0) > 0 ||
-      (await stat(join(root, "lib", "cmake", "uvcpp", "uvcppConfig.cmake")).then(
-        () => true,
-        () => false,
-      ));
-    if (!hasConfig) continue;
+      (await cmakePackageIn(root, "lib")) ||
+      (await cmakePackageIn(root, "lib64"));
+    if (!hasConfig) {
+      // A header that was read and defines nothing is not "missing development
+      // files"; only a root with no readable config source at all is.
+      if (modules === undefined) sharedLibrary ??= await sharedLibraryIn(root);
+      continue;
+    }
     const version = await libuvcppVersionOf(root);
     return {
       found: true,
@@ -424,11 +449,59 @@ const findLibuvcpp = async (
   return {
     found: false,
     modules: [],
-    note:
-      "No libuvcpp installation found. Set UVCPP_ROOT, or unpack a release and add its " +
-      "prefix to CMAKE_PREFIX_PATH.",
+    note: missingLibuvcppNote(sharedLibrary),
   };
 };
+
+/**
+ * Whether a prefix carries `find_package(uvcpp CONFIG)`'s package file.
+ *
+ * Both `lib` and `lib64`: a distribution that installs libraries into `lib64`
+ * puts the CMake package there too, and `VERSION_SOURCES` already reads the
+ * version from that layout. Checking only `lib` reported such a prefix as
+ * missing (libuvcpp's RPM is exactly that shape, where the config header alone
+ * happened to answer instead).
+ */
+const cmakePackageIn = async (root: string, lib: "lib" | "lib64"): Promise<boolean> =>
+  await stat(join(root, lib, "cmake", "uvcpp", "uvcppConfig.cmake")).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * The libuvcpp shared library a prefix carries, if it carries one.
+ *
+ * Distribution packages split the library from the headers: the runtime
+ * package in the 1.7.4 release (`libuvcpp1`) installs `libuvcpp.so.1` and
+ * `libuvcpp.so.1.7.4` and nothing else. Finding that file is what lets the
+ * missing-install note name the thing the caller actually installed.
+ */
+const SHARED_LIBRARY = /^libuvcpp\.so(\..+)?$/u;
+
+const sharedLibraryIn = async (root: string): Promise<string | undefined> => {
+  for (const lib of ["lib", "lib64"]) {
+    let entries: readonly string[];
+    try {
+      entries = await readdir(join(root, lib));
+    } catch {
+      continue;
+    }
+    // Sorted so a prefix holding both `libuvcpp.so.1` and `libuvcpp.so.1.7.4`
+    // names the same one on every run.
+    const found = [...entries].filter((name) => SHARED_LIBRARY.test(name)).sort()[0];
+    if (found !== undefined) return join(root, lib, found);
+  }
+  return undefined;
+};
+
+const missingLibuvcppNote = (sharedLibrary: string | undefined): string =>
+  sharedLibrary === undefined
+    ? "No libuvcpp installation found. Set UVCPP_ROOT, or unpack a release and add its " +
+      "prefix to CMAKE_PREFIX_PATH."
+    : `Found the libuvcpp shared library at ${sharedLibrary}, but no uvcpp_config.h could ` +
+      "be read and no uvcppConfig.cmake was found in the prefixes uvp searches. Install the " +
+      "development package (libuvcpp-devel on RPM distributions, libuvcpp-dev on Debian and " +
+      "Ubuntu), or unpack a release and add its prefix to CMAKE_PREFIX_PATH.";
 
 class LocalToolchainClient implements ToolchainClient {
   constructor(
