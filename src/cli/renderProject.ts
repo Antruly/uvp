@@ -188,11 +188,9 @@ export const renderBuild = (output: Record<string, unknown>): string[] => {
 export const renderFrontendBuild = (output: Record<string, unknown>): string[] => {
   const stepsSucceeded = bool(output["steps_succeeded"]) === true;
   const built = bool(output["built"]) === true;
+  const status = stepsSucceeded ? (built ? "built" : "not built") : "build failed";
   const lines = [
-    row(
-      "frontend",
-      `${str(output["frontend"])}  ${stepsSucceeded && built ? "built" : "not built"}`,
-    ),
+    row("frontend", `${str(output["frontend"])}  ${status}`),
     row("output", `${str(output["output_dir"])}${built ? "" : "  (no dist/index.html)"}`),
     row(
       "tools",
