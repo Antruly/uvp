@@ -259,7 +259,13 @@ endforeach()
 target_link_libraries(${input.name} PRIVATE \${UVP_UVCPP_TARGET})
 
 if (MSVC)
-  target_compile_options(${input.name} PRIVATE /W4 /permissive-)
+  # MSVC reads a source without a BOM in the system code page. On a Chinese
+  # Windows install that is GBK (936), so a UTF-8 source with Chinese comments or
+  # string literals is decoded as GBK and fails to compile. The generated sources
+  # are UTF-8, so /utf-8 tells the compiler both the source and execution
+  # charsets are UTF-8; a source that does carry a BOM still compiles the same
+  # way, and GCC and Clang already default to UTF-8 in the branch below.
+  target_compile_options(${input.name} PRIVATE /W4 /permissive- /utf-8)
 else()
   target_compile_options(${input.name} PRIVATE -Wall -Wextra -Wpedantic)
 endif()

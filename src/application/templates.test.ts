@@ -37,6 +37,36 @@ const manifest = (
   return JSON.parse(file.content) as Record<string, unknown>;
 };
 
+const cmakeLists = (template: TemplateId, features: readonly UvpFeature[]): string => {
+  const files = renderTemplate(template, { name: "svc", port: 8080, features });
+  const file = files.find((entry) => entry.path === "CMakeLists.txt");
+  if (file === undefined) throw new Error(`${template} produced no CMakeLists.txt`);
+  return file.content;
+};
+
+describe("the generated CMake tells MSVC what character set the sources use", () => {
+  it.each(TEMPLATE_IDS)("%s compiles its UTF-8 sources on a non-UTF-8 code page", (template) => {
+    // MSVC decodes a source without a BOM in the system code page. On a Chinese
+    // Windows install that is 936/GBK, so a UTF-8 source with Chinese comments or
+    // string literals is decoded as GBK and fails to compile. `/utf-8` is the
+    // switch that makes the bytes mean what this writer wrote.
+    const cmake = cmakeLists(template, template === "http3-service" ? ["tls", "http3"] : []);
+    expect(cmake).toContain("/permissive- /utf-8");
+  });
+
+  it("keeps the MSVC switch out of the GCC and Clang branch", () => {
+    // The file has other if/else pairs (the libuvcpp discovery route is one), so
+    // split from the compiler branch rather than from the first `else()`.
+    const cmake = cmakeLists("hello-http", []);
+    const compilerBranch = cmake.indexOf("if (MSVC)");
+    expect(compilerBranch).toBeGreaterThanOrEqual(0);
+    const [msvcBranch = "", otherBranch = ""] = cmake.slice(compilerBranch).split("else()");
+    expect(msvcBranch).toContain("/utf-8");
+    expect(otherBranch).toContain("target_compile_options(svc PRIVATE -Wall -Wextra -Wpedantic)");
+    expect(otherBranch).not.toContain("/utf-8");
+  });
+});
+
 /**
  * Every template that starts a `uvcpp_web_app` — which is no longer all of them.
  *
