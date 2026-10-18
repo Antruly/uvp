@@ -46,6 +46,12 @@ npm install --save-dev uvp-agents
 npx uvp doctor
 ```
 
+A local install does not make `uvp` a shell command. npm links the package's
+executable into `./node_modules/.bin` and leaves `PATH` alone, on every platform,
+so `npx uvp doctor` — the line above, and the same in PowerShell, cmd, and a Unix
+shell — is how that project runs it. npm's Windows layout also puts a shim at
+`.\node_modules\.bin\uvp.cmd` for a direct call.
+
 ### From GitHub Packages (mirror)
 
 A separate dispatch publishes the same release to GitHub Packages as
@@ -315,9 +321,18 @@ Either path leaves you with an ordinary CMake project — walk away from uvp and
 
 ## Troubleshooting
 
-**`uvp: command not found` after a global install.** The npm global bin directory
-is not on `PATH`. `npm config get prefix` prints it; `<prefix>/bin` is what needs
-to be on `PATH`.
+**`uvp: command not found` after `npm install uvp-agents`.** Without `--global`
+the install is local: npm links the executable into `./node_modules/.bin` and does
+not add that directory to `PATH`. On Windows the shell reports this as `'uvp' is
+not recognized as an internal or external command` (or the localized equivalent).
+From that project, run `npx uvp doctor`, or call the linked executable directly —
+`.\node_modules\.bin\uvp.cmd doctor` on Windows, `./node_modules/.bin/uvp doctor`
+on Unix-like hosts. A global install is what puts `uvp` on `PATH`.
+
+**`uvp: command not found` after a global install.** The npm global executable
+directory is not on `PATH`. `npm config get prefix` prints the prefix; what has to
+be on `PATH` is `<prefix>/bin` on Unix-like hosts, and the prefix directory itself
+on Windows — commonly `%APPDATA%\npm`.
 
 **`libuvcpp not found` at configure time.** Neither discovery route answered.
 `CMAKE_PREFIX_PATH` for a CMake install, `PKG_CONFIG_PATH` for a release archive.
