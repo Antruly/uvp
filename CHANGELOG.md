@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.4.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.3.0...uvp-agents-0.4.0) (2026-10-18)
+
+
+### Features
+
+* **templates:** expose the template store as CLI and MCP tools ([a58e644](https://github.com/Antruly/uvp/commit/a58e644e1f8676c10ac2ee138e35a7db8e8c57c2))
+* **templates:** expose the template store as CLI and MCP tools ([962a5ff](https://github.com/Antruly/uvp/commit/962a5fff46189f9cbe380a3e033161837a149d88))
+* **templates:** generate a workspace from a stored template package ([f12049f](https://github.com/Antruly/uvp/commit/f12049fb2c77ee7e96df73d9b89fb3090efb98cf))
+* **templates:** generate a workspace from a stored template package ([538e189](https://github.com/Antruly/uvp/commit/538e189d90573f76b26db2551d98a91afdee4c14)), closes [#271](https://github.com/Antruly/uvp/issues/271) [#236](https://github.com/Antruly/uvp/issues/236)
+* **templates:** generate a workspace from a stored template package ([#272](https://github.com/Antruly/uvp/issues/272)) ([f12049f](https://github.com/Antruly/uvp/commit/f12049fb2c77ee7e96df73d9b89fb3090efb98cf))
+* **workspace:** build Node frontend apps with an explicit command ([6a0d7fa](https://github.com/Antruly/uvp/commit/6a0d7faca0f1a4d36fd7716f9cce9cbbcf2990e5)), closes [#238](https://github.com/Antruly/uvp/issues/238)
+* **workspace:** generate and build Node frontend apps ([fcb8f77](https://github.com/Antruly/uvp/commit/fcb8f7754203e54ffb9b2ee5a334f57f05c82772))
+* **workspace:** generate built-in static frontends from a selection ([0494ed2](https://github.com/Antruly/uvp/commit/0494ed20865360bea271c15ebe0f750365f981c1))
+* **workspace:** generate built-in static frontends from a selection ([4542a53](https://github.com/Antruly/uvp/commit/4542a53c4bb3609778fd5ba3fb40e00b596145d6)), closes [#237](https://github.com/Antruly/uvp/issues/237)
+* **workspace:** generate Node frontend apps from a selection ([a36b745](https://github.com/Antruly/uvp/commit/a36b745a064d8315c8b77633bdbfa780da209b28)), closes [#238](https://github.com/Antruly/uvp/issues/238)
+
+
+### Bug Fixes
+
+* **cli:** say the build failed when an earlier dist/ still exists ([49cbf23](https://github.com/Antruly/uvp/commit/49cbf239430503c93877d0c87d603314a5c940bc))
+* **contracts:** name the package tree, not a suite ([4ecfb32](https://github.com/Antruly/uvp/commit/4ecfb322cf1df1dcd5a6ee321a5ebb590982445f))
+* **docs:** name the exit-2 template store failures ([f17f9cc](https://github.com/Antruly/uvp/commit/f17f9cca78e9adde687131bafe80a6ff204d5732))
+* **docs:** name the exit-2 template store failures ([7e62fac](https://github.com/Antruly/uvp/commit/7e62fac02283181bd255d3c93c7f10267a9285cf)), closes [#269](https://github.com/Antruly/uvp/issues/269)
+* **docs:** separate a held lock from the exit-1 refusals ([8071eec](https://github.com/Antruly/uvp/commit/8071eec5ce9da908b4127a5cf75d42e236bc647f)), closes [#269](https://github.com/Antruly/uvp/issues/269)
+* **frontends:** align the generated project with its review notes ([9fc15e7](https://github.com/Antruly/uvp/commit/9fc15e78216110a7fe2c2f88ad869b7fe7df729e))
+* **frontends:** distinguish a withdrawn or silent probe from a missing Node ([1a7af8d](https://github.com/Antruly/uvp/commit/1a7af8db527ccbe1ac7a6aa3a3d4e26bc4153d23))
+* **frontends:** resolve the committed lockfiles from the public registry ([ffaaac5](https://github.com/Antruly/uvp/commit/ffaaac5f3a9fe26981f7d244cd99c44bbcb86767))
+* **templates:** accept the routes a registry index mirrors ([b59e081](https://github.com/Antruly/uvp/commit/b59e081a6f0dc5833e846b41a8156a9b0e9f4505))
+* **templates:** answer the store's failures in the error contract ([8da47b5](https://github.com/Antruly/uvp/commit/8da47b5acfd97be1db358c9a170bbb2433e0de2b))
+* **templates:** answer the store's failures in the error contract ([5641454](https://github.com/Antruly/uvp/commit/5641454de29e683dc5f7bf73544ee5e1dad25d29)), closes [#264](https://github.com/Antruly/uvp/issues/264) [#263](https://github.com/Antruly/uvp/issues/263)
+* **templates:** record what the template tools examined ([cb4e765](https://github.com/Antruly/uvp/commit/cb4e765f0920cc050ac35238f7a93755ed8d8dd8))
+* **templates:** record what the template tools examined ([05b1254](https://github.com/Antruly/uvp/commit/05b1254befd958901cd024c83e41b06a8961f98e)), closes [#265](https://github.com/Antruly/uvp/issues/265) [#263](https://github.com/Antruly/uvp/issues/263)
+* **templates:** refuse control characters in a route ([23fbf0b](https://github.com/Antruly/uvp/commit/23fbf0b6c080a5afb781ac46509ab6538e5187e3))
+
+
+### Documentation
+
+* correct the tool count and the frontend build's written files ([91dfab6](https://github.com/Antruly/uvp/commit/91dfab649b3983623effb4893fcd41b771b78f06))
+* **workspace:** address the static-frontend review notes ([f09d5b2](https://github.com/Antruly/uvp/commit/f09d5b27fa797472048ed2a8bc5edb78d5ab54d0)), closes [#237](https://github.com/Antruly/uvp/issues/237)
+
+
+### Tests
+
+* **conformance:** exercise the frontend build with Node present and absent ([eeeb4ab](https://github.com/Antruly/uvp/commit/eeeb4abca6db7f1a11a3f97aff371baa15e956cb))
+* **frontends:** assert the generated Node range and lockfile identity ([0d00a1c](https://github.com/Antruly/uvp/commit/0d00a1c174bcc377a0d9a6f6e56c65c59fde040c))
+* **frontends:** expect the host's npm spelling at the boundary ([8d1c3dc](https://github.com/Antruly/uvp/commit/8d1c3dc4e278e94a806261467c69261be140cc0b))
+
+
+### Continuous Integration
+
+* **release:** mirror GitHub Packages automatically when release-please publishes ([d09b48d](https://github.com/Antruly/uvp/commit/d09b48d477b1f22482a8ef459c91a5b801afecad))
+* **release:** mirror GitHub Packages automatically when release-please publishes ([1ef7677](https://github.com/Antruly/uvp/commit/1ef76775bb65706510747ea40f83234fa36f85a4))
+
 ## [0.3.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.2.0...uvp-agents-0.3.0) (2026-10-18)
 
 
