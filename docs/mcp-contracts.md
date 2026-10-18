@@ -77,6 +77,15 @@ Scaffolds a CMake project from one of seven templates, at a path you name. It
 writes files and starts nothing. Refuses to overwrite an existing workspace
 unless told to.
 
+`modules` composes uvp's application pieces — `health`, `echo-log`,
+`websocket-echo`, `static-console` — into the template. Omit it to get the
+template's default: `websocket-test` composes all four, every other template
+none. The result reports the resolved `modules` beside `routes`, and records the
+selection in `uvp.json` when it differs from that default. An unknown or repeated
+name, a module whose feature was not requested, a module whose composed modules
+are missing, and a module whose exact route the template already serves are
+refused before any file is written.
+
 ### Build
 
 **`uvp_build`** — Build a workspace.

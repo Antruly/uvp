@@ -1,6 +1,12 @@
 import { FEATURE_REQUIREMENTS } from "./ToolchainProvider.js";
 import { LIBUVCPP_BASELINE } from "../domain/libuvcpp.js";
 import type { UvpFeature } from "../domain/features.js";
+import {
+  UVP_MODULE_DEFINITIONS,
+  defaultModules,
+  resolveModules,
+  type UvpModule,
+} from "../domain/modules.js";
 
 /**
  * Workspace templates.
@@ -117,42 +123,53 @@ export const templateFeatureProblem = (
 export const templateRoutes = (
   template: TemplateId,
   features: readonly UvpFeature[],
+  modules: readonly UvpModule[] = defaultModules(template),
 ): readonly string[] => {
-  switch (template) {
-    case "hello-http":
-      return ["GET /hello"];
-    case "rest-api":
-      return [
-        "GET /healthz",
-        "GET /items",
-        "GET /items/:id",
-        ...(features.includes("db") ? ["POST /items/:id"] : []),
-      ];
-    case "websocket-echo":
-      return ["GET /healthz", "WS /echo"];
-    case "websocket-test":
-      return [
-        "GET /healthz",
-        "GET /api/echo-log",
-        "WS /ws",
-        "GET /",
-        "HEAD /",
-        "GET /*path",
-        "HEAD /*path",
-      ];
-    case "soap-service":
-      return ["POST /ws"];
-    case "static-files":
-      return ["GET /healthz", "GET /", "HEAD /", "GET /*path", "HEAD /*path"];
-    case "http3-service":
-      return ["GET /hello", "GET /healthz"];
-  }
+  const base: readonly string[] = (() => {
+    switch (template) {
+      case "hello-http":
+        return ["GET /hello"];
+      case "rest-api":
+        return [
+          "GET /healthz",
+          "GET /items",
+          "GET /items/:id",
+          ...(features.includes("db") ? ["POST /items/:id"] : []),
+        ];
+      case "websocket-echo":
+        return ["GET /healthz", "WS /echo"];
+      case "websocket-test":
+        // Every route this template serves comes from its modules: omitting
+        // `--modules` means the full set, and naming a subset composes exactly
+        // that subset. A base route here would be a route no module owns and
+        // that no selection could remove.
+        return [];
+      case "soap-service":
+        return ["POST /ws"];
+      case "static-files":
+        return ["GET /healthz", "GET /", "HEAD /", "GET /*path", "HEAD /*path"];
+      case "http3-service":
+        return ["GET /hello", "GET /healthz"];
+    }
+  })();
+  return [
+    ...base,
+    ...resolveModules(modules).flatMap((module) => UVP_MODULE_DEFINITIONS[module].routes),
+  ];
 };
 
 export interface TemplateInput {
   readonly name: string;
   readonly port: number;
   readonly features: readonly UvpFeature[];
+  /**
+   * The application modules to compose.
+   *
+   * Absent means the template's own default (see `defaultModules`). The set is
+   * resolved in the vocabulary's order before it is rendered, so two requests
+   * that name the same modules produce the same file.
+   */
+  readonly modules?: readonly UvpModule[];
 }
 
 export interface GeneratedFile {
@@ -460,8 +477,243 @@ const webAppSetup = (input: TemplateInput): string => {
 `;
 };
 
+/** The modules this render composes, in the vocabulary's canonical order. */
+const selectedModules = (input: TemplateInput): readonly UvpModule[] =>
+  resolveModules(input.modules ?? []);
+
+/** What each module needs at the top of the generated file. */
+const MODULE_INCLUDES: Readonly<Record<UvpModule, readonly string[]>> = {
+  health: [],
+  "echo-log": [
+    "#include <chrono>",
+    "#include <cstdint>",
+    "#include <deque>",
+    "#include <iomanip>",
+    "#include <mutex>",
+    "#include <sstream>",
+    "#include <utility>",
+    "#include <vector>",
+  ],
+  "websocket-echo": ["#include <web/uvcpp_ws_connection.h>"],
+  "static-console": [],
+};
+
+const moduleIncludes = (
+  input: TemplateInput,
+  options: { readonly except?: readonly string[] } = {},
+): readonly string[] => {
+  const lines: string[] = [];
+  for (const module of selectedModules(input)) {
+    for (const line of MODULE_INCLUDES[module]) {
+      if (options.except?.includes(line) === true) continue;
+      if (!lines.includes(line)) lines.push(line);
+    }
+  }
+  return lines;
+};
+
+/**
+ * The echo log's storage and helpers.
+ *
+ * One string rather than four fragments because every piece here is private to
+ * the log: the endpoint reads `g_log` under its mutex, and the WebSocket handler
+ * writes it through `PushLog`. Splitting them would only invite a composition
+ * that took half.
+ */
+const ECHO_LOG_DECLARATIONS = `
+// One message as the server saw it. A text payload is kept verbatim; a binary
+// payload is a short hex summary and its length, because a test console should
+// not turn into an unbounded copy of every byte a peer sent.
+struct LogEntry {
+  long long ts;
+  std::string type;
+  std::string payload;
+};
+
+constexpr size_t kMaxLogEntries = 100;
+
+std::mutex g_log_mutex;
+std::deque<LogEntry> g_log;
+size_t g_dropped = 0;
+
+long long NowMs() {
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+std::string HexSummary(const uint8_t* data, size_t len) {
+  const size_t shown = len < 32 ? len : 32;
+  std::ostringstream out;
+  out << std::hex << std::setfill('0');
+  for (size_t i = 0; i < shown; ++i) {
+    out << std::setw(2) << static_cast<int>(data[i]);
+    if (i + 1 < shown) out << ' ';
+  }
+  if (len > shown) out << " ...";
+  out << " (" << std::dec << len << " bytes)";
+  return out.str();
+}
+
+// Escape the characters a JSON string cannot carry. The numeric constants keep
+// the generated source free of backslash literals, which are the one thing a
+// template string makes easy to get wrong.
+std::string JsonEscape(const std::string& text) {
+  const char quote = static_cast<char>(34);
+  const char backslash = static_cast<char>(92);
+  std::string out;
+  out.reserve(text.size());
+  for (char c : text) {
+    if (c == quote) {
+      out += backslash;
+      out += quote;
+    } else if (c == backslash) {
+      out += backslash;
+      out += backslash;
+    } else if (c == static_cast<char>(10)) {
+      out += backslash;
+      out += 'n';
+    } else if (c == static_cast<char>(13)) {
+      out += backslash;
+      out += 'r';
+    } else if (c == static_cast<char>(9)) {
+      out += backslash;
+      out += 't';
+    } else if (static_cast<unsigned char>(c) < 32) {
+      // The two-letter escapes above cover only three of the control
+      // characters a peer may put in a text frame. JSON has no other short
+      // spelling, so the rest take the universal form, which keeps the
+      // document parseable; emitting the byte would produce a string no
+      // parser accepts.
+      static const char kHex[] = "0123456789abcdef";
+      const unsigned char byte = static_cast<unsigned char>(c);
+      out += backslash;
+      out += 'u';
+      out += '0';
+      out += '0';
+      out += kHex[(byte >> 4) & 0x0f];
+      out += kHex[byte & 0x0f];
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+void PushLog(LogEntry entry) {
+  std::lock_guard<std::mutex> lock(g_log_mutex);
+  g_log.push_back(std::move(entry));
+  while (g_log.size() > kMaxLogEntries) {
+    g_log.pop_front();
+    ++g_dropped;
+  }
+}
+`;
+
+/**
+ * The declarations a selection puts above `main`, wrapped only when there are
+ * any.
+ *
+ * An empty anonymous namespace would be legal C++ and a line every reader of a
+ * `hello-http --modules health` project would have to account for; the whole
+ * block is omitted instead.
+ */
+const moduleNamespaceBlock = (input: TemplateInput): string => {
+  const body = selectedModules(input).includes("echo-log") ? ECHO_LOG_DECLARATIONS : "";
+  return body === "" ? "" : `\nnamespace {\n${body}\n}  // namespace\n`;
+};
+
+const healthRoute = `
+  app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+    resp.status(200).json_str(R"({"status":"ok"})");
+    resp.end();
+  });
+`;
+
+const echoLogRoute = `
+  // The log endpoint reports both what it kept and what the bound dropped.
+  // A reader that saw only the entries would not know the window moved.
+  app.get("/api/echo-log", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+    std::vector<LogEntry> entries;
+    size_t dropped = 0;
+    {
+      std::lock_guard<std::mutex> lock(g_log_mutex);
+      entries.assign(g_log.begin(), g_log.end());
+      dropped = g_dropped;
+    }
+
+    std::string body = R"({"retained":)" + std::to_string(entries.size()) +
+                       R"(,"dropped":)" + std::to_string(dropped) + R"(,"entries":[)";
+    bool first = true;
+    for (const auto& entry : entries) {
+      if (!first) body += ",";
+      first = false;
+      body += R"({"ts":)" + std::to_string(entry.ts) + R"(,"type":")" + entry.type +
+              R"(","payload":")" + JsonEscape(entry.payload) + R"("})";
+    }
+    body += "]}";
+    resp.status(200).json_str(body);
+    resp.end();
+  });
+`;
+
+/**
+ * The echo endpoint.
+ *
+ * It records into the log only when the log is selected. The hook is generated
+ * rather than always present because `websocket-echo` alone is a supported
+ * composition, and a `PushLog` call with no declaration behind it would not
+ * compile.
+ */
+const websocketEchoRoute = (input: TemplateInput): string => {
+  const logs = selectedModules(input).includes("echo-log");
+  const recordText = logs ? `      PushLog({NowMs(), "text", message});\n` : "";
+  const recordBinary = logs ? `      PushLog({NowMs(), "binary", HexSummary(data, len)});\n` : "";
+  return `
+  app.websocket("/ws", [](uvcpp_web_ws_request& ws) {
+    uvcpp_ws_connection* connection = ws.connection();
+    if (connection == nullptr) return;
+
+    connection->on_text([connection](const std::string& message) {
+${recordText}      connection->send_text(message.data(), message.size());
+    });
+
+    connection->on_binary([connection](const uint8_t* data, size_t len) {
+${recordBinary}      connection->send_binary(reinterpret_cast<const char*>(data), len);
+    });
+
+    connection->on_ping([](const uint8_t* data, size_t len) {
+      (void)data;
+      std::cout << "[ping] " << len << " bytes\\n" << std::flush;
+    });
+
+    connection->on_close([](ws_close_code code, const std::string& reason) {
+      std::cout << "[close] code=" << static_cast<int>(code)
+                << " reason=" << (reason.empty() ? "(empty)" : reason) << "\\n" << std::flush;
+    });
+  });
+`;
+};
+
+const staticConsoleRoute = `
+  // Run from the project root: a relative document root is resolved there.
+  app.serve_static("/", "./public");
+`;
+
+const MODULE_ROUTES: Readonly<Record<UvpModule, (input: TemplateInput) => string>> = {
+  health: () => healthRoute,
+  "echo-log": () => echoLogRoute,
+  "websocket-echo": websocketEchoRoute,
+  "static-console": () => staticConsoleRoute,
+};
+
+/** The route registrations a selection adds to a template, in canonical order. */
+const moduleRouteBlock = (input: TemplateInput): string =>
+  selectedModules(input)
+    .map((module) => MODULE_ROUTES[module](input))
+    .join("");
+
 const helloHttpMain = (input: TemplateInput): string =>
-  `${webPreamble(input)}
+  `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
 // A single route, wired by hand. Everything uvp generates ends up looking like
 // this: ordinary libuvcpp code that a C++ developer would recognise.
 //
@@ -474,7 +726,7 @@ ${webAppSetup(input)}
     resp.status(200).json_str(R"({"message":"Hello, AI"})");
     resp.end();
   });
-${webTail(input)}`;
+${moduleRouteBlock(input)}${webTail(input)}`;
 
 /**
  * `rest-api`'s store, chosen by whether the workspace declared the `db` module.
@@ -506,7 +758,7 @@ const restApiMain = (input: TemplateInput): string =>
  * visible: the same requests against the same routes answer from a file instead.
  */
 const restApiMemoryMain = (input: TemplateInput): string =>
-  `${webPreamble(input, ["#include <unordered_map>"])}
+  `${webPreamble(input, ["#include <unordered_map>", ...moduleIncludes(input)])}${moduleNamespaceBlock(input)}
 namespace {
 
 // An in-memory store, so the template is runnable with no database. Replace it
@@ -559,7 +811,7 @@ ${webAppSetup(input)}
     resp.status(200).json_str(JsonItem(found->first, found->second));
     resp.end();
   });
-${webTail(input)}`;
+${moduleRouteBlock(input)}${webTail(input)}`;
 
 /**
  * The db module's headers, as the database-backed template includes them.
@@ -594,7 +846,7 @@ const DATABASE_INCLUDES = [
  * at yet.
  */
 const restApiDatabaseMain = (input: TemplateInput): string =>
-  `${webPreamble(input, DATABASE_INCLUDES)}
+  `${webPreamble(input, [...DATABASE_INCLUDES, ...moduleIncludes(input)])}${moduleNamespaceBlock(input)}
 namespace {
 
 // The schema, created at startup and idempotently, so a deployed service needs
@@ -800,10 +1052,23 @@ ${webAppSetup(input)}
                resp.end();
              }
            });
-${webTail(input)}`;
+${moduleRouteBlock(input)}${webTail(input)}`;
 
-const websocketEchoMain = (input: TemplateInput): string =>
-  `${webPreamble(input, ["#include <web/uvcpp_ws_connection.h>"])}
+const websocketEchoMain = (input: TemplateInput): string => {
+  // The template's own handler uses the connection type, so its header is
+  // always first; a selected `websocket-echo` module names the same header and
+  // must not repeat it.
+  const extras = [
+    "#include <web/uvcpp_ws_connection.h>",
+    ...moduleIncludes(input, { except: ["#include <web/uvcpp_ws_connection.h>"] }),
+  ];
+  // The template's echo endpoint is the only place its messages arrive, so a
+  // selected log has to record them here too; without this hook the log route
+  // would answer, truthfully and uselessly, that nothing was ever received.
+  const recordText = selectedModules(input).includes("echo-log")
+    ? `      PushLog({NowMs(), "text", message});\n`
+    : "";
+  return `${webPreamble(input, extras)}${moduleNamespaceBlock(input)}
 // Registering a WebSocket route implicitly enables WS support, so there is no
 // separate enable call. The connection outlives this handler, and the framework
 // owns it — never delete it.
@@ -818,185 +1083,52 @@ ${webAppSetup(input)}
     uvcpp_ws_connection* conn = ws.connection();
     if (conn == nullptr) return;
     conn->on_text([conn](const std::string& message) {
-      conn->send_text(message.data(), message.size());
+${recordText}      conn->send_text(message.data(), message.size());
     });
     conn->on_close([](ws_close_code code, const std::string& reason) {
       std::cout << "closed: " << static_cast<int>(code) << " " << reason << "\\n" << std::flush;
     });
   });
-${webTail(input)}`;
-
-const websocketTestMain = (input: TemplateInput): string =>
-  `${webPreamble(input, [
-    "#include <web/uvcpp_ws_connection.h>",
-    "#include <uvcpp/uvcpp_threadpool.h>",
-    "#include <chrono>",
-    "#include <cstdint>",
-    "#include <deque>",
-    "#include <iomanip>",
-    "#include <mutex>",
-    "#include <sstream>",
-    "#include <utility>",
-    "#include <vector>",
-  ])}
-namespace {
-
-// One message as the server saw it. A text payload is kept verbatim; a binary
-// payload is a short hex summary and its length, because a test console should
-// not turn into an unbounded copy of every byte a peer sent.
-struct LogEntry {
-  long long ts;
-  std::string type;
-  std::string payload;
+${moduleRouteBlock(input)}${webTail(input)}`;
 };
 
-constexpr size_t kMaxLogEntries = 100;
-
-std::mutex g_log_mutex;
-std::deque<LogEntry> g_log;
-size_t g_dropped = 0;
-
-long long NowMs() {
-  using namespace std::chrono;
-  return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-}
-
-std::string HexSummary(const uint8_t* data, size_t len) {
-  const size_t shown = len < 32 ? len : 32;
-  std::ostringstream out;
-  out << std::hex << std::setfill('0');
-  for (size_t i = 0; i < shown; ++i) {
-    out << std::setw(2) << static_cast<int>(data[i]);
-    if (i + 1 < shown) out << ' ';
-  }
-  if (len > shown) out << " ...";
-  out << " (" << std::dec << len << " bytes)";
-  return out.str();
-}
-
-// Escape the characters a JSON string cannot carry. The numeric constants keep
-// the generated source free of backslash literals, which are the one thing a
-// template string makes easy to get wrong.
-std::string JsonEscape(const std::string& text) {
-  const char quote = static_cast<char>(34);
-  const char backslash = static_cast<char>(92);
-  std::string out;
-  out.reserve(text.size());
-  for (char c : text) {
-    if (c == quote) {
-      out += backslash;
-      out += quote;
-    } else if (c == backslash) {
-      out += backslash;
-      out += backslash;
-    } else if (c == static_cast<char>(10)) {
-      out += backslash;
-      out += 'n';
-    } else if (c == static_cast<char>(13)) {
-      out += backslash;
-      out += 'r';
-    } else if (c == static_cast<char>(9)) {
-      out += backslash;
-      out += 't';
-    } else if (static_cast<unsigned char>(c) < 32) {
-      // The two-letter escapes above cover only three of the control
-      // characters a peer may put in a text frame. JSON has no other short
-      // spelling, so the rest take the universal form, which keeps the
-      // document parseable; emitting the byte would produce a string no
-      // parser accepts.
-      static const char kHex[] = "0123456789abcdef";
-      const unsigned char byte = static_cast<unsigned char>(c);
-      out += backslash;
-      out += 'u';
-      out += '0';
-      out += '0';
-      out += kHex[(byte >> 4) & 0x0f];
-      out += kHex[byte & 0x0f];
-    } else {
-      out += c;
-    }
-  }
-  return out;
-}
-
-void PushLog(LogEntry entry) {
-  std::lock_guard<std::mutex> lock(g_log_mutex);
-  g_log.push_back(std::move(entry));
-  while (g_log.size() > kMaxLogEntries) {
-    g_log.pop_front();
-    ++g_dropped;
-  }
-}
-
-}  // namespace
-
-// A WebSocket test console: a health route, a bounded log of what the server
+const websocketTestMain = (input: TemplateInput): string => {
+  // The echo endpoint's own include is listed first, then the template's
+  // thread-pool header, then the modules' includes. That order is what this
+  // template has always emitted; keeping it means a workspace generated with no
+  // `--modules` is byte-identical to the one generated before modules existed.
+  const modules = selectedModules(input);
+  const extras = [
+    ...(modules.includes("websocket-echo") ? ["#include <web/uvcpp_ws_connection.h>"] : []),
+    "#include <uvcpp/uvcpp_threadpool.h>",
+    ...moduleIncludes(input, { except: ["#include <web/uvcpp_ws_connection.h>"] }),
+  ];
+  // The description has to match the selection: a project composed from
+  // `--modules health` serves a health route and nothing else, and the default
+  // wording would promise an echo endpoint it does not have.
+  const defaults = defaultModules("websocket-test");
+  const isDefault =
+    modules.length === defaults.length &&
+    modules.every((module, index) => module === defaults[index]);
+  const description = isDefault
+    ? `// A WebSocket test console: a health route, a bounded log of what the server
 // received, an echo endpoint, and a static page that drives it. The log is the
 // data a first-time user can read back without attaching a debugger.
-int main() {
+`
+    : modules.length === 0
+      ? `// No application modules were selected, so this service registers no routes.
+`
+      : `// A WebSocket test service composed from the selected application modules:
+// ${modules.join(", ")}.
+`;
+  return `${webPreamble(input, extras)}${moduleNamespaceBlock(input)}
+${description}int main() {
   // Size libuv's pool before the first submission; 0 means one per CPU.
   uvcpp_set_threadpool_size(0);
 ${webAppSetup(input)}
-
-  app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
-    resp.status(200).json_str(R"({"status":"ok"})");
-    resp.end();
-  });
-
-  // The log endpoint reports both what it kept and what the bound dropped.
-  // A reader that saw only the entries would not know the window moved.
-  app.get("/api/echo-log", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
-    std::vector<LogEntry> entries;
-    size_t dropped = 0;
-    {
-      std::lock_guard<std::mutex> lock(g_log_mutex);
-      entries.assign(g_log.begin(), g_log.end());
-      dropped = g_dropped;
-    }
-
-    std::string body = R"({"retained":)" + std::to_string(entries.size()) +
-                       R"(,"dropped":)" + std::to_string(dropped) + R"(,"entries":[)";
-    bool first = true;
-    for (const auto& entry : entries) {
-      if (!first) body += ",";
-      first = false;
-      body += R"({"ts":)" + std::to_string(entry.ts) + R"(,"type":")" + entry.type +
-              R"(","payload":")" + JsonEscape(entry.payload) + R"("})";
-    }
-    body += "]}";
-    resp.status(200).json_str(body);
-    resp.end();
-  });
-
-  app.websocket("/ws", [](uvcpp_web_ws_request& ws) {
-    uvcpp_ws_connection* connection = ws.connection();
-    if (connection == nullptr) return;
-
-    connection->on_text([connection](const std::string& message) {
-      PushLog({NowMs(), "text", message});
-      connection->send_text(message.data(), message.size());
-    });
-
-    connection->on_binary([connection](const uint8_t* data, size_t len) {
-      PushLog({NowMs(), "binary", HexSummary(data, len)});
-      connection->send_binary(reinterpret_cast<const char*>(data), len);
-    });
-
-    connection->on_ping([](const uint8_t* data, size_t len) {
-      (void)data;
-      std::cout << "[ping] " << len << " bytes\\n" << std::flush;
-    });
-
-    connection->on_close([](ws_close_code code, const std::string& reason) {
-      std::cout << "[close] code=" << static_cast<int>(code)
-                << " reason=" << (reason.empty() ? "(empty)" : reason) << "\\n" << std::flush;
-    });
-  });
-
-  // Run from the project root: a relative document root is resolved there.
-  app.serve_static("/", "./public");
-
+${moduleRouteBlock(input)}
 ${webTail(input)}`;
+};
 
 const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
 <html lang="en">
@@ -1048,7 +1180,7 @@ const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
 `;
 
 const soapServiceMain = (input: TemplateInput): string =>
-  `${webPreamble(input)}
+  `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
 namespace {
 
 // A hand-written envelope. The wsdl module can generate this from a real WSDL;
@@ -1077,10 +1209,10 @@ ${webAppSetup(input)}
     resp.body(QuoteEnvelope("ACME"));
     resp.end();
   });
-${webTail(input)}`;
+${moduleRouteBlock(input)}${webTail(input)}`;
 
 const staticFilesMain = (input: TemplateInput): string =>
-  `${webPreamble(input)}
+  `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
 // Serve ./public as the document root. serve_static registers four routes — the
 // prefix and prefix/*path, each for GET and HEAD — and is a fallback: it always
 // answers (404 included) rather than passing the request on. Routes registered
@@ -1102,7 +1234,7 @@ ${webAppSetup(input)}
 
   std::cout << "serving ./public — start this binary from the project root, or "
                "static routes will return 500\\n" << std::flush;
-${webTail(input)}`;
+${moduleRouteBlock(input)}${webTail(input)}`;
 
 /**
  * The preamble of the one template that does not use `uvcpp_web_app`.
@@ -1320,8 +1452,17 @@ const MAIN_BY_TEMPLATE: Record<TemplateId, (input: TemplateInput) => string> = {
  * field stating it could state it differently. `readWorkspaceManifest` — the one
  * owner of this file's meaning — reads the scheme out of `features`.
  */
-const manifest = (input: TemplateInput, template: TemplateId): string =>
-  `${JSON.stringify(
+const manifest = (input: TemplateInput, template: TemplateId): string => {
+  const modules = resolveModules(input.modules ?? defaultModules(template));
+  const defaults = defaultModules(template);
+  // Recorded only when the selection says something the template does not: a
+  // manifest for `uvp init` with no `--modules` must stay byte-identical to the
+  // one written before modules existed, and a template whose default is the
+  // full set has nothing to add by naming it.
+  const recordsModules =
+    modules.length !== defaults.length ||
+    modules.some((module, index) => module !== defaults[index]);
+  return `${JSON.stringify(
     {
       uvp: 1,
       name: input.name,
@@ -1329,11 +1470,13 @@ const manifest = (input: TemplateInput, template: TemplateId): string =>
       binary: input.name,
       port: input.port,
       features: input.features,
+      ...(recordsModules ? { modules } : {}),
       requirements: { libuvcpp: `>=${LIBUVCPP_BASELINE}` },
     },
     null,
     2,
   )}\n`;
+};
 
 /**
  * The section a `tls` workspace's README needs and the others must not carry.
@@ -1532,11 +1675,16 @@ export const renderTemplate = (
   template: TemplateId,
   input: TemplateInput,
 ): readonly GeneratedFile[] => {
+  // Resolved once, here, so every fragment and the manifest see the same set in
+  // the same order. `selectedModules` is the reader for the fragments; this is
+  // the writer of the input they read.
+  const modules = resolveModules(input.modules ?? defaultModules(template));
+  const composed: TemplateInput = { ...input, modules };
   const files: GeneratedFile[] = [
-    { path: "CMakeLists.txt", content: cmakeLists(input) },
-    { path: "src/main.cpp", content: MAIN_BY_TEMPLATE[template](input) },
-    { path: "uvp.json", content: manifest(input, template) },
-    { path: "README.md", content: readme(input, template) },
+    { path: "CMakeLists.txt", content: cmakeLists(composed) },
+    { path: "src/main.cpp", content: MAIN_BY_TEMPLATE[template](composed) },
+    { path: "uvp.json", content: manifest(composed, template) },
+    { path: "README.md", content: readme(composed, template) },
     {
       path: ".gitignore",
       // A database-backed workspace has a database in it, and a SQLite database
@@ -1545,17 +1693,25 @@ export const renderTemplate = (
       // reason the build directory is.
       content:
         "build/\ncompile_commands.json\n" +
-        (input.features.includes("db") ? "*.db\n*.db-journal\n*.db-wal\n*.db-shm\n" : ""),
+        (composed.features.includes("db") ? "*.db\n*.db-journal\n*.db-wal\n*.db-shm\n" : ""),
     },
   ];
+  // The templates that bring their own page each own one asset path; a selected
+  // `static-console` replaces it, because the console is the page that drives
+  // the routes the workspace actually serves.
   if (template === "static-files") {
     files.push({
       path: "public/index.html",
-      content: `<!doctype html>\n<title>${input.name}</title>\n<h1>${input.name}</h1>\n`,
+      content: `<!doctype html>\n<title>${composed.name}</title>\n<h1>${composed.name}</h1>\n`,
     });
   }
-  if (template === "websocket-test") {
-    files.push({ path: "public/index.html", content: websocketTestConsole(input) });
+  for (const module of modules) {
+    if (UVP_MODULE_DEFINITIONS[module].assets.includes("public/index.html")) {
+      const at = files.findIndex((file) => file.path === "public/index.html");
+      const asset = { path: "public/index.html", content: websocketTestConsole(composed) };
+      if (at === -1) files.push(asset);
+      else files[at] = asset;
+    }
   }
   return files;
 };

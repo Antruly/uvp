@@ -19,6 +19,18 @@ import {
   type TemplateId,
 } from "./templates.js";
 import type { UvpFeature } from "../domain/features.js";
+import {
+  UVP_MODULES,
+  defaultModules,
+  duplicateModules,
+  isUvpModule,
+  moduleDependencyProblem,
+  moduleFeatureProblem,
+  moduleRouteConflictProblem,
+  resolveModules,
+  unknownModules,
+  type UvpModule,
+} from "../domain/modules.js";
 import { describeStop } from "./ProcessSupervisor.js";
 import { tailWithin } from "./evidenceHelpers.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
@@ -35,6 +47,14 @@ export interface CreateWorkspaceResult {
   readonly workspaceId: string;
   readonly path: string;
   readonly template: string;
+  /**
+   * The application modules the workspace was born with, in canonical order.
+   *
+   * Reported because it is what the generated source and `uvp.json` agree on,
+   * and because a caller that passed a subset should be able to see the set the
+   * template's default expanded to.
+   */
+  readonly modules: readonly UvpModule[];
   readonly files: readonly CreatedFile[];
   readonly routes: readonly string[];
   readonly nextSteps: readonly string[];
@@ -250,6 +270,14 @@ export class WorkspaceService {
     features: readonly UvpFeature[];
     port: number;
     force: boolean;
+    /**
+     * The application modules to compose; absent means the template's default.
+     *
+     * Typed as strings rather than `UvpModule` on purpose: this method is the
+     * boundary that refuses an unknown name, and a narrower type would move that
+     * refusal to a cast somewhere upstream instead of a named error here.
+     */
+    modules?: readonly string[] | undefined;
   }): Promise<CreateWorkspaceResult> {
     const root = resolve(input.path);
 
@@ -289,10 +317,100 @@ export class WorkspaceService {
       });
     }
 
+    // Every module refusal happens here, before the first file is written. A
+    // workspace that exists with a manifest naming a module whose code is not in
+    // it would be a claim the source does not support, and a half-written one is
+    // worse than a refusal because the caller has to clean it up.
+    const requested = input.modules ?? defaultModules(input.template);
+    const unknown = unknownModules(requested);
+    if (unknown.length > 0) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `Unknown application module${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. ` +
+          `Known modules: ${UVP_MODULES.join(", ")}.`,
+        remediation: {
+          action: "Re-run with module names from the list above; a module is a closed vocabulary.",
+        },
+        details: { unknown: [...unknown], known: [...UVP_MODULES] },
+      });
+    }
+    const duplicated = duplicateModules(requested);
+    if (duplicated.length > 0) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `The module list names ${duplicated.join(", ")} more than once. ` +
+          "A module is either selected or it is not.",
+        remediation: { action: "Remove the repeated name from the module list." },
+        details: { duplicated: [...duplicated] },
+      });
+    }
+    const modules = resolveModules(requested.filter(isUvpModule));
+    if (input.template === "http3-service" && modules.length > 0) {
+      // Not a route conflict but a layering one: this template's routes are
+      // registered on `uvcpp_http_server`, and every module is written against
+      // `uvcpp_web_app`. Composing them would generate a file that does not
+      // compile, so it is refused rather than attempted.
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `The http3-service template cannot compose application modules (${modules.join(", ")}): ` +
+          "its routes are registered on uvcpp_http_server, and the modules are written against " +
+          "uvcpp_web_app.",
+        remediation: {
+          action:
+            "Choose a web-app template for module composition, or generate http3-service without --modules.",
+        },
+        details: { template: input.template, modules: [...modules] },
+      });
+    }
+    const moduleFeatureRefusal = moduleFeatureProblem(modules, input.features);
+    if (moduleFeatureRefusal !== undefined) {
+      throw new UvpFailure({
+        code: "missing_requirement",
+        message: `The requested modules cannot be composed with the requested features: ${moduleFeatureRefusal}.`,
+        remediation: {
+          action:
+            "Re-run with the feature the module is written against; `uvp doctor --features` reports " +
+            "which of them the installed libuvcpp provides.",
+        },
+        details: { modules: [...modules], features: [...input.features] },
+      });
+    }
+    const dependencyRefusal = moduleDependencyProblem(modules);
+    if (dependencyRefusal !== undefined) {
+      throw new UvpFailure({
+        code: "missing_requirement",
+        message: `The requested modules do not compose: ${dependencyRefusal}.`,
+        remediation: { action: "Select the modules the refusal names alongside this one." },
+        details: { modules: [...modules] },
+      });
+    }
+    // Against the template's own routes, not the composed list: the question is
+    // whether the template already serves what the module would register.
+    const conflict = moduleRouteConflictProblem(
+      modules,
+      input.template,
+      templateRoutes(input.template, input.features, []),
+    );
+    if (conflict !== undefined) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message: `The requested modules conflict with the template: ${conflict}.`,
+        remediation: {
+          action:
+            "Drop the conflicting module, or choose a template that does not already serve that route.",
+        },
+        details: { template: input.template, modules: [...modules] },
+      });
+    }
+
     const files = renderTemplate(input.template, {
       name: input.name,
       port: input.port,
       features: input.features,
+      modules,
     });
 
     const created: CreatedFile[] = [];
@@ -308,8 +426,9 @@ export class WorkspaceService {
       workspaceId: workspaceIdOf(root),
       path: root,
       template: input.template,
+      modules,
       files: created,
-      routes: templateRoutes(input.template, input.features),
+      routes: templateRoutes(input.template, input.features, modules),
       nextSteps: [
         `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
         `cmake --build ${join(root, "build")}`,

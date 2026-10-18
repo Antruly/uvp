@@ -352,6 +352,50 @@ const websocketTestService = async (): Promise<void> => {
   expect(await portIsFree(port)).toBe(true);
 };
 
+/**
+ * A workspace whose behaviour came from `--modules` rather than from its
+ * template.
+ *
+ * The module layer's claim on the real toolchain: the generated fragments are
+ * C++ that compiles, and the routes `uvp init` reports are routes the program
+ * answers. `hello-http` is the template with a route of its own, so this also
+ * checks that composition adds to a template rather than replacing it.
+ *
+ * At module scope because the lane's per-function budget is an error at 150
+ * lines, and the service rows together already sit near it.
+ */
+const composedService = async (): Promise<void> => {
+  const workspace = await createWorkspace("hello-http", 8097, [], ["echo-log", "health"]);
+  const built = await buildWorkspace(workspace);
+  const result = resultOrThrow(built);
+  expect(result["succeeded"], `the composed workspace failed to build: ${why(result)}`).toBe(true);
+  expect(existsSync(workspace.binary), `no binary at ${workspace.binary}`).toBe(true);
+
+  const service = await startService(workspace);
+  try {
+    for (const [path, expected] of [
+      ["/hello", '{"message":"Hello, AI"}'],
+      ["/healthz", '{"status":"ok"}'],
+      ["/api/echo-log", '{"retained":0,"dropped":0,"entries":[]}'],
+    ] as const) {
+      const outcome = await runCli([
+        "http",
+        `http://127.0.0.1:${String(workspace.port)}${path}`,
+        "--json",
+      ]);
+      expect(outcome.exit, outcome.stderr).toBe(EXIT_OK);
+      const response = resultOrThrow(outcome);
+      expect(response["status"], `${path} status`).toBe(200);
+      expect(bodyText(response), `${path} body`).toBe(expected);
+    }
+  } finally {
+    await service.stop();
+  }
+
+  expect(isAlive(service.pid)).toBe(false);
+  expect(await portIsFree(workspace.port)).toBe(true);
+};
+
 const coveredEveryTemplate = (): void => {
   // The vacuity guard. Six passing tests above are only the documented
   // table if they are the six templates — a lane that quietly stopped
@@ -497,10 +541,9 @@ describe.skipIf(realLibuvcpp === undefined)(
       expect(await portIsFree(port)).toBe(true);
     });
 
-    it(
-      "websocket-test: echoes a frame and reports a bounded echo log on :8096",
-      websocketTestService,
-    );
+    it("websocket-test: echoes a frame and reports its log on :8096", websocketTestService);
+
+    it("composed: hello-http with health and echo-log serves on :8097", composedService);
 
     it("soap-service: returns an envelope for a call on :8093", async () => {
       const workspace = await builtTemplate("soap-service");

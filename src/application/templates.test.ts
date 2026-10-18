@@ -4,6 +4,7 @@ import { TEMPLATE_IDS, renderTemplate, templateRoutes } from "./templates.js";
 import type { TemplateId } from "./templates.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import type { UvpFeature } from "../domain/features.js";
+import type { UvpModule } from "../domain/modules.js";
 
 /**
  * What a generated workspace says, and what the code it writes actually does.
@@ -611,5 +612,136 @@ describe("the websocket-test template", () => {
       "GET /*path",
       "HEAD /*path",
     ]);
+  });
+});
+
+describe("application module composition", () => {
+  const compose = (
+    template: TemplateId,
+    modules: readonly UvpModule[] | undefined,
+    features: readonly UvpFeature[] = ["websocket"],
+  ) =>
+    renderTemplate(template, {
+      name: "svc",
+      port: 8080,
+      features,
+      ...(modules === undefined ? {} : { modules }),
+    });
+
+  const mainOf = (files: readonly { path: string; content: string }[]): string => {
+    const main = files.find((file) => file.path === "src/main.cpp");
+    if (main === undefined) throw new Error("no src/main.cpp");
+    return main.content;
+  };
+
+  const manifestOf = (
+    files: readonly { path: string; content: string }[],
+  ): Record<string, unknown> => {
+    const file = files.find((entry) => entry.path === "uvp.json");
+    if (file === undefined) throw new Error("no uvp.json");
+    return JSON.parse(file.content) as Record<string, unknown>;
+  };
+
+  it("composes exactly the selected behaviours, not the template's default", () => {
+    const source = mainOf(compose("websocket-test", ["health", "echo-log"]));
+
+    expect(source).toContain('app.get("/healthz"');
+    expect(source).toContain('app.get("/api/echo-log"');
+    expect(source).toContain("constexpr size_t kMaxLogEntries");
+    expect(source).not.toContain('app.websocket("/ws"');
+    expect(source).not.toContain("app.serve_static(");
+    expect(source).not.toContain("#include <web/uvcpp_ws_connection.h>");
+  });
+
+  it("makes the same file however the module list is ordered", () => {
+    expect(mainOf(compose("websocket-test", ["echo-log", "health"]))).toBe(
+      mainOf(compose("websocket-test", ["health", "echo-log"])),
+    );
+  });
+
+  it("keeps the no-modules output identical to naming the default set", () => {
+    // Omitting `modules` means the template's default; naming the same set
+    // explicitly must land on the same bytes, or the default is a second code
+    // path that can drift.
+    expect(mainOf(compose("websocket-test", undefined))).toBe(
+      mainOf(compose("websocket-test", ["static-console", "websocket-echo", "echo-log", "health"])),
+    );
+  });
+
+  it("composes no routes when the selection is explicitly empty", () => {
+    const source = mainOf(compose("websocket-test", []));
+    expect(source).toContain("registers no routes");
+    expect(source).not.toContain("app.get(");
+    expect(source).not.toContain("app.websocket(");
+    expect(compose("websocket-test", []).some((file) => file.path === "public/index.html")).toBe(
+      false,
+    );
+  });
+
+  it("records the selection in the manifest only when it is not the default", () => {
+    expect(manifestOf(compose("websocket-test", undefined))["modules"]).toBeUndefined();
+    expect(manifestOf(compose("websocket-test", ["health", "echo-log"]))["modules"]).toEqual([
+      "health",
+      "echo-log",
+    ]);
+    // Every other template's default is no modules, so no field is written.
+    expect(manifestOf(compose("hello-http", undefined, []))["modules"]).toBeUndefined();
+  });
+
+  it("adds a module's routes to a template that has its own", () => {
+    const source = mainOf(compose("hello-http", ["echo-log"], []));
+    expect(source).toContain('app.get("/hello"');
+    expect(source).toContain('app.get("/api/echo-log"');
+    expect(templateRoutes("hello-http", [], ["echo-log"])).toEqual([
+      "GET /hello",
+      "GET /api/echo-log",
+    ]);
+  });
+
+  it("ships the console asset only when the console module is selected", () => {
+    const withoutConsole = compose("websocket-test", ["websocket-echo", "echo-log"]);
+    expect(withoutConsole.some((file) => file.path === "public/index.html")).toBe(false);
+
+    const withConsole = compose("websocket-test", ["websocket-echo", "echo-log", "static-console"]);
+    const console = withConsole.find((file) => file.path === "public/index.html");
+    expect(console).toBeDefined();
+    expect(console?.content).toContain("/api/echo-log");
+    expect(console?.content).toContain("scheme + location.host + '/ws'");
+  });
+
+  it("registers every route a composition reports, and no others", () => {
+    // The same two-way check the template table gets, for selections the table
+    // has no static entry for: what `uvp init` reports is what the source does.
+    const staticRoutes: ReadonlySet<string> = new Set([
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+    for (const modules of [
+      ["health"],
+      ["echo-log"],
+      ["websocket-echo"],
+      ["health", "echo-log", "websocket-echo", "static-console"],
+    ] as const) {
+      const source = mainOf(compose("websocket-test", modules));
+      const routes = templateRoutes("websocket-test", [], modules);
+      for (const route of routes) {
+        if (staticRoutes.has(route)) {
+          expect(source).toContain('app.serve_static("/", "./public")');
+          continue;
+        }
+        const [method, path] = route.split(" ") as [string, string];
+        const call = method === "WS" ? "websocket" : method.toLowerCase();
+        expect(source, `${modules.join(",")} does not register ${route}`).toContain(
+          `app.${call}("${path}"`,
+        );
+      }
+      const explicit = source.match(/app\.(?:get|websocket)\(/gu) ?? [];
+      const tableCalls = routes.filter((route) => !staticRoutes.has(route)).length;
+      expect(explicit.length, `${modules.join(",")} registers an unreported route`).toBe(
+        tableCalls,
+      );
+    }
   });
 });

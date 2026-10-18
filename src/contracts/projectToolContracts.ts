@@ -5,6 +5,7 @@ import { toolEnvelopeShape } from "./toolOutputSchemaPrimitives.js";
 import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_FEATURES } from "../domain/features.js";
+import { UVP_MODULES } from "../domain/modules.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
 
@@ -23,9 +24,10 @@ export const workspaceCreateContract = defineTool({
   title: "Create a libuvcpp workspace",
   description:
     "Scaffold a buildable C++ web service project wired against libuvcpp, with the requested " +
-    "transport features enabled. Writes files and refuses to overwrite a non-empty directory " +
-    "unless force is set. Returns the file manifest with digests and the routes the generated " +
-    "service registers, so the first request can be made without reading the generated source.",
+    "transport features enabled and optional application modules composed into it. Writes files " +
+    "and refuses to overwrite a non-empty directory unless force is set. Returns the file " +
+    "manifest with digests and the routes the generated service registers, so the first request " +
+    "can be made without reading the generated source.",
   kind: "workspace",
   inputSchema: z.object({
     path: z.string().min(1).describe("Absolute path to create the workspace at."),
@@ -59,6 +61,16 @@ export const workspaceCreateContract = defineTool({
           "in-memory map, and the other templates carry it as a build requirement only.",
       ),
     port: z.number().int().min(1).max(65535).default(8080),
+    modules: z
+      .array(z.enum(UVP_MODULES))
+      .optional()
+      .describe(
+        "Application modules to compose into the generated service. Absent means the template's " +
+          "own default: `websocket-test` composes all four, every other template none. " +
+          "`websocket-echo` needs the `websocket` feature, and `static-console` composes " +
+          "`websocket-echo` and `echo-log`. A module whose exact route the template already " +
+          "serves is refused, as is any module on `http3-service`.",
+      ),
     force: z
       .boolean()
       .default(false)
@@ -69,6 +81,12 @@ export const workspaceCreateContract = defineTool({
     workspace_id: workspaceIdSchema,
     path: z.string(),
     template: z.string(),
+    /**
+     * The application modules the workspace was composed from, in canonical
+     * order, after the template's default was applied and dependencies were
+     * checked. This is the set the generated source and `uvp.json` agree on.
+     */
+    modules: z.array(z.enum(UVP_MODULES)),
     files: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),
     /**
      * The routes the generated service registers, as `METHOD /path`.

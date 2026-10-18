@@ -20,6 +20,7 @@ const base = {
   scheme: "http",
   features: [],
   unrecognisedFeatures: [],
+  unrecognisedModules: [],
   path: "/w/svc/uvp.json",
 } as const satisfies Omit<WorkspaceManifest, "toolchain" | "toolchainProblem">;
 

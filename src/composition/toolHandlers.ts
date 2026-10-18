@@ -281,6 +281,7 @@ export const createToolHandlers = (
           features: input.features,
           port: input.port,
           force: input.force,
+          ...(input.modules === undefined ? {} : { modules: input.modules }),
         });
 
         record(recorder, {
@@ -309,6 +310,7 @@ export const createToolHandlers = (
           workspace_id: created.workspaceId,
           path: created.path,
           template: created.template,
+          modules: [...created.modules],
           files: created.files.map((file) => ({
             path: file.path,
             bytes: file.bytes,

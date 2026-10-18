@@ -282,6 +282,7 @@ export const createWorkspace = async (
   template: string,
   port: number,
   features: readonly string[] = [],
+  modules?: readonly string[],
 ): Promise<Workspace> => {
   const root = join(scratch(), `${template}-${String((made += 1))}`);
   const init = await runCli([
@@ -297,6 +298,10 @@ export const createWorkspace = async (
     // set a plain web service needs — is what applies. A lane that passed `""`
     // would be testing a workspace no caller can produce.
     ...(features.length === 0 ? [] : ["--features", features.join(",")]),
+    // Given rather than omitted when the caller names a selection, including an
+    // empty one: `--modules ""` is an explicit "none", which the command
+    // preserves on purpose.
+    ...(modules === undefined ? [] : ["--modules", modules.join(",")]),
     "--json",
   ]);
   if (init.exit !== 0) {

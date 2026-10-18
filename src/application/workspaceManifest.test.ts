@@ -7,6 +7,7 @@ import { renderTemplate } from "./templates.js";
 import type { TemplateId } from "./templates.js";
 import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
 import type { UvpFeature } from "../domain/features.js";
+import type { UvpModule } from "../domain/modules.js";
 
 /**
  * What a manifest means, checked against what a workspace writes.
@@ -64,10 +65,17 @@ afterEach(async () => {
 const writeWorkspace = async (
   template: TemplateId,
   features: readonly UvpFeature[],
+  modules?: readonly UvpModule[],
 ): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "uvp-manifest-"));
   directories.push(root);
-  for (const file of renderTemplate(template, { name: "svc", port: 8080, features })) {
+  const files = renderTemplate(template, {
+    name: "svc",
+    port: 8080,
+    features,
+    ...(modules === undefined ? {} : { modules }),
+  });
+  for (const file of files) {
     const target = join(root, file.path);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, file.content);
@@ -150,6 +158,7 @@ describe("the toolchain declaration", () => {
       scheme: "http",
       features: [],
       unrecognisedFeatures: [],
+      unrecognisedModules: [],
       toolchain: { kind: "local" },
       path: join(root, "uvp.json"),
     });
@@ -243,6 +252,61 @@ describe("the feature list", () => {
   });
 });
 
+describe("the module list", () => {
+  it("round-trips a selection the generator recorded", async () => {
+    const root = await writeWorkspace("websocket-test", ["websocket"], ["health", "echo-log"]);
+    const manifest = await manifestAt(root);
+    expect(manifest?.modules).toEqual(["health", "echo-log"]);
+    expect(manifest?.unrecognisedModules).toEqual([]);
+  });
+
+  it("reads an absent field as the template's default rather than as none", async () => {
+    // `--modules` was not passed, so the field is not written: the generated
+    // source composes the template's default, and "absent" has to stay
+    // distinguishable from an explicit empty selection.
+    const root = await writeWorkspace("websocket-test", ["websocket"]);
+    const manifest = await manifestAt(root);
+    expect(manifest?.modules).toBeUndefined();
+    expect(manifest?.unrecognisedModules).toStrictEqual([]);
+  });
+
+  it("keeps a manifest written before modules existed valid", async () => {
+    const read = await readWorkspaceManifest(await manifestRoot({ name: "svc" }));
+    expect(read.state).toBe("read");
+    const manifest = manifestOf(read);
+    expect(manifest?.modules).toBeUndefined();
+    expect(manifest?.unrecognisedModules).toStrictEqual([]);
+  });
+
+  it("reports an unknown module name beside the ones it kept", async () => {
+    const manifest = await manifestAt(
+      await manifestRoot({
+        name: "svc",
+        template: "websocket-test",
+        modules: ["health", "quantum"],
+      }),
+    );
+    expect(manifest?.modules).toEqual(["health"]);
+    expect(manifest?.unrecognisedModules).toEqual(["quantum"]);
+  });
+
+  it("keeps an explicitly empty selection distinct from an absent one", async () => {
+    const manifest = await manifestAt(await manifestRoot({ name: "svc", modules: [] }));
+    expect(manifest?.modules).toStrictEqual([]);
+  });
+
+  it.each([
+    ["a `modules` that is a string", { name: "svc", modules: "health" }],
+    ["a `modules` entry that is not a string", { name: "svc", modules: ["health", 7] }],
+  ])("refuses %s rather than answering a composition it did not read", async (_label, body) => {
+    // Folding a malformed declaration into "absent" would answer the template
+    // default on behalf of a file that said something else.
+    const read = await readWorkspaceManifest(await manifestRoot(body));
+    expect(read.state).toBe("unreadable");
+    expect(manifestProblemOf(read)).toContain("modules");
+  });
+});
+
 describe("the fields a manifest carries", () => {
   it("reads every field it states, and derives the transport from the features", async () => {
     const root = await manifestRoot({
@@ -262,6 +326,7 @@ describe("the fields a manifest carries", () => {
       scheme: "https",
       features: ["tls"],
       unrecognisedFeatures: ["quantum"],
+      unrecognisedModules: [],
       requiredLibuvcpp: "1.7.0",
       toolchain: { kind: "container", image: "localhost/uvp-base:12" },
       path: join(root, "uvp.json"),
@@ -280,6 +345,7 @@ describe("the fields a manifest carries", () => {
       scheme: "http",
       features: [],
       unrecognisedFeatures: [],
+      unrecognisedModules: [],
       path: join(root, "uvp.json"),
     });
   });
@@ -298,6 +364,7 @@ describe("the fields a manifest carries", () => {
       scheme: "http",
       features: [],
       unrecognisedFeatures: [],
+      unrecognisedModules: [],
       path: join(root, "uvp.json"),
     });
   });
@@ -318,6 +385,7 @@ describe("the fields a manifest carries", () => {
       scheme: "http",
       features: [],
       unrecognisedFeatures: [],
+      unrecognisedModules: [],
       path: join(root, "uvp.json"),
     });
   });
@@ -331,6 +399,7 @@ describe("the fields a manifest carries", () => {
       scheme: "http",
       features: [],
       unrecognisedFeatures: [],
+      unrecognisedModules: [],
       path: join(root, "uvp.json"),
     });
   });

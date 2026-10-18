@@ -134,6 +134,37 @@ The switches that would enable them are emitted as comments in the generated
 `CMakeLists.txt`, because a feature cannot be retrofitted into an installed
 library.
 
+### Application modules
+
+`--modules` composes uvp's own application code into the template. These are not
+libuvcpp build switches: a feature says what the library was built with, a module
+says what uvp writes into `src/main.cpp`.
+
+| Module           | What it adds                                                           |
+| ---------------- | ---------------------------------------------------------------------- |
+| `health`         | `GET /healthz` answering `{"status":"ok"}`                             |
+| `echo-log`       | a bounded in-memory log of arriving messages, with `GET /api/echo-log` |
+| `websocket-echo` | `WS /ws`, echoing text and binary frames and reporting ping/close      |
+| `static-console` | `public/index.html`, a page that drives the echo route and the log     |
+
+```bash
+uvp init ./svc --name svc --template websocket-test --modules health,echo-log
+```
+
+`websocket-test` is the four modules by default; every other template composes
+none unless you ask, and the routes it already serves stay. Some combinations are
+refused before a file is written: an unknown or repeated name, `websocket-echo`
+without `--features websocket`, `static-console` without the two modules its page
+drives, and a module whose exact route the template already registers (`health`
+on `rest-api`, for example). `http3-service` composes no modules at all — it is
+written against `uvcpp_http_server`, and the modules are written against
+`uvcpp_web_app`.
+
+The selection is recorded in `uvp.json` as `modules` when it differs from the
+template's default; a workspace generated without `--modules` keeps the manifest
+it had before the field existed. The list is a set, not an order: the generated
+files are the same however the names were typed.
+
 Two features change the generated code rather than only the build. `http2` turns
 on cleartext HTTP/2 on the same port. `tls` makes the service serve **HTTPS and
 refuse to start rather than fall back to cleartext** — the one failure nobody can
