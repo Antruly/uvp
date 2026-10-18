@@ -20,6 +20,7 @@ import {
   waitForOutput,
 } from "../support/realLibuvcpp.js";
 import type { RealLibuvcpp } from "../support/realLibuvcpp.js";
+import { closeFramePayload, exchangeWebSocketFrames } from "../support/websocketFrames.js";
 
 /**
  * The self-proof: six templates, built by a real CMake against a real libuvcpp,
@@ -82,6 +83,7 @@ const PORT_BY_TEMPLATE: Record<TemplateId, number> = {
   "hello-http": 8090,
   "rest-api": 8091,
   "websocket-echo": 8092,
+  "websocket-test": 8096,
   "soap-service": 8093,
   "static-files": 8094,
   "http3-service": 8095,
@@ -250,6 +252,116 @@ const install = (): RealLibuvcpp => {
   return realLibuvcpp;
 };
 
+const websocketTestService = async (): Promise<void> => {
+  const workspace = await builtTemplate("websocket-test");
+  const port = workspace.port;
+  const service = await startService(workspace);
+  try {
+    const echo = await runCli([
+      "ws",
+      `ws://127.0.0.1:${String(port)}/ws`,
+      "--send",
+      "hello",
+      "--json",
+    ]);
+    expect(echo.exit).toBe(EXIT_OK);
+    const result = resultOrThrow(echo);
+    expect(result["upgraded"]).toBe(true);
+    const frames = result["frames"] as readonly {
+      readonly direction: string;
+      readonly text?: string;
+    }[];
+    expect(frames.filter((frame) => frame.direction === "sent").map((frame) => frame.text)).toEqual(
+      ["hello"],
+    );
+    expect(
+      frames.filter((frame) => frame.direction === "received").map((frame) => frame.text),
+    ).toEqual(["hello"]);
+
+    // A control character with no short JSON escape. The log endpoint
+    // serializes what arrived, so the byte either gets the universal form
+    // or the whole response stops parsing.
+    const control = "a\u0001b";
+    const controlEcho = await runCli([
+      "ws",
+      `ws://127.0.0.1:${String(port)}/ws`,
+      "--send",
+      control,
+      "--json",
+    ]);
+    expect(controlEcho.exit).toBe(EXIT_OK);
+    expect(
+      (resultOrThrow(controlEcho)["frames"] as readonly { readonly text?: string }[]).some(
+        (frame) => frame.text === control,
+      ),
+    ).toBe(true);
+
+    // Binary frames, PING, and CLOSE are outside what `uvp ws` sends; the
+    // raw client drives them and the service's own stdout says whether the
+    // handlers ran.
+    const payload = Buffer.from([0x00, 0x01, 0xfe, 0xff]);
+    const exchange = await exchangeWebSocketFrames(port, "/ws", [
+      { opcode: "binary", payload },
+      { opcode: "ping", payload: Buffer.from("abc") },
+      { opcode: "close", payload: closeFramePayload(1000, "bye") },
+    ]);
+    expect(exchange.status).toBe(101);
+    const echoed = exchange.frames.find((frame) => frame.opcode === "binary");
+    expect(echoed, "the service did not echo the binary frame").toBeDefined();
+    expect(echoed?.payload.equals(payload)).toBe(true);
+    expect(await waitForOutput(service, /\[ping\] 3 bytes/u)).toBeDefined();
+    expect(await waitForOutput(service, /\[close\] code=1000 reason=bye/u)).toBeDefined();
+
+    const log = await runCli(["http", `http://127.0.0.1:${String(port)}/api/echo-log`, "--json"]);
+    const logResult = resultOrThrow(log);
+    expect(logResult["status"]).toBe(200);
+    const said = bodyText(logResult);
+    const parsed = JSON.parse(said) as {
+      readonly retained: number;
+      readonly dropped: number;
+      readonly entries: readonly { readonly type: string; readonly payload: string }[];
+    };
+    expect(parsed.retained).toBeGreaterThanOrEqual(1);
+    expect(parsed.dropped).toBe(0);
+    expect(parsed.entries.some((entry) => entry.type === "text" && entry.payload === "hello")).toBe(
+      true,
+    );
+    expect(parsed.entries.some((entry) => entry.type === "text" && entry.payload === control)).toBe(
+      true,
+    );
+    expect(
+      parsed.entries.some(
+        (entry) => entry.type === "binary" && entry.payload === "00 01 fe ff (4 bytes)",
+      ),
+    ).toBe(true);
+
+    // The console is the static route the template adds; a page that does
+    // not mention the log endpoint is not the console the template promises.
+    const page = bodyText(
+      resultOrThrow(await runCli(["http", `http://127.0.0.1:${String(port)}/`, "--json"])),
+    );
+    expect(page).toContain("WebSocket test");
+    expect(page).toContain("/api/echo-log");
+
+    observed.push({ template: "websocket-test", said });
+  } finally {
+    await service.stop();
+  }
+
+  expect(isAlive(service.pid)).toBe(false);
+  expect(await portIsFree(port)).toBe(true);
+};
+
+const coveredEveryTemplate = (): void => {
+  // The vacuity guard. Six passing tests above are only the documented
+  // table if they are the six templates — a lane that quietly stopped
+  // exercising one, or that a new template never reached, would otherwise
+  // report the same green.
+  expect(observed.map((row) => row.template)).toEqual([...TEMPLATE_IDS]);
+  expect(Object.keys(PORT_BY_TEMPLATE).sort()).toEqual([...TEMPLATE_IDS].sort());
+  expect(observed.every((row) => row.said !== "")).toBe(true);
+};
+
 describe.skipIf(realLibuvcpp === undefined)(
   realLibuvcpp === undefined
     ? `real CMake and real libuvcpp — skipped: ${skipReason}`
@@ -385,6 +497,11 @@ describe.skipIf(realLibuvcpp === undefined)(
       expect(await portIsFree(port)).toBe(true);
     });
 
+    it(
+      "websocket-test: echoes a frame and reports a bounded echo log on :8096",
+      websocketTestService,
+    );
+
     it("soap-service: returns an envelope for a call on :8093", async () => {
       const workspace = await builtTemplate("soap-service");
       const port = workspace.port;
@@ -450,14 +567,6 @@ describe.skipIf(realLibuvcpp === undefined)(
 
     it("http3-service: opens both legs on :8095 and answers on the route table", http3Service);
 
-    it("covered every template, so a green run is the whole table", () => {
-      // The vacuity guard. Six passing tests above are only the documented
-      // table if they are the six templates — a lane that quietly stopped
-      // exercising one, or that a new template never reached, would otherwise
-      // report the same green.
-      expect(observed.map((row) => row.template)).toEqual([...TEMPLATE_IDS]);
-      expect(Object.keys(PORT_BY_TEMPLATE).sort()).toEqual([...TEMPLATE_IDS].sort());
-      expect(observed.every((row) => row.said !== "")).toBe(true);
-    });
+    it("covered every template, so a green run is the whole table", coveredEveryTemplate);
   },
 );

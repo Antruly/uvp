@@ -24,6 +24,7 @@ export const TEMPLATE_IDS = [
   "hello-http",
   "rest-api",
   "websocket-echo",
+  "websocket-test",
   "soap-service",
   "static-files",
   "http3-service",
@@ -129,6 +130,16 @@ export const templateRoutes = (
       ];
     case "websocket-echo":
       return ["GET /healthz", "WS /echo"];
+    case "websocket-test":
+      return [
+        "GET /healthz",
+        "GET /api/echo-log",
+        "WS /ws",
+        "GET /",
+        "HEAD /",
+        "GET /*path",
+        "HEAD /*path",
+      ];
     case "soap-service":
       return ["POST /ws"];
     case "static-files":
@@ -815,6 +826,227 @@ ${webAppSetup(input)}
   });
 ${webTail(input)}`;
 
+const websocketTestMain = (input: TemplateInput): string =>
+  `${webPreamble(input, [
+    "#include <web/uvcpp_ws_connection.h>",
+    "#include <uvcpp/uvcpp_threadpool.h>",
+    "#include <chrono>",
+    "#include <cstdint>",
+    "#include <deque>",
+    "#include <iomanip>",
+    "#include <mutex>",
+    "#include <sstream>",
+    "#include <utility>",
+    "#include <vector>",
+  ])}
+namespace {
+
+// One message as the server saw it. A text payload is kept verbatim; a binary
+// payload is a short hex summary and its length, because a test console should
+// not turn into an unbounded copy of every byte a peer sent.
+struct LogEntry {
+  long long ts;
+  std::string type;
+  std::string payload;
+};
+
+constexpr size_t kMaxLogEntries = 100;
+
+std::mutex g_log_mutex;
+std::deque<LogEntry> g_log;
+size_t g_dropped = 0;
+
+long long NowMs() {
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+std::string HexSummary(const uint8_t* data, size_t len) {
+  const size_t shown = len < 32 ? len : 32;
+  std::ostringstream out;
+  out << std::hex << std::setfill('0');
+  for (size_t i = 0; i < shown; ++i) {
+    out << std::setw(2) << static_cast<int>(data[i]);
+    if (i + 1 < shown) out << ' ';
+  }
+  if (len > shown) out << " ...";
+  out << " (" << std::dec << len << " bytes)";
+  return out.str();
+}
+
+// Escape the characters a JSON string cannot carry. The numeric constants keep
+// the generated source free of backslash literals, which are the one thing a
+// template string makes easy to get wrong.
+std::string JsonEscape(const std::string& text) {
+  const char quote = static_cast<char>(34);
+  const char backslash = static_cast<char>(92);
+  std::string out;
+  out.reserve(text.size());
+  for (char c : text) {
+    if (c == quote) {
+      out += backslash;
+      out += quote;
+    } else if (c == backslash) {
+      out += backslash;
+      out += backslash;
+    } else if (c == static_cast<char>(10)) {
+      out += backslash;
+      out += 'n';
+    } else if (c == static_cast<char>(13)) {
+      out += backslash;
+      out += 'r';
+    } else if (c == static_cast<char>(9)) {
+      out += backslash;
+      out += 't';
+    } else if (static_cast<unsigned char>(c) < 32) {
+      // The two-letter escapes above cover only three of the control
+      // characters a peer may put in a text frame. JSON has no other short
+      // spelling, so the rest take the universal form, which keeps the
+      // document parseable; emitting the byte would produce a string no
+      // parser accepts.
+      static const char kHex[] = "0123456789abcdef";
+      const unsigned char byte = static_cast<unsigned char>(c);
+      out += backslash;
+      out += 'u';
+      out += '0';
+      out += '0';
+      out += kHex[(byte >> 4) & 0x0f];
+      out += kHex[byte & 0x0f];
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+void PushLog(LogEntry entry) {
+  std::lock_guard<std::mutex> lock(g_log_mutex);
+  g_log.push_back(std::move(entry));
+  while (g_log.size() > kMaxLogEntries) {
+    g_log.pop_front();
+    ++g_dropped;
+  }
+}
+
+}  // namespace
+
+// A WebSocket test console: a health route, a bounded log of what the server
+// received, an echo endpoint, and a static page that drives it. The log is the
+// data a first-time user can read back without attaching a debugger.
+int main() {
+  // Size libuv's pool before the first submission; 0 means one per CPU.
+  uvcpp_set_threadpool_size(0);
+${webAppSetup(input)}
+
+  app.get("/healthz", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+    resp.status(200).json_str(R"({"status":"ok"})");
+    resp.end();
+  });
+
+  // The log endpoint reports both what it kept and what the bound dropped.
+  // A reader that saw only the entries would not know the window moved.
+  app.get("/api/echo-log", [](uvcpp_web_request&, uvcpp_web_response& resp, uvcpp_web_next) {
+    std::vector<LogEntry> entries;
+    size_t dropped = 0;
+    {
+      std::lock_guard<std::mutex> lock(g_log_mutex);
+      entries.assign(g_log.begin(), g_log.end());
+      dropped = g_dropped;
+    }
+
+    std::string body = R"({"retained":)" + std::to_string(entries.size()) +
+                       R"(,"dropped":)" + std::to_string(dropped) + R"(,"entries":[)";
+    bool first = true;
+    for (const auto& entry : entries) {
+      if (!first) body += ",";
+      first = false;
+      body += R"({"ts":)" + std::to_string(entry.ts) + R"(,"type":")" + entry.type +
+              R"(","payload":")" + JsonEscape(entry.payload) + R"("})";
+    }
+    body += "]}";
+    resp.status(200).json_str(body);
+    resp.end();
+  });
+
+  app.websocket("/ws", [](uvcpp_web_ws_request& ws) {
+    uvcpp_ws_connection* connection = ws.connection();
+    if (connection == nullptr) return;
+
+    connection->on_text([connection](const std::string& message) {
+      PushLog({NowMs(), "text", message});
+      connection->send_text(message.data(), message.size());
+    });
+
+    connection->on_binary([connection](const uint8_t* data, size_t len) {
+      PushLog({NowMs(), "binary", HexSummary(data, len)});
+      connection->send_binary(reinterpret_cast<const char*>(data), len);
+    });
+
+    connection->on_ping([](const uint8_t* data, size_t len) {
+      (void)data;
+      std::cout << "[ping] " << len << " bytes\\n" << std::flush;
+    });
+
+    connection->on_close([](ws_close_code code, const std::string& reason) {
+      std::cout << "[close] code=" << static_cast<int>(code)
+                << " reason=" << (reason.empty() ? "(empty)" : reason) << "\\n" << std::flush;
+    });
+  });
+
+  // Run from the project root: a relative document root is resolved there.
+  app.serve_static("/", "./public");
+
+${webTail(input)}`;
+
+const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>${input.name} WebSocket test</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+  textarea { width: 100%; height: 4rem; }
+  pre { background: #111; color: #eee; padding: 1rem; min-height: 12rem; overflow: auto; }
+  button { margin-right: .5rem; }
+</style>
+<h1>${input.name}</h1>
+<p>Connect, send a message, and load the server's bounded echo log.</p>
+<textarea id="message">hello</textarea>
+<div>
+  <button id="connect">Connect</button>
+  <button id="send">Send</button>
+  <button id="load-log">Load echo log</button>
+</div>
+<pre id="output"></pre>
+<script>
+  let socket = null;
+  const output = document.getElementById('output');
+  const write = (line) => { output.textContent += line + String.fromCharCode(10); };
+  document.getElementById('connect').onclick = () => {
+    if (socket !== null) socket.close();
+    // The console is served from the same origin as the route, so a page
+    // loaded over HTTPS needs the secure scheme: a cleartext socket from a
+    // secure page is blocked, and the upgrade would never arrive.
+    const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    socket = new WebSocket(scheme + location.host + '/ws');
+    socket.onopen = () => write('connected');
+    socket.onmessage = (event) => write('recv: ' + event.data);
+    socket.onclose = (event) => write('closed: ' + event.code + ' ' + event.reason);
+  };
+  document.getElementById('send').onclick = () => {
+    const text = document.getElementById('message').value;
+    if (socket !== null && socket.readyState === WebSocket.OPEN) {
+      socket.send(text);
+      write('sent: ' + text);
+    }
+  };
+  document.getElementById('load-log').onclick = async () => {
+    const response = await fetch('/api/echo-log');
+    write(JSON.stringify(await response.json(), null, 2));
+  };
+</script>
+</html>
+`;
+
 const soapServiceMain = (input: TemplateInput): string =>
   `${webPreamble(input)}
 namespace {
@@ -1071,6 +1303,7 @@ const MAIN_BY_TEMPLATE: Record<TemplateId, (input: TemplateInput) => string> = {
   "hello-http": helloHttpMain,
   "rest-api": restApiMain,
   "websocket-echo": websocketEchoMain,
+  "websocket-test": websocketTestMain,
   "soap-service": soapServiceMain,
   "static-files": staticFilesMain,
   "http3-service": http3ServiceMain,
@@ -1320,6 +1553,9 @@ export const renderTemplate = (
       path: "public/index.html",
       content: `<!doctype html>\n<title>${input.name}</title>\n<h1>${input.name}</h1>\n`,
     });
+  }
+  if (template === "websocket-test") {
+    files.push({ path: "public/index.html", content: websocketTestConsole(input) });
   }
   return files;
 };

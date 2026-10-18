@@ -113,6 +113,7 @@ Scaffolds a CMake project. Writes files; starts nothing; builds nothing.
 | `hello-http`     | One route, `GET /hello`, returning JSON. The smallest thing. |
 | `rest-api`       | A collection with `GET`/`POST` and JSON in and out.          |
 | `websocket-echo` | An upgrade endpoint that echoes frames back.                 |
+| `websocket-test` | Health, a bounded echo log, a WS echo, and a static console. |
 | `soap-service`   | A SOAP endpoint with a hand-written envelope.                |
 | `static-files`   | Serves a directory over HTTP.                                |
 
@@ -122,11 +123,11 @@ same list is the `routes` field of `uvp_workspace_create`. A path that is not in
 it is a 404 from a service that is working exactly as generated, not a failure
 to diagnose.
 
-`rest-api` and `websocket-echo` need `UVCPP_BUILD_WEBAPP=ON` in the libuvcpp you
-built against. `uvp init` does not check that — `uvp doctor` does, and the
-generated code has a compile-time guard that turns a missing module into one
-readable error instead of a cascade of unknown-identifier failures inside
-libuvcpp's own headers.
+`rest-api`, `websocket-echo`, and `websocket-test` need `UVCPP_BUILD_WEBAPP=ON` in
+the libuvcpp you built against. `uvp init` does not check that — `uvp doctor`
+does, and the generated code has a compile-time guard that turns a missing module
+into one readable error instead of a cascade of unknown-identifier failures
+inside libuvcpp's own headers.
 
 Pass `--features` to add the guards and the CMake surface for optional modules.
 The switches that would enable them are emitted as comments in the generated

@@ -21,7 +21,7 @@ Follow [the AI development workflow](agent-workflow.md) and
   `remote-ssh/` (blocked on verification), two CI observations/flakes, and the
   Ubuntu 26.04 migration watch.
 - **Milestone 1:** complete. The full describe → generate → build → run → probe →
-  evidence loop works for all six templates against real libuvcpp.
+  evidence loop works for all seven templates against real libuvcpp.
 - **Milestone 2:** the `container` provider is written and passes the provider
   conformance suite; `remote-ssh/` is not written and is blocked on a real
   verification route, not on appetite.

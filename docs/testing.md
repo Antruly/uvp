@@ -388,15 +388,15 @@ These require `npm run compile` to have run first. They exercise the artifacts
 that ship: the CLI as a process, the MCP server as a process, the packaged
 tarball.
 
-| Project            | Covers                                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `boundary`         | Import-surface rules across built output                                                                     |
-| `cli-boundary`     | The CLI driven as a subprocess, including `uvp setup`'s write path                                           |
-| `process-boundary` | Process supervision: start, readiness, stop, orphans                                                         |
-| `mcp-boundary`     | The MCP server over real stdio                                                                               |
-| `toolchain`        | Real CMake and real libuvcpp: six templates, a database-backed one, a failing build, both provider contracts |
-| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                                         |
-| `process-global`   | What a call leaves in the process it ran in, and whose session it is                                         |
+| Project            | Covers                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `boundary`         | Import-surface rules across built output                                                                       |
+| `cli-boundary`     | The CLI driven as a subprocess, including `uvp setup`'s write path                                             |
+| `process-boundary` | Process supervision: start, readiness, stop, orphans                                                           |
+| `mcp-boundary`     | The MCP server over real stdio                                                                                 |
+| `toolchain`        | Real CMake and real libuvcpp: seven templates, a database-backed one, a failing build, both provider contracts |
+| `acceptance`       | The whole closure through `uvp verify`, and the assertion vocabulary                                           |
+| `process-global`   | What a call leaves in the process it ran in, and whose session it is                                           |
 
 `toolchain` is serial (`maxWorkers: 1`, `fileParallelism: false`) because it
 configures and compiles real CMake projects, and two of those at once on one
@@ -412,13 +412,13 @@ not a red one they learn to ignore.
 When libuvcpp _is_ present, the test:
 
 1. runs `uvp doctor` and asserts the reported version is at or above the floor,
-2. generates each of the six templates,
+2. generates each of the seven templates,
 3. configures and compiles each one,
 4. starts each one **on its own port** and waits for readiness,
 5. drives a real request and asserts on the response,
 6. stops it and asserts the process is gone.
 
-Each template gets a distinct port (8090–8095 in the reference run). Sequential
+Each template gets a distinct port (8090–8096 in the reference run). Sequential
 probes sharing one port was the cause of a long-standing intermittent failure
 that looked like a flaky server and was actually a previous test's socket still
 in `TIME_WAIT`.
@@ -429,6 +429,7 @@ The verified output of that pass, against libuvcpp 1.7.0:
 ### hello-http      :8090 -> {"message":"Hello, AI"}
 ### rest-api        :8091 -> {"id":"1","value":"first"}
 ### websocket-echo  :8092 -> HTTP/1.1 101 Switching Protocols
+### websocket-test  :8096 -> {"retained":1,"dropped":0,"entries":[…]}
 ### soap-service    :8093 -> <?xml version="1.0" encoding="utf-8"?><soap:Envelope …
 ### static-files    :8094 -> <!doctype html>
 ### http3-service   :8095 -> hello over HTTP/3
@@ -503,7 +504,7 @@ cannot be read. `npm run verify:reporters` is what keeps the two in step.
 ### A build that fails
 
 `tests/toolchain/buildFailure.test.ts` is the other half of the same claim. A
-green run of six templates says the templates work; this says a workspace that
+green run of seven templates says the templates work; this says a workspace that
 does **not** build is reported as one. Both halves serve the same caller, because
 "your workspace is broken", "the library is missing", and "this tool could not
 tell" are three different next steps.
