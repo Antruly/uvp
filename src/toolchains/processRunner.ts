@@ -57,6 +57,15 @@ export interface RunProcessOptions {
   /** Replace the child's environment entirely rather than extending it. */
   readonly replaceEnv?: boolean;
   /**
+   * Route the invocation through the platform shell.
+   *
+   * Only for executables the platform cannot spawn directly — on Windows,
+   * `npm` is `npm.cmd`, and a bare spawn of a `.cmd` file is not executable.
+   * Only pass fixed words: with a shell the command and arguments are joined
+   * into one command line, so anything a caller supplied would be interpreted.
+   */
+  readonly shell?: boolean;
+  /**
    * Text to write to the child's stdin, which is then closed.
    *
    * A request handed to a child this way is not a command line: it has no length
@@ -210,6 +219,7 @@ export const runProcess = async (options: RunProcessOptions): Promise<ProcessOut
         }),
     stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     windowsHide: true,
+    ...(options.shell === true ? { shell: true } : {}),
   });
 
   if (options.stdin !== undefined) {

@@ -5,7 +5,7 @@ import type { TemplateId } from "./templates.js";
 import type { UvpEventPayloadPolicy } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import type { UvpFeature } from "../domain/features.js";
-import { UVP_FRONTENDS, type UvpFrontend } from "../domain/frontends.js";
+import { UVP_FRONTENDS, type UvpFrontend, type UvpFrontendSelection } from "../domain/frontends.js";
 import type { UvpModule } from "../domain/modules.js";
 
 /**
@@ -827,7 +827,7 @@ describe("application module composition", () => {
  */
 const withFrontends = (
   template: TemplateId,
-  frontends: readonly UvpFrontend[],
+  frontends: readonly UvpFrontendSelection[],
   options: { modules?: readonly UvpModule[]; features?: readonly UvpFeature[] } = {},
 ): readonly { path: string; content: string }[] =>
   renderTemplate(template, {
@@ -962,5 +962,110 @@ describe("static frontend composition", () => {
     expect(
       withFrontends("hello-http", []).find((file) => file.path === "README.md")?.content,
     ).not.toContain("## Frontend");
+  });
+});
+
+describe("frontend app composition", () => {
+  it("writes a standalone frontend project and no public/ document root", () => {
+    const files = withFrontends("hello-http", ["vue3"]);
+    for (const path of [
+      "frontend/package.json",
+      "frontend/package-lock.json",
+      "frontend/vite.config.js",
+      "frontend/index.html",
+      "frontend/src/main.js",
+      "frontend/src/App.vue",
+      "frontend/src/style.css",
+      "frontend/README.md",
+    ]) {
+      expect(pathOf(files, path), path).toBe(true);
+    }
+    expect(files.some((file) => file.path.startsWith("public/"))).toBe(false);
+    // Node is not part of the C++ build: the CMake file must not mention it.
+    const cmake = files.find((file) => file.path === "CMakeLists.txt")?.content ?? "";
+    expect(cmake).not.toContain("npm");
+    expect(cmake).not.toContain("frontend");
+  });
+
+  it("serves frontend/dist only when the build output exists", () => {
+    const source = mainOf(withFrontends("hello-http", ["vue3"]));
+    expect(source).toContain("#include <fstream>");
+    expect(source).not.toContain("#include <filesystem>");
+    expect(source).toContain('std::ifstream frontend_entry("./frontend/dist/index.html");');
+    expect(source).toContain("if (frontend_entry.good()) {");
+    expect(source).toContain('app.serve_static("/", "./frontend/dist", frontend_options);');
+    expect(source).toContain("frontend_options.spa_fallback = true;");
+    // A missing document root is a 500 for every request in libuvcpp's static
+    // server, so the unbuilt path must answer with the instruction instead.
+    expect(source).toContain("resp.status(503)");
+    expect(source).toContain("npm ci && npm run build");
+    // serve_static is the fallback; the template's own route still wins.
+    expect(source.indexOf('app.get("/hello"')).toBeLessThan(
+      source.indexOf("if (frontend_entry.good())"),
+    );
+  });
+
+  it("reports the document-root routes a built app serves", () => {
+    expect(templateRoutes("hello-http", [], [], ["vue3"])).toEqual([
+      "GET /hello",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+    // The templates that own the root keep their own route list.
+    expect(templateRoutes("static-files", [], undefined, ["react"])).toEqual([
+      "GET /healthz",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+  });
+
+  it("records the app in the manifest and documents the build", () => {
+    const files = withFrontends("hello-http", ["svelte"]);
+    expect(manifestOf(files)["frontends"]).toEqual(["svelte"]);
+    const readme = files.find((file) => file.path === "README.md")?.content ?? "";
+    expect(readme).toContain("## Frontend");
+    expect(readme).toContain("npm ci");
+    expect(readme).toContain("frontend/dist");
+    expect(readme).toContain("503");
+    expect(readme).toContain("^22.19.0 || ^24.11.0 || >=26.0.0");
+  });
+
+  it("writes each framework with its own entry, component, and pinned manifest", () => {
+    const cases = [
+      { app: "vue3", entry: "frontend/src/main.js", component: "frontend/src/App.vue" },
+      { app: "react", entry: "frontend/src/main.jsx", component: "frontend/src/App.jsx" },
+      { app: "svelte", entry: "frontend/src/main.js", component: "frontend/src/App.svelte" },
+    ] as const;
+    for (const { app, entry, component } of cases) {
+      const files = withFrontends("rest-api", [app]);
+      expect(pathOf(files, entry), `${app} ${entry}`).toBe(true);
+      const componentFile = files.find((file) => file.path === component);
+      expect(componentFile?.content, `${app} ${component}`).toContain("svc");
+      const manifestText =
+        files.find((file) => file.path === "frontend/package.json")?.content ?? "";
+      const manifestJson = JSON.parse(manifestText) as {
+        devDependencies: Record<string, string>;
+      };
+      const versions = Object.values({
+        ...(manifestJson.devDependencies as Record<string, string>),
+      });
+      expect(versions.length, app).toBeGreaterThan(0);
+      for (const version of versions) expect(version, app).toMatch(/^\d+\.\d+\.\d+$/u);
+    }
+  });
+
+  it("composes an app on a WebSocket template without disturbing its routes", () => {
+    const files = withFrontends("websocket-echo", ["react"], { features: ["websocket"] });
+    expect(mainOf(files)).toContain('app.websocket("/echo"');
+    expect(mainOf(files)).toContain("if (frontend_entry.good()) {");
+    expect(manifestOf(files)["frontends"]).toEqual(["react"]);
+  });
+
+  it("renders the same files for the same app regardless of how it was named", () => {
+    expect(withFrontends("hello-http", ["vue3"])).toEqual(withFrontends("hello-http", ["vue3"]));
   });
 });

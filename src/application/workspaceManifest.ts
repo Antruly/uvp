@@ -7,7 +7,7 @@ import {
   type UvpEventPayloadPolicy,
 } from "../domain/eventPayloadPolicy.js";
 import { isUvpFeature, type UvpFeature } from "../domain/features.js";
-import { isUvpFrontend, type UvpFrontend } from "../domain/frontends.js";
+import { isUvpFrontendSelection, type UvpFrontendSelection } from "../domain/frontends.js";
 import { isUvpModule, type UvpModule } from "../domain/modules.js";
 import { isToolchainKind, type ToolchainSelection } from "../domain/toolchain.js";
 
@@ -71,7 +71,7 @@ export interface WorkspaceManifest {
    * template default to fall back to. A name this uvp does not know is reported
    * through `unrecognisedFrontends` rather than silently dropped.
    */
-  readonly frontends?: readonly UvpFrontend[] | undefined;
+  readonly frontends?: readonly UvpFrontendSelection[] | undefined;
   /** Frontend names that were present but not recognised, kept so they can be reported. */
   readonly unrecognisedFrontends: readonly string[];
   /**
@@ -278,7 +278,7 @@ export const readWorkspaceManifest = async (
   // no skin, and folding a malformed declaration into "absent" would answer
   // "no skin" on behalf of a file that said something else.
   const frontendsValue = parsed["frontends"];
-  const frontends: UvpFrontend[] = [];
+  const frontends: UvpFrontendSelection[] = [];
   const unrecognisedFrontends: string[] = [];
   if (frontendsValue !== undefined) {
     if (!Array.isArray(frontendsValue)) {
@@ -294,7 +294,7 @@ export const readWorkspaceManifest = async (
           problem: `${manifestName} declares a \`frontends\` entry that is not a string`,
         };
       }
-      if (isUvpFrontend(entry)) frontends.push(entry);
+      if (isUvpFrontendSelection(entry)) frontends.push(entry);
       else unrecognisedFrontends.push(entry);
     }
   }

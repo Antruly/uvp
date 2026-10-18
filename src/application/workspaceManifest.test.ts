@@ -7,7 +7,7 @@ import { renderTemplate } from "./templates.js";
 import type { TemplateId } from "./templates.js";
 import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
 import type { UvpFeature } from "../domain/features.js";
-import type { UvpFrontend } from "../domain/frontends.js";
+import type { UvpFrontendSelection } from "../domain/frontends.js";
 import type { UvpModule } from "../domain/modules.js";
 
 /**
@@ -67,7 +67,7 @@ const writeWorkspace = async (
   template: TemplateId,
   features: readonly UvpFeature[],
   modules?: readonly UvpModule[],
-  frontends?: readonly UvpFrontend[],
+  frontends?: readonly UvpFrontendSelection[],
 ): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "uvp-manifest-"));
   directories.push(root);
@@ -330,12 +330,28 @@ describe("the static frontend list", () => {
     expect(manifest?.frontends).toStrictEqual([]);
   });
 
-  it("reports an unknown skin beside the ones it kept", async () => {
+  it("round-trips a frontend app, which is generated rather than served from public/", async () => {
+    const root = await writeWorkspace("hello-http", [], undefined, ["vue3"]);
+    const manifest = await manifestAt(root);
+    expect(manifest?.frontends).toEqual(["vue3"]);
+    expect(manifest?.unrecognisedFrontends).toEqual([]);
+  });
+
+  it("reports an unknown frontend beside the ones it kept", async () => {
     const manifest = await manifestAt(
       await manifestRoot({ name: "svc", frontends: ["h5-tech", "angular"] }),
     );
     expect(manifest?.frontends).toEqual(["h5-tech"]);
     expect(manifest?.unrecognisedFrontends).toEqual(["angular"]);
+  });
+
+  it("keeps a package-only framework name unrecognised", async () => {
+    // `alpine` and `h5` are names a package may declare, not selections `uvp
+    // init` can generate. A manifest naming one is reported, not accepted as a
+    // frontend with no files behind it.
+    const manifest = await manifestAt(await manifestRoot({ name: "svc", frontends: ["alpine"] }));
+    expect(manifest?.frontends).toEqual([]);
+    expect(manifest?.unrecognisedFrontends).toEqual(["alpine"]);
   });
 
   it.each([

@@ -24,12 +24,13 @@ import {
 } from "../domain/eventPayloadPolicy.js";
 import type { UvpFeature } from "../domain/features.js";
 import {
-  UVP_FRONTENDS,
-  duplicateFrontends,
-  isUvpFrontend,
-  resolveFrontends,
-  unknownFrontends,
-  type UvpFrontend,
+  UVP_FRONTEND_SELECTIONS,
+  duplicateFrontendSelections,
+  frontendSelectionNames,
+  resolveFrontendSelection,
+  selectedFrontendApps,
+  unknownFrontendSelections,
+  type UvpFrontendSelection,
 } from "../domain/frontends.js";
 import {
   UVP_MODULES,
@@ -48,6 +49,7 @@ import { tailWithin } from "./evidenceHelpers.js";
 import type { ProcessSupervisor } from "./ProcessSupervisor.js";
 import { performRequest } from "./httpClient.js";
 import { manifestOf, manifestProblemFailure, readWorkspaceManifest } from "./workspaceManifest.js";
+import { workspaceIdOf } from "./workspaceIdentity.js";
 
 export interface CreatedFile {
   readonly path: string;
@@ -73,7 +75,7 @@ export interface CreateWorkspaceResult {
    * Reported because each one is a directory a caller reaches at `/<skin>/`;
    * the list is the same one recorded in `uvp.json`.
    */
-  readonly frontends: readonly UvpFrontend[];
+  readonly frontends: readonly UvpFrontendSelection[];
   readonly files: readonly CreatedFile[];
   readonly routes: readonly string[];
   readonly nextSteps: readonly string[];
@@ -138,13 +140,6 @@ const CANCELLED_RUN_GRACE_MS = 3_000;
  * half a character in the evidence.
  */
 const REPORT_TAIL_UNITS = 4_096;
-
-const workspaceIdOf = (path: string): string => {
-  // Derived, not random: re-opening the same directory must yield the same id,
-  // so an evidence record from an earlier call still refers to this workspace.
-  const digest = sha256(resolve(path));
-  return `wsp_${digest.slice(0, 22)}`;
-};
 
 /** Why a directory could not be listed, in terms a caller can act on. */
 const describeListFailure = (cause: unknown): string => {
@@ -475,47 +470,98 @@ export class WorkspaceService {
     // exists with a directory missing what its manifest names is a half-written
     // claim, not a result the caller can use.
     const requestedFrontends = input.frontends ?? [];
-    const unknownFrontendsFound = unknownFrontends(requestedFrontends);
+    const unknownFrontendsFound = unknownFrontendSelections(requestedFrontends);
     if (unknownFrontendsFound.length > 0) {
       throw new UvpFailure({
         code: "invalid_request",
         message:
-          `Unknown static frontend${unknownFrontendsFound.length === 1 ? "" : "s"}: ` +
-          `${unknownFrontendsFound.join(", ")}. Known frontends: ${UVP_FRONTENDS.join(", ")}.`,
+          `Unknown frontend${unknownFrontendsFound.length === 1 ? "" : "s"}: ` +
+          `${unknownFrontendsFound.join(", ")}. Known frontends: ${UVP_FRONTEND_SELECTIONS.join(", ")}.`,
         remediation: {
-          action: "Re-run with a skin from the list above; the set is a closed vocabulary.",
+          action: "Re-run with a name from the list above; the set is a closed vocabulary.",
         },
-        details: { unknown: [...unknownFrontendsFound], known: [...UVP_FRONTENDS] },
+        details: { unknown: [...unknownFrontendsFound], known: [...UVP_FRONTEND_SELECTIONS] },
       });
     }
-    const duplicatedFrontends = duplicateFrontends(requestedFrontends);
+    const duplicatedFrontends = duplicateFrontendSelections(requestedFrontends);
     if (duplicatedFrontends.length > 0) {
       throw new UvpFailure({
         code: "invalid_request",
         message:
           `The frontend list names ${duplicatedFrontends.join(", ")} more than once. ` +
-          "A skin is either selected or it is not.",
+          "A frontend is either selected or it is not.",
         remediation: { action: "Remove the repeated name from the frontend list." },
         details: { duplicated: [...duplicatedFrontends] },
       });
     }
-    const frontends = resolveFrontends(requestedFrontends.filter(isUvpFrontend));
-    if (input.template === "http3-service" && frontends.length > 0) {
-      // Not a preference: this template's routes are registered on a plain
-      // `uvcpp_http_server`, and the generated code never gives that server a
-      // document root. Accepting the selection would write skins nothing serves.
+    const frontendApps = selectedFrontendApps(requestedFrontends);
+    if (frontendApps.length > 1) {
       throw new UvpFailure({
         code: "invalid_request",
         message:
-          `The http3-service template cannot serve a static frontend (${frontends.join(", ")}): ` +
-          "its generated source registers no static document root.",
+          `One workspace can select one frontend app, and this request names ${frontendApps.join(", ")}. ` +
+          "Each app is a separate frontend/ project with its own build.",
+        remediation: { action: "Keep one of the named apps and generate the others separately." },
+        details: { apps: [...frontendApps] },
+      });
+    }
+    // Every name passed the vocabulary check above, which throws on the first
+    // unknown one; the cast records that, it does not assume it.
+    const selection = resolveFrontendSelection(
+      requestedFrontends as readonly UvpFrontendSelection[],
+    );
+    if (selection.app !== undefined && selection.pages.length > 0) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `A frontend app and a static page set both own the document root: ` +
+          `${selection.app} with ${selection.pages.join(", ")}. The app is served from ` +
+          "frontend/dist and the page sets from public/, and both are mounted at /.",
+        remediation: { action: "Select the app, or the static page sets, but not both." },
+        details: { app: selection.app, pages: [...selection.pages] },
+      });
+    }
+    // A selected app registers the document root itself, so a template (or a
+    // module) that already registers one would produce a source with two
+    // registrations fighting over `/`. Refused here rather than rendered with
+    // one of them silently dropped.
+    const ownsDocumentRoot =
+      input.template === "static-files" ||
+      input.template === "websocket-test" ||
+      modules.includes("static-console");
+    if (selection.app !== undefined && ownsDocumentRoot) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `The ${input.template} template already serves a page at / ` +
+          `(${input.template === "static-files" ? "its public/ document root" : "its test console"}), ` +
+          `so the ${selection.app} frontend cannot own that document root too.`,
+        remediation: {
+          action: "Choose a backend template for a frontend app, or drop the app selection.",
+        },
+        details: { template: input.template, app: selection.app },
+      });
+    }
+    if (input.template === "http3-service" && (selection.pages.length > 0 || selection.app)) {
+      // Not a preference: this template's routes are registered on a plain
+      // `uvcpp_http_server`, and the generated code never gives that server a
+      // document root. Accepting the selection would write a frontend nothing serves.
+      throw new UvpFailure({
+        code: "invalid_request",
+        message: `The http3-service template cannot serve a frontend (${frontendSelectionNames(
+          selection,
+        ).join(", ")}): its generated source registers no static document root.`,
         remediation: {
           action:
             "Choose a web-app template for a frontend, or generate http3-service without --frontend/--frontends.",
         },
-        details: { template: input.template, frontends: [...frontends] },
+        details: {
+          template: input.template,
+          frontends: frontendSelectionNames(selection),
+        },
       });
     }
+    const frontends = frontendSelectionNames(selection);
 
     const files = renderTemplate(input.template, {
       name: input.name,

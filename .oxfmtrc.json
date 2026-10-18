@@ -18,6 +18,7 @@
     "tests/support/fixtures/registry-index.generated.json",
     "skills/**",
     "src/generatedPackageMetadata.ts",
+    "src/application/frontendLockfiles/**",
     "docs/error-contract.schema.json"
   ]
 }

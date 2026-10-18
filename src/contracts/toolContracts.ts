@@ -2,6 +2,7 @@ import { doctorContract } from "./toolchainToolContracts.js";
 import {
   bundleDiffContract,
   buildContract,
+  frontendBuildContract,
   runContract,
   runStopContract,
   verifyContract,
@@ -36,6 +37,7 @@ export const TOOL_CONTRACTS = [
 
   workspaceCreateContract,
   buildContract,
+  frontendBuildContract,
   runContract,
   runStopContract,
 

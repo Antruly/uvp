@@ -6,7 +6,7 @@ import { ASSERTION_KINDS } from "../domain/assertionKinds.js";
 import { uvpRemediationSchema } from "../domain/errors.js";
 import { UVP_EVENT_PAYLOAD_POLICIES } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
-import { UVP_FRONTENDS } from "../domain/frontends.js";
+import { UVP_FRONTEND_APPS, UVP_FRONTEND_SELECTIONS } from "../domain/frontends.js";
 import { UVP_MODULES } from "../domain/modules.js";
 import { TOOLCHAIN_KINDS } from "../domain/toolchain.js";
 import { WORKSPACE_NAME_MESSAGE, WORKSPACE_NAME_PATTERN } from "../domain/workspaceName.js";
@@ -84,17 +84,21 @@ export const workspaceCreateContract = defineTool({
           "by `GET /api/events`, and refused unless the `evidence-log` module is selected.",
       ),
     frontends: z
-      .array(z.enum(UVP_FRONTENDS))
+      .array(z.enum(UVP_FRONTEND_SELECTIONS))
       .optional()
       .describe(
-        "Build-free static skins to write under `public/<skin>/` and serve from the workspace's " +
-          "document root: `h5-minimal`, `h5-dashboard`, `h5-tech`. Absent or empty means no skin; " +
-          "a template with its own page (the `static-files` placeholder or the `websocket-test` " +
-          "console) keeps that page either way. A selected skin is served at `/<skin>/`, and the " +
-          "page at `/` lists the skins unless the template's own page already owns `/`. Refused " +
-          "on `http3-service`, whose generated source registers no static document root. These " +
-          "skins use only local assets: no CDN, external font, or remote script. Node-based " +
-          "frameworks are a separate, later capability and are not selectable here.",
+        "Frontends to generate. Static page sets (`h5-minimal`, `h5-dashboard`, `h5-tech`) are " +
+          "written under `public/<name>/` and served from the workspace's document root; the page " +
+          "at `/` lists them unless the template's own page already owns `/`. Frontend apps " +
+          "(`vue3`, `react`, `svelte`) write a standalone `frontend/` Vite project instead: it is " +
+          "not part of `uvp build`, Node is never required to generate, build, or run the C++ " +
+          "workspace, and the service serves `frontend/dist` at `/` when that build output exists " +
+          "at startup. Until then `/` answers 503 with the build instruction. At most one app per " +
+          "workspace, and an app cannot be combined with static page sets or with a template that " +
+          "already owns the document root. Absent or empty means no frontend; a template with its " +
+          "own page keeps that page either way. Refused on `http3-service`, whose generated source " +
+          "registers no static document root. Every generated page uses local assets only: no CDN, " +
+          "external font, or remote script.",
       ),
     force: z
       .boolean()
@@ -112,8 +116,8 @@ export const workspaceCreateContract = defineTool({
      * checked. This is the set the generated source and `uvp.json` agree on.
      */
     modules: z.array(z.enum(UVP_MODULES)),
-    /** The static skins the workspace carries, in canonical order. */
-    frontends: z.array(z.enum(UVP_FRONTENDS)),
+    /** The frontends the workspace carries, in canonical order. */
+    frontends: z.array(z.enum(UVP_FRONTEND_SELECTIONS)),
     files: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),
     /**
      * The routes the generated service registers, as `METHOD /path`.
@@ -121,6 +125,11 @@ export const workspaceCreateContract = defineTool({
      * A first request has to guess otherwise: the smallest template answers
      * `GET /hello`, not `GET /`, and an unlisted path is a 404 from a service
      * that is working exactly as generated.
+     *
+     * For a workspace with a Node frontend app these describe the built state.
+     * Before `frontend/dist/index.html` exists the source registers only
+     * `GET /` (the 503 with the build instruction), so a client-side path is a
+     * 404 until the frontend build runs and the service restarts.
      */
     routes: z.array(z.string()),
     /** The exact command that turns this workspace into a running binary. */
@@ -234,6 +243,91 @@ export const buildContract = defineTool({
     {
       description: "Build a workspace with Ninja",
       input: { path: "/home/dev/svc", generator: "ninja" },
+    },
+  ],
+});
+
+/**
+ * The frontend app build.
+ *
+ * Separate from `uvp_build` because its effects are different, and the
+ * separation is the contract, not a convenience: a caller who asked for a C++
+ * build did not agree to spawn Node or to contact a package registry. It never
+ * runs as part of `uvp_build`, and the generated service starts without it —
+ * answering `/` with a named "not built" response until this succeeds.
+ *
+ * The commands are reported as data. A failed `npm ci` is a result with the
+ * failing step's output, not a transport error, for the same reason a compile
+ * failure is: the answer is the evidence.
+ */
+export const frontendBuildContract = defineTool({
+  name: "uvp_frontend_build",
+  title: "Build a workspace's Node frontend app",
+  description:
+    "Install the locked frontend dependencies and run the framework build for a workspace " +
+    "generated with a Node frontend app (vue3, react, or svelte). Runs `npm ci` and " +
+    "`npm run build` in `frontend/`, then reports each step's exit code and output tails and " +
+    "whether `frontend/dist/index.html` exists. This spawns processes and may fetch packages " +
+    "from the registry named in the committed lockfile. `uvp build` never runs it, and the " +
+    "generated service and C++ build do not need Node.",
+  kind: "build",
+  inputSchema: z.object({
+    path: z.string().min(1),
+    /** Overall budget for the install and the framework build together. */
+    timeout_ms: z.number().int().min(1000).default(600_000),
+  }),
+  outputSchema: z.object({
+    ...toolEnvelopeShape,
+    workspace_id: workspaceIdSchema,
+    frontend: z.enum(UVP_FRONTEND_APPS),
+    frontend_dir: z.string(),
+    output_dir: z.string(),
+    /** `frontend/dist/index.html`: what the generated service checks for at startup. */
+    entry: z.string(),
+    /**
+     * True when the entry exists after the run, whichever run wrote it. A
+     * failed rebuild of an earlier build leaves this true; `steps_succeeded`
+     * is the claim about this run.
+     */
+    built: z.boolean(),
+    /** True when every command that started exited 0. */
+    steps_succeeded: z.boolean(),
+    node_version: z.string(),
+    npm_version: z.string(),
+    steps: z.array(
+      z.object({
+        command: z.string(),
+        args: z.array(z.string()),
+        exit_code: z.number().int().nullable(),
+        signal: z.string().nullable(),
+        timed_out: z.boolean(),
+        duration_ms: z.number().int(),
+        /** The last 4096 characters; `stdout_truncated` says more was captured. */
+        stdout_tail: z.string(),
+        stderr_tail: z.string(),
+        stdout_bytes: z.number().int(),
+        stderr_bytes: z.number().int(),
+        stdout_truncated: z.boolean(),
+        stderr_truncated: z.boolean(),
+        succeeded: z.boolean(),
+      }),
+    ),
+  }),
+  effects: {
+    readsFilesystem: true,
+    // `frontend/node_modules` and `frontend/dist`, both inside the workspace.
+    writesFilesystem: true,
+    // `npm ci` may fetch the packages the lockfile names.
+    network: true,
+    spawnsProcess: true,
+    mutatesTarget: false,
+  },
+  // npm's own output and any registry text in it did not originate with uvp.
+  returnsTargetContent: true,
+  examples: [
+    {
+      description: "Build the Vue app in a generated workspace",
+      input: { path: "/home/dev/svc" },
     },
   ],
 });

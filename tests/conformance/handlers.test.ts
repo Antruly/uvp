@@ -12,6 +12,11 @@ import { z } from "zod";
 
 import { ASSERTION_KINDS } from "../../src/application/assertions.js";
 import type {
+  CommandOutcome,
+  CommandRequest,
+  CommandRunner,
+} from "../../src/application/CommandRunner.js";
+import type {
   NativeProbeAvailability,
   NativeWebSocketProbe,
 } from "../../src/application/NativeWebSocketProbe.js";
@@ -712,6 +717,224 @@ describe("the static frontend selection at the boundary", () => {
       }),
     ).toBe("invalid_request");
     await expect(access(path)).rejects.toThrow();
+  });
+});
+
+describe("the frontend app build at the boundary", () => {
+  const outcome = (patch: Partial<CommandOutcome> = {}): CommandOutcome => ({
+    command: "npm",
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    aborted: false,
+    durationMs: 1,
+    stdout: "",
+    stderr: "",
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    ...patch,
+  });
+
+  const callFrontend = async (
+    runner: CommandRunner,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const services = createUvpServices({
+      providers: [createFakeToolchain()],
+      now: FROZEN_CLOCK,
+      frontendRunner: runner,
+    });
+    return await handlerFor(createToolHandlers(services), "uvp_frontend_build")(input, {
+      signal: harness.signal,
+    });
+  };
+
+  it("runs the locked install and the framework build, and reports the entry", async () => {
+    const path = join(harness.workspace, "..", "app-build");
+    temporaryRoots.push(path);
+    await call("uvp_workspace_create", {
+      path,
+      name: "app-build",
+      template: "hello-http",
+      features: [],
+      frontends: ["vue3"],
+    });
+
+    const commands: string[] = [];
+    const runner: CommandRunner = async (request: CommandRequest) => {
+      commands.push([request.command, ...request.args].join(" "));
+      if (request.args[0] === "--version") {
+        return outcome({ stdout: request.command === "node" ? "v24.21.0\n" : "11.16.0\n" });
+      }
+      if (request.args[0] === "run") {
+        await mkdir(join(path, "frontend", "dist"), { recursive: true });
+        await writeFile(join(path, "frontend", "dist", "index.html"), "<!doctype html>\n");
+      }
+      return outcome({ stdout: "ok\n" });
+    };
+
+    const output = await callFrontend(runner, { path });
+    expectConforms("uvp_frontend_build", output);
+    expect(output["frontend"]).toBe("vue3");
+    expect(output["steps_succeeded"]).toBe(true);
+    expect(output["built"]).toBe(true);
+    // The service spells npm `npm.cmd` on Windows, which is the only spelling
+    // CreateProcess can start there. The lane runs on both hosts.
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    expect(commands).toEqual([
+      "node --version",
+      `${npm} --version`,
+      `${npm} ci --no-audit --no-fund`,
+      `${npm} run build`,
+    ]);
+    const steps = output["steps"] as { command: string; succeeded: boolean }[];
+    expect(steps.map((step) => step.succeeded)).toEqual([true, true]);
+  });
+
+  it("reports a failing install as a result with the step's own output", async () => {
+    const path = join(harness.workspace, "..", "app-build-fails");
+    temporaryRoots.push(path);
+    await call("uvp_workspace_create", {
+      path,
+      name: "app-build-fails",
+      template: "hello-http",
+      features: [],
+      frontends: ["react"],
+    });
+
+    const runner: CommandRunner = async (request) =>
+      request.args[0] === "--version"
+        ? outcome({ stdout: request.command === "node" ? "v24.21.0\n" : "11.16.0\n" })
+        : request.args[0] === "ci"
+          ? outcome({ exitCode: 1, stderr: "npm ERR! code EUSAGE\n" })
+          : outcome();
+
+    const output = await callFrontend(runner, { path });
+    expectConforms("uvp_frontend_build", output);
+    expect(output["steps_succeeded"]).toBe(false);
+    expect(output["built"]).toBe(false);
+    const steps = output["steps"] as { stderr_tail: string }[];
+    // The framework build is never started after a failed install.
+    expect(steps).toHaveLength(1);
+    expect(steps[0]?.stderr_tail).toContain("npm ERR! code EUSAGE");
+  });
+
+  it("refuses a workspace that records no Node frontend app", async () => {
+    expect(await failureCodeOf("uvp_frontend_build", { path: harness.workspace })).toBe(
+      "invalid_request",
+    );
+  });
+});
+
+describe("the frontend app selection at the boundary", () => {
+  it("writes a frontend project and the conditional document root, and records it", async () => {
+    const path = join(harness.workspace, "..", "with-app");
+    temporaryRoots.push(path);
+
+    const output = await call("uvp_workspace_create", {
+      path,
+      name: "app",
+      template: "hello-http",
+      features: [],
+      port: 8080,
+      frontends: ["vue3"],
+    });
+    expectConforms("uvp_workspace_create", output);
+    expect(output["frontends"]).toEqual(["vue3"]);
+    expect(output["routes"]).toEqual([
+      "GET /hello",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+
+    for (const file of [
+      "frontend/package.json",
+      "frontend/package-lock.json",
+      "frontend/vite.config.js",
+      "frontend/index.html",
+      "frontend/src/main.js",
+      "frontend/src/App.vue",
+    ]) {
+      await expect(access(join(path, ...file.split("/"))), file).resolves.toBeUndefined();
+    }
+    // The app is not a document root under public/: its output is the Vite
+    // build directory, which does not exist until someone runs that build.
+    await expect(access(join(path, "public"))).rejects.toThrow();
+
+    const source = await readFile(join(path, "src", "main.cpp"), "utf8");
+    expect(source).toContain('std::ifstream frontend_entry("./frontend/dist/index.html");');
+    expect(source).toContain('app.serve_static("/", "./frontend/dist", frontend_options);');
+
+    const manifest = JSON.parse(await readFile(join(path, "uvp.json"), "utf8")) as {
+      frontends?: string[];
+    };
+    expect(manifest.frontends).toEqual(["vue3"]);
+  });
+
+  it("refuses every combination that would give one workspace two document roots", async () => {
+    const cases = [
+      { label: "two apps", frontends: ["vue3", "react"], template: "hello-http" as const },
+      { label: "app and skin", frontends: ["vue3", "h5-tech"], template: "hello-http" as const },
+      { label: "static-files", frontends: ["svelte"], template: "static-files" as const },
+      { label: "websocket-test", frontends: ["react"], template: "websocket-test" as const },
+    ];
+    for (const { label, frontends, template } of cases) {
+      const path = join(harness.workspace, "..", `app-refused-${label.replace(/ /gu, "-")}`);
+      temporaryRoots.push(path);
+      expect(
+        await failureCodeOf("uvp_workspace_create", {
+          path,
+          name: "app",
+          template,
+          features: template === "websocket-test" ? ["websocket"] : [],
+          frontends: [...frontends],
+        }),
+        label,
+      ).toBe("invalid_request");
+      await expect(access(path), label).rejects.toThrow();
+    }
+  });
+
+  it("refuses a frontend app on a module that already registers the document root", async () => {
+    const path = join(harness.workspace, "..", "app-refused-console");
+    temporaryRoots.push(path);
+    expect(
+      await failureCodeOf("uvp_workspace_create", {
+        path,
+        name: "console",
+        template: "hello-http",
+        features: ["websocket"],
+        modules: ["static-console", "echo-log", "websocket-echo"],
+        frontends: ["react"],
+      }),
+    ).toBe("invalid_request");
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("refuses an app on http3-service and names outside the vocabulary", async () => {
+    for (const [label, frontends, template] of [
+      ["http3", ["vue3"], "http3-service"],
+      ["alpine", ["alpine"], "hello-http"],
+      ["h5", ["h5"], "hello-http"],
+    ] as const) {
+      const path = join(harness.workspace, "..", `app-refused-${label}`);
+      temporaryRoots.push(path);
+      expect(
+        await failureCodeOf("uvp_workspace_create", {
+          path,
+          name: label,
+          template,
+          features: template === "http3-service" ? ["tls", "http3"] : [],
+          frontends: [...frontends],
+        }),
+        label,
+      ).toBe("invalid_request");
+      await expect(access(path), label).rejects.toThrow();
+    }
   });
 });
 

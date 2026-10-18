@@ -123,7 +123,8 @@ for (const name of toolNames) {
  * README and not the other leaves a reader running a command that does not
  * exist, and it is the one kind of drift between two translations that is
  * checkable without reading Chinese. The tool *count* is checked in the English
- * README only — the translation gives that number as prose about the templates.
+ * README and the MCP page only — the translation gives it as prose about the
+ * templates.
  */
 for (const file of README_PAGES) {
   const text = await read(file);
@@ -137,10 +138,16 @@ for (const file of README_PAGES) {
 }
 
 {
-  const readme = await read("README.md");
-  requireIn(readme, String(TOOL_CONTRACTS.length), {
+  // The phrase, not the bare number. A bare-number check passed on a stale
+  // count once: `16` appeared in `#160` while the README still said `15`.
+  const count = String(TOOL_CONTRACTS.length);
+  requireIn(await read("README.md"), `${count} tool contracts`, {
     file: "README.md",
-    why: `the README states the tool count, which is currently ${TOOL_CONTRACTS.length}`,
+    why: `the README states the tool count, which is currently ${count}`,
+  });
+  requireIn(await read(MCP_CONTRACTS_PAGE), `${count} tools`, {
+    file: MCP_CONTRACTS_PAGE,
+    why: `the MCP page states the tool count, which is currently ${count}`,
   });
 }
 

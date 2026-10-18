@@ -1,11 +1,13 @@
 import { SessionStore } from "../application/sessionStore.js";
 import { WorkspaceService } from "../application/WorkspaceService.js";
+import { FrontendBuildService } from "../application/FrontendBuildService.js";
+import type { CommandRunner } from "../application/CommandRunner.js";
 import { WebService } from "../application/WebService.js";
 import { CaptureService } from "../application/CaptureService.js";
 import { DoctorService } from "../application/DoctorService.js";
 import { LocalToolchainProvider } from "../toolchains/local/LocalToolchainProvider.js";
 import { ContainerToolchainProvider } from "../toolchains/container/ContainerToolchainProvider.js";
-import { startSupervised } from "../toolchains/processRunner.js";
+import { startSupervised, runProcess } from "../toolchains/processRunner.js";
 import type { ToolchainSelection } from "../domain/toolchain.js";
 import { NativeProbeRunner } from "../toolchains/native/NativeProbeRunner.js";
 import { NativeHttp3ProbeRunner } from "../toolchains/native/NativeHttp3ProbeRunner.js";
@@ -59,6 +61,14 @@ export interface UvpServiceOptions {
    * wants to script one exchange's report should not have to satisfy the other's.
    */
   readonly nativeHttp3Probe?: NativeHttp3Probe | undefined;
+  /**
+   * How the frontend build starts `node` and `npm`.
+   *
+   * Injected for the same reason the probes are: a lane about what the build
+   * does with a step's exit code should not need Node installed, and the lane
+   * that *is* about a real install names the real runner explicitly.
+   */
+  readonly frontendRunner?: CommandRunner | undefined;
 }
 
 export interface UvpServices {
@@ -89,6 +99,13 @@ export interface UvpServices {
    */
   readonly workspaceFor: (provider: ToolchainProvider) => WorkspaceService;
   readonly workspace: WorkspaceService;
+  /**
+   * The explicit Node frontend build.
+   *
+   * Not bound to a toolchain: it runs on this host, with this host's Node, even
+   * when `uvp.json` names a container for the C++ build.
+   */
+  readonly frontendBuild: FrontendBuildService;
   readonly web: WebService;
   readonly capture: CaptureService;
   readonly doctor: DoctorService;
@@ -134,6 +151,7 @@ export const createUvpServices = (options: UvpServiceOptions = {}): UvpServices 
     toolchainFor,
     workspaceFor,
     workspace: workspaceFor(primary),
+    frontendBuild: new FrontendBuildService(options.frontendRunner ?? runProcess),
     web: new WebService({
       store,
       now,

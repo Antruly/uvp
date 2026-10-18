@@ -138,7 +138,13 @@ describe("effects and annotations", () => {
     // the capture came from or to whichever one the caller names. A replay that
     // declared itself a local read would be the exact under-declaration this
     // list exists to catch.
+    //
+    // `uvp_frontend_build` is here for a host neither the call nor the
+    // workspace names in the call: `npm ci` may fetch the packages the
+    // workspace's committed lockfile pins. The build runs on this host, so the
+    // traffic is `npm`'s, but it is traffic the caller started.
     expect(reaching).toEqual([
+      "uvp_frontend_build",
       "uvp_run",
       "uvp_http_request",
       "uvp_websocket_probe",
@@ -193,6 +199,9 @@ describe("effects and annotations", () => {
     // whole result is statuses, counts, and hashes of the target's responses.
     expect(marked).toEqual([
       "uvp_build",
+      // npm's own diagnostics and anything the registry printed in them are
+      // not uvp's words.
+      "uvp_frontend_build",
       "uvp_run",
       "uvp_http_request",
       "uvp_websocket_probe",

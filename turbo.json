@@ -13,7 +13,7 @@
         "scripts/clean-build-output.mjs",
         "scripts/generate-package-metadata.mjs",
         "src/**/*.{cts,mts,ts,tsx}",
-        "src/**/package.json",
+        "src/**/*.json",
         "!src/**/*.test.ts",
         "tsconfig.json",
         "tsconfig.build.json"

@@ -3,6 +3,7 @@ import type { CommandSpec } from "../commandSpec.js";
 import {
   buildCommand,
   bundleDiffCommand,
+  frontendBuildCommand,
   runCommand,
   stopCommand,
   verifyCommand,
@@ -36,6 +37,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   doctorCommand,
   initCommand,
   buildCommand,
+  frontendBuildCommand,
   runCommand,
   stopCommand,
   verifyCommand,

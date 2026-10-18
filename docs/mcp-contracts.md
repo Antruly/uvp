@@ -1,6 +1,6 @@
 # MCP contracts
 
-uvp exposes 15 tools over MCP, from the same contracts that back the CLI. This
+uvp exposes 16 tools over MCP, from the same contracts that back the CLI. This
 page is the reference: what each tool does, what it touches, and what a result
 contains.
 
@@ -32,6 +32,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_doctor`           | toolchain |  ●  |     |     |  ●   |     |           |
 | `uvp_workspace_create` | workspace |  ●  |  ●  |     |      |     |           |
 | `uvp_build`            | build     |  ●  |  ●  |     |  ●   |     |     ●     |
+| `uvp_frontend_build`   | build     |  ●  |  ●  |  ●  |  ●   |     |     ●     |
 | `uvp_run`              | runtime   |  ●  |  ●  |  ●  |  ●   |  ●  |     ●     |
 | `uvp_run_stop`         | runtime   |     |     |     |  ●   |  ●  |           |
 | `uvp_verify`           | workflow  |  ●  |  ●  |  ●  |  ●   |  ●  |           |
@@ -107,6 +108,18 @@ recorded in `uvp.json` in canonical order. An unknown or repeated skin, and any
 skin on `http3-service` (whose source registers no document root), are refused
 before any file is written.
 
+The same field also accepts one Node frontend app — `vue3`, `react`, `svelte` —
+which is a different kind of selection: it writes a pinned Vite project under
+`frontend/` (exact dependency versions plus a committed lockfile, no remote
+assets, no build step run by uvp) instead of a page set under `public/`. The
+generated service registers `frontend/dist` as a static root, with SPA
+fallback, only when `frontend/dist/index.html` exists at startup, and answers
+`GET /` with `503` and a build instruction until the caller runs `npm ci && npm
+run build` in `frontend/`. One app per workspace; an app and a skin, a second
+app, and an app on `static-files`, `websocket-test`, `static-console`, or
+`http3-service` are refused before any file is written. The selection is
+recorded in `uvp.json` and reported beside `routes`.
+
 ### Build
 
 **`uvp_build`** — Build a workspace.
@@ -132,6 +145,23 @@ that follow: the artifacts are linked against the image's libuvcpp at an in-imag
 path and may not start here, and anything the build wrote outside the workspace
 was discarded with the container. `uvp_verify` refuses a container-declared
 workspace with `unsupported_toolchain`, because a pass runs what it builds.
+
+### Frontend build
+
+**`uvp_frontend_build`** — Build a workspace's Node frontend app.
+Runs `npm ci --no-audit --no-fund` and `npm run build` in `frontend/`, then
+reports each step's exit code, duration, and output tail, plus the versions of
+Node and npm it used. `built` reports whether `frontend/dist/index.html` exists
+after the run — the file the generated service checks for at startup — while
+`steps_succeeded` reports whether this run's commands exited `0`. They can
+disagree: a failed rebuild over an earlier output leaves `built` true. `net` and
+`proc` are unconditional because the install may fetch packages from the
+registry named in the committed lockfile and both steps are processes; `mut` is
+not set because the workspace's own files outside `frontend/` are not touched,
+although npm may use its cache outside the workspace.
+`untrusted` because npm's output is npm's words. The build never runs as part
+of `uvp_build`, and it runs on this host even when `uvp.json` names a container
+for the C++ build — the result says so when it does.
 
 ### Runtime
 
