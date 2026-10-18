@@ -15,10 +15,13 @@ import { Problems, asInteger, asString, isRecord } from "./templatePackageProble
  * lists against each other in both directions, so a manifest cannot declare a
  * file the tree lacks and a tree cannot carry a file the manifest omits.
  *
- * Observations are optional and partial on purpose. A listing that did not
- * report symlinks or binary-ness leaves those questions unexamined, and this
- * module does not turn "not examined" into "fine" — it checks only what the
- * reader observed. Whether the bytes on disk actually hash to the declared
+ * Observations are optional and partial on purpose. The two-way agreement
+ * below runs only when a reader supplied a listing; without one the validator
+ * has examined the declaration alone, and the result's `filesObserved` marker
+ * says so rather than letting `ok` imply the tree matches. A listing that did
+ * not report symlinks or binary-ness leaves those questions unexamined, and
+ * this module does not turn "not examined" into "fine" — it checks only what
+ * the reader observed. Whether the bytes on disk actually hash to the declared
  * digest is the reader's finding; a reader that supplies no digest has not made
  * that finding, and the validator does not pretend otherwise.
  */
@@ -135,6 +138,7 @@ export function compareObservations(
   problems: Problems,
 ): void {
   const declared = new Map(files.map((file) => [file.path, file]));
+  const declaredCaseFolded = new Map(files.map((file) => [file.path.toLowerCase(), file]));
   const seen = new Map<string, number>();
   let total = 0;
   observations.forEach((observation, index) => {
@@ -152,7 +156,17 @@ export function compareObservations(
     total += observation.bytes;
     const file = declared.get(observation.path);
     if (file === undefined) {
-      problems.add(location, `'${observation.path}' is not listed in the manifest`);
+      // Paths agree by exact case: a package extracted on Windows or macOS
+      // would still produce the spelling the manifest has. A case-only
+      // difference is reported as such rather than as an unrelated file, so
+      // the caller knows the tree and the manifest name the same entry.
+      const caseMatch = declaredCaseFolded.get(key);
+      problems.add(
+        location,
+        caseMatch === undefined
+          ? `'${observation.path}' is not listed in the manifest`
+          : `differs only in case from the manifest's '${caseMatch.path}'; declare one spelling`,
+      );
       return;
     }
     if (observation.bytes !== file.bytes) {

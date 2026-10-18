@@ -79,6 +79,14 @@ describe("a valid package", () => {
     expect(result.digest).toBe(templatePackageDigest(result.manifest));
   });
 
+  it("records that a declaration-only result did not examine the tree", () => {
+    const result = check();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The manifest is well-formed; nothing here says the tree matches it.
+    expect(result.filesObserved).toBe(false);
+  });
+
   it("keeps the optional fields it was given, and omits the ones it was not", () => {
     const result = check({
       description: "A dashboard",
@@ -254,6 +262,16 @@ describe("text fields", () => {
     );
   });
 
+  it("refuses a control character in a display field, so a result cannot rewrite a line", () => {
+    rejects(check({ name: "Acme\u001b[31m" }), "name", /control character/u);
+    rejects(check({ description: "line\nbreak" }), "description", /control character/u);
+    rejects(
+      check({ provenance: { author: "Acme\u0007", createdAt: "2026-10-18T00:00:00Z" } }),
+      "provenance.author",
+      /control character/u,
+    );
+  });
+
   it("refuses tags that are not lowercase slugs or that repeat", () => {
     rejects(check({ tags: ["Vue 3"] }), "tags[0]");
     rejects(check({ tags: ["vue", "vue"] }), "tags[1]", /duplicates/u);
@@ -263,6 +281,12 @@ describe("text fields", () => {
   it("bounds the number of tags", () => {
     const limits = { ...DEFAULT_TEMPLATE_PACKAGE_LIMITS, maxTags: 1 };
     rejects(check({ tags: ["one", "two"] }, undefined, limits), "tags");
+  });
+
+  it("bounds one tag's length by the named limit", () => {
+    const limit = DEFAULT_TEMPLATE_PACKAGE_LIMITS.maxTagLength;
+    expect(check({ tags: ["a".repeat(limit)] }).ok).toBe(true);
+    rejects(check({ tags: ["a".repeat(limit + 1)] }), "tags[0]");
   });
 });
 
@@ -326,7 +350,43 @@ describe("licence and provenance", () => {
     rejects(check({ license: undefined }), "license", /required/u);
     rejects(check({ license: { file: "LICENSE" } }), "license", /spdx or name/u);
     rejects(check({ license: { spdx: "MIT", file: "COPYING" } }), "license.file");
+    rejects(
+      check({ license: { spdx: "MIT OR Apache-2.0", file: "LICENSE" } }),
+      "license.spdx",
+      /single SPDX identifier/u,
+    );
     expect(check({ license: { name: "Acme Internal", file: "LICENSE" } }).ok).toBe(true);
+  });
+
+  it("bounds author, revision, licence name, and SPDX id by the named limits", () => {
+    const limits = DEFAULT_TEMPLATE_PACKAGE_LIMITS;
+    rejects(
+      check({
+        provenance: {
+          author: "a".repeat(limits.maxAuthorLength + 1),
+          createdAt: "2026-10-18T00:00:00Z",
+        },
+      }),
+      "provenance.author",
+    );
+    rejects(
+      check({
+        provenance: {
+          author: "Acme",
+          createdAt: "2026-10-18T00:00:00Z",
+          revision: "a".repeat(limits.maxRevisionLength + 1),
+        },
+      }),
+      "provenance.revision",
+    );
+    rejects(
+      check({ license: { name: "a".repeat(limits.maxLicenseNameLength + 1), file: "LICENSE" } }),
+      "license.name",
+    );
+    rejects(
+      check({ license: { spdx: "a".repeat(limits.maxSpdxLength + 1), file: "LICENSE" } }),
+      "license.spdx",
+    );
   });
 
   it("requires an author and a UTC creation time", () => {
@@ -342,6 +402,12 @@ describe("licence and provenance", () => {
     rejects(
       check({ provenance: { author: "Acme", createdAt: "2026-13-18T00:00:00Z" } }),
       "provenance.createdAt",
+    );
+    // `Date.parse` would roll this into 3 March; the calendar has no 31 February.
+    rejects(
+      check({ provenance: { author: "Acme", createdAt: "2026-02-31T00:00:00Z" } }),
+      "provenance.createdAt",
+      /UTC ISO-8601/u,
     );
   });
 
@@ -394,6 +460,8 @@ describe("file paths", () => {
   it.each([
     ["a source file", "src/main.cc", true],
     ["a nested asset", "assets/logo.png", true],
+    ["a path naming the files/ directory", "files/src/main.cc", false],
+    ["a file named files", "files", false],
     ["a hidden file", ".gitignore", true],
     ["an absolute path", "/etc/passwd", false],
     ["a Windows drive path", "C:/Windows/system.ini", false],
@@ -493,7 +561,14 @@ describe("the reader's observations", () => {
   });
 
   it("accepts a listing that agrees with the manifest", () => {
-    expect(check({}, [observation({ digest: DIGEST_A })]).ok).toBe(true);
+    const result = check({}, [observation({ digest: DIGEST_A })]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.filesObserved).toBe(true);
+  });
+
+  it("names a case-only difference as such, rather than as an unrelated file", () => {
+    rejects(check({}, [observation({ path: "SRC/main.cc" })]), "files[0]", /differs only in case/u);
   });
 
   it("does not invent a digest, symlink, or binary check the reader did not report", () => {
