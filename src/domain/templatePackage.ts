@@ -62,6 +62,35 @@ export const TEMPLATE_PACKAGE_VARIABLES = ["name", "port"] as const;
 export type TemplatePackageVariableName = (typeof TEMPLATE_PACKAGE_VARIABLES)[number];
 
 /**
+ * The methods a declared route may name.
+ *
+ * This is the vocabulary the built-in route table uses: HTTP methods plus `WS`,
+ * which marks a WebSocket endpoint rather than an HTTP verb. A package that
+ * invented a ninth method would be declaring a route no generated service
+ * registers, and `uvp init` would report it as a first request that cannot work.
+ */
+export const TEMPLATE_PACKAGE_ROUTE_METHODS = [
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+  "WS",
+] as const;
+
+/**
+ * One declared route, as `METHOD /path`.
+ *
+ * The path may use the two forms the built-in table uses: `:name` for one
+ * parameter and `*name` for a subtree. The rule stops at the shape — whether
+ * the service actually registers it is the build-and-run lane's question, not
+ * the manifest's.
+ */
+export const TEMPLATE_PACKAGE_ROUTE_PATTERN = /^[A-Z]+ \/\S*$/u;
+
+/**
  * The limits P1 enforces.
  *
  * Q8 in the design comment is still open for P2/P4, so these numbers are named
@@ -72,6 +101,7 @@ export type TemplatePackageVariableName = (typeof TEMPLATE_PACKAGE_VARIABLES)[nu
  */
 export interface TemplatePackageLimits {
   readonly maxFiles: number;
+  readonly maxRoutes: number;
   readonly maxFileBytes: number;
   readonly maxTotalBytes: number;
   readonly maxPathLength: number;
@@ -88,6 +118,7 @@ export interface TemplatePackageLimits {
 
 export const DEFAULT_TEMPLATE_PACKAGE_LIMITS: TemplatePackageLimits = {
   maxFiles: 512,
+  maxRoutes: 64,
   maxFileBytes: 1024 * 1024,
   maxTotalBytes: 8 * 1024 * 1024,
   maxPathLength: 240,
@@ -156,6 +187,15 @@ export interface TemplatePackageManifest {
     Partial<Record<TemplatePackageVariableName, TemplatePackageVariable>>
   >;
   readonly files: readonly TemplatePackageFile[];
+  /**
+   * The routes the package's service registers, as `METHOD /path`.
+   *
+   * Optional because a package may be a library or a frontend module rather than
+   * a service. Absent is not "no routes": it is "the package did not say", and
+   * `uvp init` reports an empty list with a limitation that names that gap
+   * instead of deriving routes from source it did not execute.
+   */
+  readonly routes?: readonly string[];
   readonly license: TemplatePackageLicense;
   readonly provenance: TemplatePackageProvenance;
   /** A root-level `preview.png`, `preview.svg`, or `preview.webp`. */

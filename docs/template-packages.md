@@ -9,16 +9,14 @@ package that disagrees with them is refused rather than repaired.
 ## Status
 
 The schema and validator (P1), the directory reader and local store (P2–P4),
-and the CLI/MCP surface (P5) are shipped. `uvp template validate` checks a
-directory without writing, and `uvp template import` copies one into the local
-store under `$UVP_TEMPLATE_HOME` (or `~/.uvp/templates`); `search`, `get`,
-`export`, and `remove` cover the rest. The store never executes a package: the
-source tree is copied into a generated workspace, and building that workspace
-remains the evidence that it works.
-
-`uvp init --template-package id@version` (P6) is not implemented yet; a package
-is imported and exported as data, and generating a workspace from one is a
-separate step.
+the CLI/MCP surface (P5), and workspace generation (P6) are shipped. `uvp
+template validate` checks a directory without writing, and `uvp template
+import` copies one into the local store under `$UVP_TEMPLATE_HOME` (or
+`~/.uvp/templates`); `search`, `get`, `export`, and `remove` cover the rest.
+`uvp init --template-package id@version` renders a stored package into a
+workspace. The store never executes a package: the source tree is copied into
+the generated workspace, and building that workspace remains the evidence that
+it works.
 
 ## Package layout
 
@@ -64,6 +62,7 @@ with `files/`.
       "bytes": 1024
     }
   ],
+  "routes": ["GET /healthz", "WS /console"],
   "license": { "spdx": "MIT", "file": "LICENSE" },
   "provenance": {
     "author": "Acme",
@@ -96,6 +95,7 @@ manifest would silently drop it.
 | `requires.features` | no       | libuvcpp features: `tls`, `http2`, `http3`, `grpc`, `websocket`, `soap`, `db`                    |
 | `variables`         | no       | only `name` (`type: "slug"`) and `port` (`type: "port"`), with optional `required` and `default` |
 | `files`             | yes      | at least one entry; `path`, `digest`, and `bytes`                                                |
+| `routes`            | no       | at most 64 unique `METHOD /path` entries; the methods the route table names                      |
 | `license`           | yes      | `spdx` or `name`, and `file: "LICENSE"`                                                          |
 | `provenance`        | yes      | `author`, `createdAt`; optional `source` and `revision`                                          |
 | `preview`           | no       | `preview.png`, `preview.svg`, or `preview.webp`                                                  |
@@ -103,6 +103,14 @@ manifest would silently drop it.
 `name`, `description`, `license.name`, and `provenance.author` may not contain
 control characters. They appear in search results and reports, and a control
 character could rewrite the line a terminal has already written.
+
+`routes` is what the package's service registers, and it is the only route
+information `uvp init` reports for a package workspace. A method must be one of
+`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, or `WS`; a path is
+`:name` for one parameter or `*name` for a subtree, as in the built-in route
+table. An absent `routes` means the package did not say, not that the service
+registers nothing: `uvp init` reports an empty list with a limitation naming
+that gap rather than inferring routes from source it never ran.
 
 ## Limits
 
@@ -113,6 +121,7 @@ before the store's own checks run.
 | Limit                      | Value           |
 | -------------------------- | --------------- |
 | files per package          | 512             |
+| routes per package         | 64              |
 | one file                   | 1 MiB           |
 | total declared or observed | 8 MiB           |
 | path length                | 240 characters  |
@@ -164,6 +173,47 @@ A v1 package may use three placeholders in `files/`:
 
 There are no conditional placeholders in v1. A variable for any other
 placeholder is refused, because it would render literally into a compiled file.
+
+Substitution is textual and happens on every occurrence in a file that decodes
+as UTF-8. A file that does not decode is copied byte for byte — rewriting bytes
+that are not text would corrupt an image or an icon for nothing.
+<span v-pre>`{{features}}`</span> becomes the feature names joined with `,` in
+the manifest's order. Because the substitution is textual, the package controls
+its own quoting: a manifest that writes
+<span v-pre>`"port": {{project.port}}`</span> renders a JSON number, while
+<span v-pre>`"port": "{{project.port}}"`</span> renders a string the workspace
+manifest reader will then refuse as it would any other bad field.
+
+## Generating a workspace from a package
+
+```bash
+uvp init ./dashboard --name dashboard --template-package acme-dashboard@1.0.0
+```
+
+A workspace is generated from exactly one selector: a built-in `template` or a
+stored `template_package`, never both. Naming both is refused before the store
+is read, so the answer cannot depend on which package happened to be stored. The
+package's `files/` tree is written under the workspace root with the
+placeholders substituted, and every file is read back and re-hashed against the
+manifest first: a stored tree that no longer matches its manifest is an
+`artifact_modified` failure, and no partial workspace is written.
+
+Only the package's source is rendered. `features`, `modules`,
+`event_payloads`, and `frontends` compose the built-in generators, so they are
+refused with `--template-package` rather than accepted and ignored. A package's
+`requires.features` describes what its source was written for; `uvp init` does
+not check that the installed libuvcpp satisfies it — the build is the evidence.
+
+The one file uvp writes rather than copies is `uvp.json`:
+
+- a package that ships one keeps every field, loses `template` (the selectors
+  are mutually exclusive), and gains `template_package: {id, version, digest}`;
+- a package without one gets a minimal manifest with `uvp`, `name`, `binary`,
+  `port`, `features`, `template_package`, and `requires.libuvcpp` when the
+  package declared one.
+
+The result reports the built-in `template` or the `template_package`
+identity, never both, and the routes exactly as the manifest declared them.
 
 ## What validation establishes
 

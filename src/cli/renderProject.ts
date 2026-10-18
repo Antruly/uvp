@@ -129,9 +129,19 @@ export const renderWorkspaceCreate = (output: Record<string, unknown>): string[]
   const total = files.reduce<number>((sum, file) => sum + (num(at(file, "bytes")) ?? 0), 0);
   const modules = strings(output["modules"]);
   const frontends = strings(output["frontends"]);
+  // A package workspace names its selector the way the store does, `id@version`,
+  // and prints the digest because that is the identity `uvp.json` records: two
+  // workspaces from the same id@version are the same source only when the
+  // digests agree.
+  const templatePackage = obj(output["template_package"]);
+  const selector =
+    typeof output["template_package"] === "object" && output["template_package"] !== null
+      ? `${str(templatePackage["id"])}@${str(templatePackage["version"])}  ` +
+        shortDigest(str(templatePackage["digest"]))
+      : str(output["template"]);
   return [
     row("workspace", `${str(output["workspace_id"])}  ${str(output["path"])}`),
-    row("template", str(output["template"])),
+    row("template", selector),
     // Always shown, because "(none)" is a fact a composed workspace needs: it
     // is what an explicit empty selection produced, and it is not the same
     // claim as a template that simply has no default modules.

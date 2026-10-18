@@ -6,6 +6,8 @@ import {
   DEFAULT_TEMPLATE_PACKAGE_LIMITS,
   TEMPLATE_PACKAGE_CATEGORIES,
   TEMPLATE_PACKAGE_FRAMEWORKS,
+  TEMPLATE_PACKAGE_ROUTE_METHODS,
+  TEMPLATE_PACKAGE_ROUTE_PATTERN,
   TEMPLATE_PACKAGE_SCHEMA,
   TEMPLATE_PACKAGE_VARIABLES,
   parseTemplatePackageVersion,
@@ -62,6 +64,7 @@ const MANIFEST_KEYS = new Set([
   "requires",
   "variables",
   "files",
+  "routes",
   "license",
   "provenance",
   "preview",
@@ -428,6 +431,47 @@ function readPreview(record: Record<string, unknown>, problems: Problems): strin
   return preview;
 }
 
+function readRoutes(
+  record: Record<string, unknown>,
+  limits: TemplatePackageLimits,
+  problems: Problems,
+): readonly string[] | undefined {
+  const routes = record["routes"];
+  if (routes === undefined) return undefined;
+  if (!Array.isArray(routes)) {
+    problems.add("routes", "must be an array of 'METHOD /path' strings");
+    return undefined;
+  }
+  if (routes.length > limits.maxRoutes) {
+    problems.add("routes", `must have at most ${limits.maxRoutes} entries`);
+  }
+  const seen = new Set<string>();
+  routes.forEach((route: unknown, index: number) => {
+    const location = `routes.${String(index)}`;
+    if (typeof route !== "string") {
+      problems.add(location, "must be a string");
+      return;
+    }
+    if (!TEMPLATE_PACKAGE_ROUTE_PATTERN.test(route)) {
+      problems.add(location, "must be 'METHOD /path' with no whitespace in the path");
+      return;
+    }
+    const [method = "", pathname = ""] = route.split(" ", 2);
+    if (!(TEMPLATE_PACKAGE_ROUTE_METHODS as readonly string[]).includes(method)) {
+      problems.add(location, `method must be one of ${TEMPLATE_PACKAGE_ROUTE_METHODS.join(", ")}`);
+    }
+    if (pathname.length > limits.maxPathLength) {
+      problems.add(location, `path must be at most ${limits.maxPathLength} characters`);
+    }
+    if (seen.has(route)) {
+      problems.add(location, `duplicates '${route}'`);
+    } else {
+      seen.add(route);
+    }
+  });
+  return routes as readonly string[];
+}
+
 function validateManifest(
   value: unknown,
   observations: readonly TemplatePackageFileObservation[] | undefined,
@@ -452,6 +496,7 @@ function validateManifest(
   const requires = readRequires(value, problems);
   const variables = readVariables(value, problems);
   const files = readFiles(value, limits, problems);
+  const routes = readRoutes(value, limits, problems);
   const license = readLicense(value, limits, problems);
   const provenance = readProvenance(value, limits, problems);
   const preview = readPreview(value, problems);
@@ -482,6 +527,7 @@ function validateManifest(
     ...(requires === undefined ? {} : { requires }),
     ...(variables === undefined ? {} : { variables }),
     files,
+    ...(routes === undefined ? {} : { routes }),
     license,
     provenance,
     ...(preview === undefined ? {} : { preview }),

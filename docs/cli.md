@@ -279,6 +279,27 @@ cannot be combined: both own the document root. Those refusals, and the
 already answer `/`. The selection is recorded in `uvp.json` as the app id and
 reported beside `routes`; `--frontend none` means no frontend at all.
 
+### Template packages
+
+```bash
+uvp init ./dashboard --name dashboard --template-package acme-dashboard@1.0.0
+```
+
+Renders a package imported with `uvp template import` instead of a built-in
+template. The id and an exact version name the stored package; an `ID@VERSION`
+that is missing either half, a version that is not SemVer, or a package that is
+not in the store is refused with exit 2. A stored tree that no longer matches
+its manifest is exit 1 (`artifact_modified`), and no partial workspace is
+written.
+
+One selector only: `--template` and `--template-package` are refused together,
+and `--features`, `--modules`, `--event-payloads`, and `--frontend`/`--frontends`
+are refused with a package, because they compose the built-in generators rather
+than the package's source. The package's declared routes are printed as `route`
+lines; when it declared none, uvp says so as a limitation rather than reporting
+an empty list as an inspected fact. `uvp.json` records `template_package` with
+the id, version, and digest. See [template packages](template-packages.md).
+
 `uvp init` refuses to write into a non-empty directory without `--force`.
 
 ## `uvp build`

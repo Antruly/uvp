@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -283,8 +284,184 @@ describe("the template commands' failures", () => {
     expect(tampered.code).toBe(1);
     expect(failureOf(tampered)["code"]).toBe("artifact_modified");
   });
+});
 
-  it("carries a malformed package's problems in the error contract", async () => {
+/**
+ * `uvp init --template-package`, as a process.
+ *
+ * The template commands above own the store's lifecycle. This block asks what
+ * the init path adds on top of it: the selector is read through the same store
+ * boundary, the rendered workspace records the package it came from, and every
+ * refusal happens before a file is written.
+ */
+describe("a workspace from a stored package", () => {
+  it("renders a stored package into a workspace and records its identity", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({ root });
+    const imported = await run(["template", "import", fixture.dir, "--json"], env);
+    expect(imported.code).toBe(0);
+    const digest = json(imported)["digest"];
+
+    const target = path.join(root, "workspace");
+    const initialized = await run(
+      [
+        "init",
+        target,
+        "--name",
+        "svc",
+        "--template-package",
+        "acme-dashboard@1.2.0",
+        "--port",
+        "8123",
+        "--json",
+      ],
+      env,
+    );
+    expect(initialized.code, initialized.stderr).toBe(0);
+    const output = json(initialized);
+    expectContractOutput("uvp_workspace_create", output);
+
+    // The selector that was not used stays absent, rather than being filled in
+    // with the built-in default the package replaced.
+    const selector = { id: "acme-dashboard", version: "1.2.0", digest };
+    expect(output["template"]).toBeUndefined();
+    expect(output["template_package"]).toEqual(selector);
+    expect(output["routes"]).toEqual([]);
+    // An absent routes declaration is a limitation, not a claim that the
+    // service registers nothing.
+    expect(output["limitations"]).toContain("The package declares no routes.");
+
+    // The package's file reached the workspace unchanged, and the only file uvp
+    // wrote rather than copied is the manifest.
+    expect(await readFile(path.join(target, "src", "main.cc"), "utf8")).toBe(fixture.content);
+    const manifest = JSON.parse(await readFile(path.join(target, "uvp.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(manifest["template"]).toBeUndefined();
+    expect(manifest["name"]).toBe("svc");
+    expect(manifest["binary"]).toBe("svc");
+    expect(manifest["port"]).toBe(8123);
+    expect(manifest["template_package"]).toEqual(selector);
+  });
+
+  it("refuses two selectors and writes nothing", async () => {
+    const root = await temporaryRoot();
+    const env = { UVP_TEMPLATE_HOME: path.join(root, "store") };
+    const target = path.join(root, "workspace");
+    const refused = await run(
+      [
+        "init",
+        target,
+        "--name",
+        "svc",
+        "--template",
+        "hello-http",
+        "--template-package",
+        "acme-dashboard@1.2.0",
+        "--json",
+      ],
+      env,
+    );
+    expect(refused.code).toBe(2);
+    expect(failureOf(refused)["code"]).toBe("invalid_request");
+    expect(String(failureOf(refused)["message"])).toContain("pass one of them");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses built-in composition options with a package and writes nothing", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({ root });
+    expect((await run(["template", "import", fixture.dir, "--json"], env)).code).toBe(0);
+
+    const cases: readonly (readonly [string, readonly string[]])[] = [
+      ["features", ["--features", "tls"]],
+      ["modules", ["--modules", "health"]],
+      ["event_payloads", ["--event-payloads", "verbatim"]],
+      ["frontends", ["--frontends", "h5-tech"]],
+    ];
+    for (const [option, flags] of cases) {
+      const target = path.join(root, `workspace-${option}`);
+      const refused = await run(
+        [
+          "init",
+          target,
+          "--name",
+          "svc",
+          "--template-package",
+          "acme-dashboard@1.2.0",
+          ...flags,
+          "--json",
+        ],
+        env,
+      );
+      expect(refused.code, option).toBe(2);
+      const failure = failureOf(refused);
+      expect(failure["code"], option).toBe("invalid_request");
+      expect(String(failure["message"]), option).toContain(option);
+      // The refusal names the option rather than writing a package workspace
+      // that silently ignored it.
+      expect(existsSync(target), option).toBe(false);
+    }
+  });
+
+  it("reports a missing package as template_not_found and writes nothing", async () => {
+    const root = await temporaryRoot();
+    const target = path.join(root, "workspace");
+    const refused = await run(
+      ["init", target, "--name", "svc", "--template-package", "missing@1.0.0", "--json"],
+      { UVP_TEMPLATE_HOME: path.join(root, "store") },
+    );
+    expect(refused.code).toBe(2);
+    expect(failureOf(refused)["code"]).toBe("template_not_found");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a stored tree that no longer matches its manifest", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    const fixture = await makeTemplatePackage({ root });
+    expect((await run(["template", "import", fixture.dir, "--json"], env)).code).toBe(0);
+    await writeFile(
+      path.join(store, "acme-dashboard", "1.2.0", "files", "src", "main.cc"),
+      "// changed after import\n",
+    );
+
+    const target = path.join(root, "workspace");
+    const refused = await run(
+      ["init", target, "--name", "svc", "--template-package", "acme-dashboard@1.2.0", "--json"],
+      env,
+    );
+    // The store's integrity, not the caller's input: exit 1, and no partial
+    // workspace rendered from bytes that failed their digest.
+    expect(refused.code).toBe(1);
+    expect(failureOf(refused)["code"]).toBe("artifact_modified");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a --template-package that is not ID@VERSION", async () => {
+    const root = await temporaryRoot();
+    for (const value of ["acme-dashboard", "acme-dashboard@", "@1.2.0", "a@1.0.0@x"]) {
+      const target = path.join(root, `workspace-${value.replaceAll(/[^a-z0-9]/gu, "_")}`);
+      const refused = await run(
+        ["init", target, "--name", "svc", "--template-package", value, "--json"],
+        { UVP_TEMPLATE_HOME: path.join(root, "store") },
+      );
+      expect(refused.code, value).toBe(2);
+      expect(failureOf(refused)["code"], value).toBe("invalid_request");
+      expect(String(failureOf(refused)["message"]), value).toContain("ID@VERSION");
+      expect(existsSync(target), value).toBe(false);
+    }
+  });
+});
+
+describe("a malformed package", () => {
+  it("carries its problems in the error contract", async () => {
     const root = await temporaryRoot();
     const fixture = await makeTemplatePackage({
       root,
