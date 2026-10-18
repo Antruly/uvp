@@ -34,9 +34,13 @@ describe("the generated frontend project", () => {
       const manifest = JSON.parse(byPath(app, "frontend/package.json")) as {
         dependencies: Record<string, string>;
         devDependencies: Record<string, string>;
+        engines: { node: string };
         private: boolean;
       };
       expect(manifest.private, app).toBe(true);
+      // The same lines uvp itself accepts; a bare floor would also admit the
+      // odd-numbered releases Vite does not test against.
+      expect(manifest.engines.node, app).toBe("^22.19.0 || ^24.11.0 || >=26.0.0");
       for (const [dependency, version] of Object.entries({
         ...manifest.dependencies,
         ...manifest.devDependencies,
