@@ -184,25 +184,37 @@ describe("FrontendBuildService", () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it("reports an absent node as a missing requirement, not a failed build", async () => {
-    const fake = fakeRunner({
-      node: () => Promise.reject(Object.assign(new Error("spawn node ENOENT"), { code: "ENOENT" })),
+  describe("a version probe", () => {
+    it("reports an absent node as a missing requirement, not a failed build", async () => {
+      const fake = fakeRunner({
+        node: () =>
+          Promise.reject(Object.assign(new Error("spawn node ENOENT"), { code: "ENOENT" })),
+      });
+      await expect(build(fake.run)).rejects.toMatchObject({
+        detail: {
+          code: "missing_requirement",
+          remediation: { docs: "docs/installation.md" },
+        },
+      });
+      expect(buildCalls(fake.calls)).toHaveLength(0);
     });
-    await expect(build(fake.run)).rejects.toMatchObject({
-      detail: {
-        code: "missing_requirement",
-        remediation: { docs: "docs/installation.md" },
-      },
-    });
-    expect(buildCalls(fake.calls)).toHaveLength(0);
-  });
 
-  it("treats a probe that cannot answer as a missing requirement", async () => {
-    const fake = fakeRunner({
-      node: () => Promise.resolve(outcome({ exitCode: 127, stderr: "not found\n" })),
+    it("treats a probe that cannot answer as a missing requirement", async () => {
+      const fake = fakeRunner({
+        node: () => Promise.resolve(outcome({ exitCode: 127, stderr: "not found\n" })),
+      });
+      await expect(build(fake.run)).rejects.toMatchObject({
+        detail: { code: "missing_requirement" },
+      });
     });
-    await expect(build(fake.run)).rejects.toMatchObject({
-      detail: { code: "missing_requirement" },
+
+    it.each([
+      ["withdrawn", outcome({ aborted: true, exitCode: null }), "cancelled"],
+      ["silent", outcome({ exitCode: null, timedOut: true }), "timeout"],
+    ])("reports a %s probe as %s, not as a missing node", async (_label, answer, code) => {
+      const fake = fakeRunner({ node: () => Promise.resolve(answer) });
+      await expect(build(fake.run)).rejects.toMatchObject({ detail: { code } });
+      expect(buildCalls(fake.calls)).toHaveLength(0);
     });
   });
 

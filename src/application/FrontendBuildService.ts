@@ -285,13 +285,33 @@ export class FrontendBuildService {
     }).catch((cause: unknown) => {
       throw missingNode(command, cause);
     });
+    // The caller's withdrawal is not a finding about the host, exactly as in
+    // `#step`. `runProcess` resolves an aborted run rather than rejecting, and
+    // returns that before spawning when the signal is already aborted, so
+    // without this line a cancelled probe would read as "Node is missing".
+    if (outcome.aborted) throw cancelledFailure("The frontend build was cancelled.");
+    // A probe that never answered is not a probe that said no. The prerequisite
+    // may be installed and merely stuck, which is a different remedy.
+    if (outcome.timedOut) {
+      throw new UvpFailure({
+        code: "timeout",
+        message: `\`${command} ${args.join(" ")}\` did not answer within the version-probe limit.`,
+        remediation: {
+          action:
+            `Check that \`${command} ${args.join(" ")}\` returns promptly on this host — a shell ` +
+            "profile or wrapper that blocks it also blocks the build — then re-run.",
+          docs: "docs/installation.md",
+        },
+      });
+    }
     const version = firstLine(outcome.stdout);
     if (outcome.exitCode !== 0 || version === "") {
       throw new UvpFailure({
         code: "missing_requirement",
         message:
           `\`${command} ${args.join(" ")}\` did not report a version ` +
-          `(exit ${String(outcome.exitCode)}${outcome.timedOut ? ", timed out" : ""}).`,
+          `(exit ${outcome.exitCode === null ? "none" : String(outcome.exitCode)}` +
+          `${outcome.signal === null ? "" : `, signal ${outcome.signal}`}).`,
         remediation: {
           action:
             `Repair the ${command} installation so that \`${command} ${args.join(" ")}\` ` +
