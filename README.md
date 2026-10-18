@@ -56,7 +56,7 @@ can walk away from uvp and keep the project.
   `find_package(uvcpp CONFIG)` instead and does not need it.
 
 On Windows the archive route uses the same `pkg-config` lookup CMake does:
-`pkg-config.bat` is one of the names CMake searches, and from CMake 3.30 a
+`pkg-config.bat` is one of the names CMake searches, and from CMake 3.29.1 a
 non-`.exe` is skipped when `--help` fails or its output says `Pure-Perl`
 (Strawberry Perl's shim). `uvp doctor` applies that rule too. The archive needs
 a Release build; [installation.md](docs/installation.md#windows-msvc) has the

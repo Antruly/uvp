@@ -17,6 +17,7 @@ import {
   discoverLibuvcpp,
   pkgConfigCandidateNames,
   pkgConfigHelpAccepted,
+  pkgConfigValidatesCandidate,
   probeInvocation,
 } from "./LocalToolchainProvider.js";
 
@@ -770,8 +771,26 @@ describe("what CMake's FindPkgConfig searches", () => {
     ]);
   });
 
-  it("accepts a non-.exe candidate only when CMake's 3.30 validator would", () => {
-    // From 3.30, Windows runs `--help` on a candidate without `.exe` and rejects
+  it("runs the validator from 3.29.1, the release that added it", () => {
+    // 3.29.0 has no validator; 3.29.1 through 3.29.6 and 3.30+ do. The patch
+    // component decides: a whole-minor gate would skip 3.29.1–3.29.6, and there
+    // the probe would search the right names while never applying the check
+    // that decides, reporting a host ready whose configure then fails.
+    expect(pkgConfigValidatesCandidate("3.28.3", true)).toBe(false);
+    expect(pkgConfigValidatesCandidate("3.29.0", true)).toBe(false);
+    expect(pkgConfigValidatesCandidate("3.29.1", true)).toBe(true);
+    expect(pkgConfigValidatesCandidate("3.29.6", true)).toBe(true);
+    expect(pkgConfigValidatesCandidate("3.30.0", true)).toBe(true);
+    expect(pkgConfigValidatesCandidate("4.0.0", true)).toBe(true);
+    // The validator is a Windows-only step of `find_program`; elsewhere the
+    // version alone does not make it apply.
+    expect(pkgConfigValidatesCandidate("3.29.6", false)).toBe(false);
+    // An unreadable version takes the broader branch, as the name list does.
+    expect(pkgConfigValidatesCandidate(undefined, true)).toBe(true);
+  });
+
+  it("accepts a non-.exe candidate only when CMake's 3.29.1 validator would", () => {
+    // From 3.29.1, Windows runs `--help` on a candidate without `.exe` and rejects
     // it unless that exits 0. Strawberry Perl's shim is the real case: it is
     // found, answers `--version`, and is rejected by CMake — so the probe must
     // reject it too rather than promise a configure that then fails.

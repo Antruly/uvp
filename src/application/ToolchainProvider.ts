@@ -58,7 +58,7 @@ export interface ToolchainAvailability {
    *
    * What counts is what CMake's `FindPkgConfig` would use, not a narrower rule
    * of uvp's: on Windows that module searches `pkg-config.bat` too, and from
-   * 3.30 it validates a non-`.exe` candidate. A provider that reported only
+   * 3.29.1 it validates a non-`.exe` candidate. A provider that reported only
    * `.exe` files would send a host with a working shim to install a second
    * pkg-config it does not need.
    */

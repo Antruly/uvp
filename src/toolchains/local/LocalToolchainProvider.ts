@@ -61,27 +61,37 @@ const BUILD_SYSTEM_CANDIDATES: readonly { id: string; commands: readonly string[
 const PKGCONF_CMake_MINOR = 22;
 
 /**
- * From CMake 3.30, `find_program` on Windows validates a non-`.exe` candidate by
- * running it with `--help` and rejecting an exit other than 0 or output
- * containing `Pure-Perl` — Strawberry Perl's shim. Before 3.30 every candidate
- * `find_program` returned was accepted by the same `--version` check that still
- * follows it in every version.
+ * From CMake 3.29.1, `find_program` on Windows validates a non-`.exe` candidate
+ * by running it with `--help` and rejecting an exit other than 0 or output
+ * containing `Pure-Perl` — Strawberry Perl's shim. The gate is the patch release,
+ * not 3.30: 3.29.0 has no validator, and 3.29.1 through 3.29.6 have the same one
+ * 3.30 does. Before it every candidate `find_program` returned was accepted by
+ * the same `--version` check that still follows it in every version.
  */
-const BAT_VALIDATOR_CMake_MINOR = 30;
+const BAT_VALIDATOR_CMake_VERSION: readonly [number, number, number] = [3, 29, 1];
 
-/** The `major.minor` CMake reports, or undefined when the line is not one. */
-const cmakeMinorVersion = (version: string | undefined): readonly [number, number] | undefined => {
-  const match = /(\d+)\.(\d+)/u.exec(version ?? "");
-  return match === null ? undefined : [Number(match[1]), Number(match[2])];
+/** The `major.minor[.patch]` CMake reports, or undefined when the line is not one. */
+const cmakeVersionParts = (
+  version: string | undefined,
+): readonly [number, number, number] | undefined => {
+  const match = /(\d+)\.(\d+)(?:\.(\d+))?/u.exec(version ?? "");
+  return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)];
 };
 
-const cmakeAtLeast = (version: string | undefined, minor: number): boolean => {
-  const parsed = cmakeMinorVersion(version);
+/** Whether the version CMake reports is at or above `required`. */
+const cmakeAtLeast = (
+  version: string | undefined,
+  required: readonly [number, number, number],
+): boolean => {
+  const parsed = cmakeVersionParts(version);
   // An unreadable version takes the broader branch on purpose: reporting a tool
   // CMake may use is a weaker error than requiring one the caller may not need.
   if (parsed === undefined) return true;
-  const [major, found] = parsed;
-  return major > 3 || (major === 3 && found >= minor);
+  const [major, minor, patch] = parsed;
+  const [wantMajor, wantMinor, wantPatch] = required;
+  if (major !== wantMajor) return major > wantMajor;
+  if (minor !== wantMinor) return minor > wantMinor;
+  return patch >= wantPatch;
 };
 
 /**
@@ -93,8 +103,8 @@ const cmakeAtLeast = (version: string | undefined, minor: number): boolean => {
  * only `pkgconf` is not ready there, and saying it is would move the failure to
  * the caller's configure.
  *
- * The list is an approximation in one respect: CMake 3.22–3.30 prepends
- * `pkgconf` ahead of the Windows `.bat`, and 3.31 appends it. That only decides
+ * The list is an approximation in one respect: CMake 3.22 prepends `pkgconf`
+ * ahead of `pkg-config`, and 3.23 through 3.31 append it. That only decides
  * which path is named when both are installed, not whether a host is ready.
  */
 export const pkgConfigCandidateNames = (
@@ -104,14 +114,14 @@ export const pkgConfigCandidateNames = (
   const names: string[] = [];
   if (windows) names.push("pkg-config.bat");
   names.push(windows ? "pkg-config.exe" : "pkg-config");
-  if (cmakeAtLeast(cmakeVersion, PKGCONF_CMake_MINOR)) {
+  if (cmakeAtLeast(cmakeVersion, [3, PKGCONF_CMake_MINOR, 0])) {
     names.push(windows ? "pkgconf.exe" : "pkgconf");
   }
   return names;
 };
 
 /**
- * CMake's Windows validator for a non-`.exe` candidate (3.30+), as a predicate.
+ * CMake's Windows validator for a non-`.exe` candidate (3.29.1+), as a predicate.
  *
  * `execute_process(COMMAND "${candidate}" --help ...)` and then
  * `if(NOT _result EQUAL 0 OR _output MATCHES "Pure-Perl")`. The output variable
@@ -119,6 +129,20 @@ export const pkgConfigCandidateNames = (
  */
 export const pkgConfigHelpAccepted = (exitCode: number | null, output: string): boolean =>
   exitCode === 0 && !/Pure-Perl/u.test(output);
+
+/**
+ * Whether the version in use runs that validator at all.
+ *
+ * Exported because it is the boundary that decides *when* a candidate is
+ * rejected, and it is not visible in `pkgConfigHelpAccepted`'s tests: a probe
+ * that skipped the check entirely would still pass every one of them. CMake
+ * 3.29.0 and earlier search the same names and accept whatever `find_program`
+ * finds, so a host whose only shim is rejected from 3.29.1 on is ready there.
+ */
+export const pkgConfigValidatesCandidate = (
+  cmakeVersion: string | undefined,
+  windows: boolean = isWindows,
+): boolean => windows && cmakeAtLeast(cmakeVersion, BAT_VALIDATOR_CMake_VERSION);
 
 /**
  * How to start `path` for a probe.
@@ -165,9 +189,9 @@ const helpAccepts = async (path: string, signal: AbortSignal): Promise<boolean> 
  *
  * uvp mirrors `FindPkgConfig` rather than approximating it with an `.exe`-only
  * lookup: on Windows the module searches `pkg-config.bat` first, so a host whose
- * shim is a working `.bat` is ready even though no `.exe` exists. From 3.30 the
- * module's validator rejects a non-`.exe` that fails `--help` or identifies as
- * Pure-Perl, and its search then continues with the rest of the list; older
+ * shim is a working `.bat` is ready even though no `.exe` exists. From 3.29.1
+ * the module's validator rejects a non-`.exe` that fails `--help` or identifies
+ * as Pure-Perl, and its search then continues with the rest of the list; older
  * versions accept any candidate `find_program` returns and decide with
  * `--version`, which every version still runs afterwards and which clears the
  * result on a nonzero exit.
@@ -185,8 +209,7 @@ const pkgConfigOnPath = async (
   let candidate = await findOnPath(names);
   if (
     candidate !== undefined &&
-    isWindows &&
-    cmakeAtLeast(cmakeVersion, BAT_VALIDATOR_CMake_MINOR) &&
+    pkgConfigValidatesCandidate(cmakeVersion) &&
     !candidate.toLowerCase().endsWith(".exe") &&
     !(await helpAccepts(candidate, signal))
   ) {

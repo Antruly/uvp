@@ -357,7 +357,7 @@ jobs:
           # Strawberry Perl's `pkg-config.bat`, so `Get-Command pkg-config`
           # succeeds there — but a `.bat` is not what this lane can rely on.
           # CMake's FindPkgConfig has searched `pkg-config.bat` since 3.20 and
-          # `pkgconf` since 3.22; from 3.30 it validates a non-`.exe` candidate by
+          # `pkgconf` since 3.22; from 3.29.1 it validates a non-`.exe` candidate by
           # running `--help`, and rejects the Strawberry shim whose output says
           # `Pure-Perl`. That is how the second run reported
           # `missing: PKG_CONFIG_EXECUTABLE` with a `.bat` on PATH (the first run

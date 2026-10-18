@@ -68,7 +68,7 @@ const CMAKE_MODULE_ERROR = [
  * `PKG_CONFIG_EXECUTABLE` to `NOTFOUND`.
  *
  * This is the configure failure a Windows host meets when `FindPkgConfig` finds
- * no pkg-config it will use — a `.bat` wrapper included, when the CMake 3.30
+ * no pkg-config it will use — a `.bat` wrapper included, when the CMake 3.29.1
  * validator rejects it or the `--version` probe fails. The message is CMake's
  * and names neither the candidate nor the documentation, so the parser attaches
  * the remedy beside it.

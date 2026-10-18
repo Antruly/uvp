@@ -269,7 +269,7 @@ const cmakeHeader = (line: string): CmakeHeader | undefined => {
  * A first-time Windows user meets this sentence when a libuvcpp release archive
  * is in use and no `pkg-config` CMake can use is on `PATH`. The module has
  * searched, among other names, `pkg-config.bat` since 3.20 — so the presence of
- * a `.bat` is not by itself the failure. From CMake 3.30 a non-`.exe` candidate
+ * a `.bat` is not by itself the failure. From CMake 3.29.1 a non-`.exe` candidate
  * is rejected when `--help` exits nonzero or its output says `Pure-Perl`, which
  * is Strawberry Perl's shim; on older versions the `--version` probe decides.
  * The message is CMake's and says none of that, so the remedy is attached beside
