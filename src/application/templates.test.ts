@@ -580,6 +580,12 @@ describe("the websocket-test template", () => {
     expect(source).toContain('app.websocket("/ws"');
     expect(source).toContain('app.serve_static("/", "./public")');
 
+    // The log is JSON, and a peer may put any byte in a text frame. The
+    // three short escapes cover newline, carriage return, and tab; every
+    // other control character needs the universal form or the response
+    // stops parsing.
+    expect(source).toContain("static_cast<unsigned char>(c) < 32");
+
     const files = renderTemplate("websocket-test", {
       name: "svc",
       port: 8080,
@@ -589,6 +595,12 @@ describe("the websocket-test template", () => {
     expect(consoleFile, "websocket-test produced no public/index.html").toBeDefined();
     expect(consoleFile?.content).toContain("WebSocket test");
     expect(consoleFile?.content).toContain("/api/echo-log");
+
+    // The console is served from the same origin as the route, and `tls`
+    // turns that origin HTTPS. A page that hardcodes the cleartext scheme
+    // would have its upgrade blocked before it left the browser.
+    expect(consoleFile?.content).toContain("location.protocol");
+    expect(consoleFile?.content).toContain("wss://");
 
     expect(templateRoutes("websocket-test", [])).toEqual([
       "GET /healthz",

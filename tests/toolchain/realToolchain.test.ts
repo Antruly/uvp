@@ -19,6 +19,7 @@ import {
   waitForOutput,
 } from "../support/realLibuvcpp.js";
 import type { RealLibuvcpp } from "../support/realLibuvcpp.js";
+import { closeFramePayload, exchangeWebSocketFrames } from "../support/websocketFrames.js";
 
 /**
  * The self-proof: six templates, built by a real CMake against a real libuvcpp,
@@ -276,6 +277,40 @@ const websocketTestService = async (): Promise<void> => {
       frames.filter((frame) => frame.direction === "received").map((frame) => frame.text),
     ).toEqual(["hello"]);
 
+    // A control character with no short JSON escape. The log endpoint
+    // serializes what arrived, so the byte either gets the universal form
+    // or the whole response stops parsing.
+    const control = "a\u0001b";
+    const controlEcho = await runCli([
+      "ws",
+      `ws://127.0.0.1:${String(port)}/ws`,
+      "--send",
+      control,
+      "--json",
+    ]);
+    expect(controlEcho.exit).toBe(EXIT_OK);
+    expect(
+      (resultOrThrow(controlEcho)["frames"] as readonly { readonly text?: string }[]).some(
+        (frame) => frame.text === control,
+      ),
+    ).toBe(true);
+
+    // Binary frames, PING, and CLOSE are outside what `uvp ws` sends; the
+    // raw client drives them and the service's own stdout says whether the
+    // handlers ran.
+    const payload = Buffer.from([0x00, 0x01, 0xfe, 0xff]);
+    const exchange = await exchangeWebSocketFrames(port, "/ws", [
+      { opcode: "binary", payload },
+      { opcode: "ping", payload: Buffer.from("abc") },
+      { opcode: "close", payload: closeFramePayload(1000, "bye") },
+    ]);
+    expect(exchange.status).toBe(101);
+    const echoed = exchange.frames.find((frame) => frame.opcode === "binary");
+    expect(echoed, "the service did not echo the binary frame").toBeDefined();
+    expect(echoed?.payload.equals(payload)).toBe(true);
+    expect(await waitForOutput(service, /\[ping\] 3 bytes/u)).toBeDefined();
+    expect(await waitForOutput(service, /\[close\] code=1000 reason=bye/u)).toBeDefined();
+
     const log = await runCli(["http", `http://127.0.0.1:${String(port)}/api/echo-log`, "--json"]);
     const logResult = resultOrThrow(log);
     expect(logResult["status"]).toBe(200);
@@ -290,6 +325,14 @@ const websocketTestService = async (): Promise<void> => {
     expect(parsed.entries.some((entry) => entry.type === "text" && entry.payload === "hello")).toBe(
       true,
     );
+    expect(parsed.entries.some((entry) => entry.type === "text" && entry.payload === control)).toBe(
+      true,
+    );
+    expect(
+      parsed.entries.some(
+        (entry) => entry.type === "binary" && entry.payload === "00 01 fe ff (4 bytes)",
+      ),
+    ).toBe(true);
 
     // The console is the static route the template adds; a page that does
     // not mention the log endpoint is not the console the template promises.

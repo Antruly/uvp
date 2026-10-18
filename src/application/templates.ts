@@ -900,6 +900,20 @@ std::string JsonEscape(const std::string& text) {
     } else if (c == static_cast<char>(9)) {
       out += backslash;
       out += 't';
+    } else if (static_cast<unsigned char>(c) < 32) {
+      // The two-letter escapes above cover only three of the control
+      // characters a peer may put in a text frame. JSON has no other short
+      // spelling, so the rest take the universal form, which keeps the
+      // document parseable; emitting the byte would produce a string no
+      // parser accepts.
+      static const char kHex[] = "0123456789abcdef";
+      const unsigned char byte = static_cast<unsigned char>(c);
+      out += backslash;
+      out += 'u';
+      out += '0';
+      out += '0';
+      out += kHex[(byte >> 4) & 0x0f];
+      out += kHex[byte & 0x0f];
     } else {
       out += c;
     }
@@ -1011,7 +1025,11 @@ const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
   const write = (line) => { output.textContent += line + String.fromCharCode(10); };
   document.getElementById('connect').onclick = () => {
     if (socket !== null) socket.close();
-    socket = new WebSocket('ws://' + location.host + '/ws');
+    // The console is served from the same origin as the route, so a page
+    // loaded over HTTPS needs the secure scheme: a cleartext socket from a
+    // secure page is blocked, and the upgrade would never arrive.
+    const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    socket = new WebSocket(scheme + location.host + '/ws');
     socket.onopen = () => write('connected');
     socket.onmessage = (event) => write('recv: ' + event.data);
     socket.onclose = (event) => write('closed: ' + event.code + ' ' + event.reason);
