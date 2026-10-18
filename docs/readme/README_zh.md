@@ -130,23 +130,23 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 
 ## uvp 能做什么
 
-| 任务                                             | 工具                                                                                                                                    |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| 检查工具链以及存在哪些 libuvcpp 模块             | `uvp_doctor`                                                                                                                            |
-| 生成可编译的工程（7 个模板）                     | `uvp_workspace_create`                                                                                                                  |
-| 搜索、校验、导入、导出、删除模板包               | `uvp_template_search`、`uvp_template_get`、`uvp_template_validate`、`uvp_template_import`、`uvp_template_export`、`uvp_template_remove` |
-| 用 CMake 配置并编译                              | `uvp_build`                                                                                                                             |
-| 安装并构建生成的 Node 前端应用                   | `uvp_frontend_build`                                                                                                                    |
-| 启动服务，并等待它真正能应答                     | `uvp_run`、`uvp_run_stop`                                                                                                               |
-| 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS | `uvp_http_request`                                                                                                                      |
-| 探测 WebSocket 端点                              | `uvp_websocket_probe`                                                                                                                   |
-| 发送 SOAP 信封并读取应答                         | `uvp_soap_call`                                                                                                                         |
-| 测量吞吐与延迟分位数                             | `uvp_load_test`                                                                                                                         |
-| 录制一段会话中的请求往来，供之后读取             | `uvp_capture_start`、`uvp_capture_read`                                                                                                 |
-| 把录制的会话对着一个活动目标重放                 | `uvp_capture_replay`                                                                                                                    |
-| 针对已录制的请求往来求值断言                     | `uvp_assert_exchange`                                                                                                                   |
-| 把以上全部作为一次托管流程执行                   | `uvp_verify`                                                                                                                            |
-| 对比两份验证报告，看清到底哪里变了               | `uvp_bundle_diff`                                                                                                                       |
+| 任务                                                     | 工具                                                                                                                                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 检查工具链以及存在哪些 libuvcpp 模块                     | `uvp_doctor`                                                                                                                                                                          |
+| 生成可编译的工程（7 个模板）                             | `uvp_workspace_create`                                                                                                                                                                |
+| 搜索、校验、导入、导出、删除模板包，并从模板包生成工作区 | `uvp_template_search`、`uvp_template_get`、`uvp_template_validate`、`uvp_template_import`、`uvp_template_export`、`uvp_template_remove`；`uvp_workspace_create`（`template_package`） |
+| 用 CMake 配置并编译                                      | `uvp_build`                                                                                                                                                                           |
+| 安装并构建生成的 Node 前端应用                           | `uvp_frontend_build`                                                                                                                                                                  |
+| 启动服务，并等待它真正能应答                             | `uvp_run`、`uvp_run_stop`                                                                                                                                                             |
+| 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS         | `uvp_http_request`                                                                                                                                                                    |
+| 探测 WebSocket 端点                                      | `uvp_websocket_probe`                                                                                                                                                                 |
+| 发送 SOAP 信封并读取应答                                 | `uvp_soap_call`                                                                                                                                                                       |
+| 测量吞吐与延迟分位数                                     | `uvp_load_test`                                                                                                                                                                       |
+| 录制一段会话中的请求往来，供之后读取                     | `uvp_capture_start`、`uvp_capture_read`                                                                                                                                               |
+| 把录制的会话对着一个活动目标重放                         | `uvp_capture_replay`                                                                                                                                                                  |
+| 针对已录制的请求往来求值断言                             | `uvp_assert_exchange`                                                                                                                                                                 |
+| 把以上全部作为一次托管流程执行                           | `uvp_verify`                                                                                                                                                                          |
+| 对比两份验证报告，看清到底哪里变了                       | `uvp_bundle_diff`                                                                                                                                                                     |
 
 模板：`hello-http`、`rest-api`、`websocket-echo`、`websocket-test`、`soap-service`、
 `static-files`、`http3-service`。
@@ -211,19 +211,21 @@ libuvcpp 自己的那一个，也就是生成的服务所链接的同一个栈�
 MySQL 和 PostgreSQL 走的是同一份生成代码、同一条运行时加载驱动的路径，
 这里不会声称观察过它们。
 
-**模板包（0.3.0）。** 本版本定义了 `uvp.template/1` 模板包格式，并以应用模块的形式
-提供本地 store、确定性搜索、inspect/export 以及有界的密钥/PII 扫描。它还加入了官方
-registry [Antruly/uvp-templates](https://github.com/Antruly/uvp-templates) 所用
-`uvp.registry/1` 索引的读取客户端。包的六个工具（`uvp_template_*`）已为下一个版本准备；0.3.0 尚未暴露它们，
-`uvp init --template-package` 仍属于 P6 增量。registry 在其 runtime lane 启用前
-也不会声称任何包已通过构建验证。
+**模板包（0.4.0）。** 本版本定义了 `uvp.template/1` 模板包格式，并提供本地 store、
+确定性搜索、inspect/export、有界的密钥/PII 扫描，以及官方 registry
+[Antruly/uvp-templates](https://github.com/Antruly/uvp-templates) 所用
+`uvp.registry/1` 索引的读取客户端。六个 CLI/MCP 工具（`uvp_template_*`）与
+`uvp init --template-package` 在本版本可用：包的文件会以 <span v-pre>`{{project.name}}`</span>、
+<span v-pre>`{{project.port}}`</span>、<span v-pre>`{{features}}`</span> 渲染，`uvp.json` 记录
+`template_package { id, version, digest }`，并报告 manifest 声明的 routes。
+registry 在其 runtime lane 启用前不会声称任何包已通过构建验证。
 
 **进行中。** Web 工具箱 —— 请求、WebSocket 探测、SOAP 调用、负载测试、抓包、断言 ——
 对任何服务都能用，不只对 uvp 生成的。它还缺的是触达范围：工具链 provider 的
 **端口（port）**已经定义，`local` provider 已实现；容器与远程 SSH provider 尚未编写。
 
-**发布。** `uvp-agents@0.2.0` 是首个正式发布；`0.3.0` 是当前由 release-please
-准备的版本。针对 PR 标题的传统提交门禁与 release-please 工作流
+**发布。** `uvp-agents@0.2.0` 是首个正式发布；`0.3.0` 随后发布；`0.4.0` 是当前由
+release-please 准备的版本。针对 PR 标题的传统提交门禁与 release-please 工作流
 （`.github/workflows/release-please.yml`，由 #177 为 #160 添加）负责生成发布 PR。
 发布 PR 上的派生文件仍由维护者手动重新生成，这是 #160 记录在案的决定；
 发布工作流由维护者从发布 tag 手动 dispatch。路线图里列出的加固项
