@@ -149,11 +149,11 @@ licence text itself is the package's `LICENSE` file.
 
 A v1 package may use three placeholders in `files/`:
 
-| Placeholder        | Substituted from                                |
-| ------------------ | ----------------------------------------------- |
-| `{{project.name}}` | the project name, declared by a `name` variable |
-| `{{project.port}}` | the port, declared by a `port` variable         |
-| `{{features}}`     | `requires.features`                             |
+| Placeholder                           | Substituted from                                |
+| ------------------------------------- | ----------------------------------------------- |
+| <span v-pre>`{{project.name}}`</span> | the project name, declared by a `name` variable |
+| <span v-pre>`{{project.port}}`</span> | the port, declared by a `port` variable         |
+| <span v-pre>`{{features}}`</span>     | `requires.features`                             |
 
 There are no conditional placeholders in v1. A variable for any other
 placeholder is refused, because it would render literally into a compiled file.
