@@ -71,6 +71,29 @@ describe("parsing a uvp.registry/1 index", () => {
     });
     expect(entry?.files).toHaveLength(1);
   });
+
+  it("carries a mirrored routes declaration through the manifest rules", () => {
+    // The generator spreads `template.json`, so a package that declares routes
+    // puts them on every index entry. Refusing the key would refuse the whole
+    // index, not just the entry, because a key is closed at every level.
+    const result = parseTemplateRegistryIndex(
+      index([packageEntry({ versions: [versionEntry({ routes: ["GET /healthz"] })] })]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.index.packages[0]?.versions[0]?.routes).toEqual(["GET /healthz"]);
+  });
+
+  it("validates a mirrored routes declaration instead of only tolerating it", () => {
+    // A malformed route is reported by the package rule, under the entry that
+    // carried it: "tolerated" would let the registry describe a route the
+    // package format refuses.
+    const problems = problemsOf(
+      index([packageEntry({ versions: [versionEntry({ routes: ["FOO /healthz"] })] })]),
+    );
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems.join("\n")).toContain("routes.0: method must be one of");
+  });
 });
 
 describe("the shape the registry's generator emits", () => {
