@@ -140,7 +140,11 @@ const SCAN_RULES: readonly ScanRule[] = [
   },
   {
     rule: "home_path",
-    pattern: /\/(?:home|Users)\/[A-Za-z0-9._-]+\//u,
+    // The user name may end the path: `HOME=/home/alice` is the leak shape as
+    // much as `/home/alice/projects` is. The lookahead stops the match at the
+    // end of the name without requiring a component below it. `\/home\/` still
+    // excludes `/homepage/alice`.
+    pattern: /\/(?:home|Users)\/[A-Za-z0-9._-]+(?![A-Za-z0-9._-])/u,
     redact: (match) => (match.startsWith("/Users/") ? "/Users/…/" : "/home/…/"),
   },
   {

@@ -78,6 +78,42 @@ describe("scanning a template package", () => {
     expect(result.scanned).toContain("template.json");
   });
 
+  it("reports a bare home path, which has no component below the user name", async () => {
+    const root = await temporaryRoot("uvp-scan-home-");
+    const fixture = await makeTemplatePackage({ root });
+    await writeFile(
+      path.join(fixture.dir, "files", "src", "paths.txt"),
+      ["HOME=/home/alice", "home: /Users/bob", "nested = /home/dave/projects/app", ""].join("\n"),
+    );
+
+    const result = await scanTemplatePackage(fixture.dir);
+
+    const homes = result.findings.filter((finding) => finding.rule === "home_path");
+    // One finding per path: the nested form must not also report its bare prefix.
+    expect(homes.map((finding) => finding.line)).toEqual([1, 2, 3]);
+    expect(homes.map((finding) => finding.redacted)).toEqual(["/home/…/", "/Users/…/", "/home/…/"]);
+    for (const finding of homes) {
+      expect(finding.redacted).not.toContain("alice");
+      expect(finding.redacted).not.toContain("bob");
+      expect(finding.redacted).not.toContain("dave");
+    }
+  });
+
+  it("does not read a path that only contains the shape as a home path", async () => {
+    const root = await temporaryRoot("uvp-scan-not-home-");
+    const fixture = await makeTemplatePackage({ root });
+    await writeFile(
+      path.join(fixture.dir, "files", "src", "not-home.txt"),
+      ["prefix = /usr/local/share", "prefix = /homepage/alice", "prefix = /myhome/alice", ""].join(
+        "\n",
+      ),
+    );
+
+    const result = await scanTemplatePackage(fixture.dir);
+
+    expect(result.findings.filter((finding) => finding.rule === "home_path")).toEqual([]);
+  });
+
   it("reports nothing for a package with no matching shape, and says what it read", async () => {
     const root = await temporaryRoot("uvp-scan-clean-");
     const fixture = await makeTemplatePackage({ root });
