@@ -6,11 +6,17 @@ import {
 } from "../domain/eventPayloadPolicy.js";
 import type { UvpFeature } from "../domain/features.js";
 import {
+  UVP_FRONTEND_DEFINITIONS,
+  resolveFrontends,
+  type UvpFrontend,
+} from "../domain/frontends.js";
+import {
   UVP_MODULE_DEFINITIONS,
   defaultModules,
   resolveModules,
   type UvpModule,
 } from "../domain/modules.js";
+import { frontendFiles, frontendSelector } from "./frontends.js";
 
 /**
  * Workspace templates.
@@ -128,6 +134,7 @@ export const templateRoutes = (
   template: TemplateId,
   features: readonly UvpFeature[],
   modules: readonly UvpModule[] = defaultModules(template),
+  frontends: readonly UvpFrontend[] = [],
 ): readonly string[] => {
   const base: readonly string[] = (() => {
     switch (template) {
@@ -159,8 +166,40 @@ export const templateRoutes = (
   return [
     ...base,
     ...resolveModules(modules).flatMap((module) => UVP_MODULE_DEFINITIONS[module].routes),
+    // A selected skin adds the document root the source gains below. Where the
+    // template or a module already registers one, the routes above already name
+    // it, and listing it twice would be a table that disagrees with itself.
+    ...(frontendStaticRouteNeeded(template, modules, frontends) ? STATIC_ROOT_ROUTES : []),
   ];
 };
+
+/**
+ * The four registrations one `serve_static` call adds.
+ *
+ * Kept as a constant because three places have to agree on them: the route
+ * table here, the `static-console` module's entries, and the `static-files`
+ * template's. A fifth spelling of the pair is a difference waiting to happen.
+ */
+const STATIC_ROOT_ROUTES = ["GET /", "HEAD /", "GET /*path", "HEAD /*path"] as const;
+
+/**
+ * Whether a frontend selection is what puts a static document root in the source.
+ *
+ * `static-files` registers one itself, and the `static-console` module registers
+ * one for the templates that compose it; in both cases the skin files are served
+ * by a call that is already there and the generated source must not add a second
+ * one. `http3-service` never qualifies: its routes are registered on
+ * `uvcpp_http_server`, which the generated code gives no document root.
+ */
+const frontendStaticRouteNeeded = (
+  template: TemplateId,
+  modules: readonly UvpModule[],
+  frontends: readonly UvpFrontend[],
+): boolean =>
+  frontends.length > 0 &&
+  template !== "http3-service" &&
+  template !== "static-files" &&
+  !resolveModules(modules).includes("static-console");
 
 export interface TemplateInput {
   readonly name: string;
@@ -183,7 +222,21 @@ export interface TemplateInput {
    * change nothing.
    */
   readonly eventPayloads?: UvpEventPayloadPolicy;
+  /**
+   * The static frontends to generate.
+   *
+   * Absent means no skin. The template's own page — the `static-files`
+   * placeholder or the `websocket-test` console — is not a skin and is kept
+   * whether or not one is selected. Resolved in the vocabulary's order before
+   * it is rendered, so two requests that name the same skins produce the same
+   * files.
+   */
+  readonly frontends?: readonly UvpFrontend[];
 }
+
+/** The skins this render composes, in the vocabulary's canonical order. */
+const selectedFrontends = (input: TemplateInput): readonly UvpFrontend[] =>
+  resolveFrontends(input.frontends ?? []);
 
 /** The payload policy this input asks for, before the module is checked. */
 const eventPayloadsOf = (input: TemplateInput): UvpEventPayloadPolicy =>
@@ -970,6 +1023,20 @@ const staticConsoleRoute = `
   app.serve_static("/", "./public");
 `;
 
+/**
+ * The document-root registration a selected skin needs, or nothing.
+ *
+ * A frontend template's own page registers its root itself; this fragment is
+ * for the backend templates, which serve no files until a skin asks them to.
+ * The registration is emitted after every route, because `serve_static` is a
+ * fallback that answers every request it sees — registered earlier, it would
+ * win over the exact routes that should.
+ */
+const frontendStaticRoute = (template: TemplateId, input: TemplateInput): string =>
+  frontendStaticRouteNeeded(template, selectedModules(input), selectedFrontends(input))
+    ? staticConsoleRoute
+    : "";
+
 const MODULE_ROUTES: Readonly<Record<UvpModule, (input: TemplateInput) => string>> = {
   health: () => healthRoute,
   "echo-log": () => echoLogRoute,
@@ -998,7 +1065,7 @@ ${webAppSetup(input)}
     resp.status(200).json_str(R"({"message":"Hello, AI"})");
     resp.end();
   });
-${moduleRouteBlock(input)}${webTail(input)}`;
+${moduleRouteBlock(input)}${frontendStaticRoute("hello-http", input)}${webTail(input)}`;
 
 /**
  * `rest-api`'s store, chosen by whether the workspace declared the `db` module.
@@ -1083,7 +1150,7 @@ ${webAppSetup(input)}
     resp.status(200).json_str(JsonItem(found->first, found->second));
     resp.end();
   });
-${moduleRouteBlock(input)}${webTail(input)}`;
+${moduleRouteBlock(input)}${frontendStaticRoute("rest-api", input)}${webTail(input)}`;
 
 /**
  * The db module's headers, as the database-backed template includes them.
@@ -1324,7 +1391,7 @@ ${webAppSetup(input)}
                resp.end();
              }
            });
-${moduleRouteBlock(input)}${webTail(input)}`;
+${moduleRouteBlock(input)}${frontendStaticRoute("rest-api", input)}${webTail(input)}`;
 
 const websocketEchoMain = (input: TemplateInput): string => {
   // The template's own handler uses the connection type, so its header is
@@ -1361,7 +1428,7 @@ ${recordText}      conn->send_text(message.data(), message.size());
       std::cout << "closed: " << static_cast<int>(code) << " " << reason << "\\n" << std::flush;
     });
   });
-${moduleRouteBlock(input)}${webTail(input)}`;
+${moduleRouteBlock(input)}${frontendStaticRoute("websocket-echo", input)}${webTail(input)}`;
 };
 
 const websocketTestMain = (input: TemplateInput): string => {
@@ -1398,11 +1465,22 @@ ${description}int main() {
   // Size libuv's pool before the first submission; 0 means one per CPU.
   uvcpp_set_threadpool_size(0);
 ${webAppSetup(input)}
-${moduleRouteBlock(input)}
+${moduleRouteBlock(input)}${frontendStaticRoute("websocket-test", input)}
 ${webTail(input)}`;
 };
 
-const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
+const websocketTestConsole = (input: TemplateInput): string => {
+  // The console owns `/`, so the skins a workspace also selected are linked
+  // from here rather than from a selector page that would have to replace the
+  // console. Relative links resolve under `public/`.
+  const frontends = selectedFrontends(input);
+  const skins =
+    frontends.length === 0
+      ? ""
+      : `<nav><strong>Static skins:</strong> ${frontends
+          .map((frontend) => `<a href="./${frontend}/">${frontend}</a>`)
+          .join(" ")}</nav>\n`;
+  return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <title>${input.name} WebSocket test</title>
@@ -1411,10 +1489,12 @@ const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
   textarea { width: 100%; height: 4rem; }
   pre { background: #111; color: #eee; padding: 1rem; min-height: 12rem; overflow: auto; }
   button { margin-right: .5rem; }
+  nav { margin: 0 0 1rem; }
+  nav a { margin-right: .75rem; }
 </style>
 <h1>${input.name}</h1>
 <p>Connect, send a message, and load the server's bounded echo log.</p>
-<textarea id="message">hello</textarea>
+${skins}<textarea id="message">hello</textarea>
 <div>
   <button id="connect">Connect</button>
   <button id="send">Send</button>
@@ -1450,6 +1530,7 @@ const websocketTestConsole = (input: TemplateInput): string => `<!doctype html>
 </script>
 </html>
 `;
+};
 
 const soapServiceMain = (input: TemplateInput): string =>
   `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
@@ -1481,7 +1562,7 @@ ${webAppSetup(input)}
     resp.body(QuoteEnvelope("ACME"));
     resp.end();
   });
-${moduleRouteBlock(input)}${webTail(input)}`;
+${moduleRouteBlock(input)}${frontendStaticRoute("soap-service", input)}${webTail(input)}`;
 
 const staticFilesMain = (input: TemplateInput): string =>
   `${webPreamble(input, moduleIncludes(input))}${moduleNamespaceBlock(input)}
@@ -1740,6 +1821,11 @@ const manifest = (input: TemplateInput, template: TemplateId): string => {
   // a reader who found it absent would have to guess whether that meant
   // `summary` or an older workspace that predates the field.
   const recordsEvidence = modules.includes("evidence-log");
+  // Recorded whenever a skin was selected: unlike `modules`, there is no
+  // template default to stay silent about. The template's own page is not a
+  // skin and is not recorded — a reader that found a name here can rely on the
+  // files existing under `public/<name>/`.
+  const frontends = selectedFrontends(input);
   return `${JSON.stringify(
     {
       uvp: 1,
@@ -1750,6 +1836,7 @@ const manifest = (input: TemplateInput, template: TemplateId): string => {
       features: input.features,
       ...(recordsModules ? { modules } : {}),
       ...(recordsEvidence ? { evidence: { payloads: eventPayloadsOf(input) } } : {}),
+      ...(frontends.length > 0 ? { frontends } : {}),
       requirements: { libuvcpp: `>=${LIBUVCPP_BASELINE}` },
     },
     null,
@@ -1911,6 +1998,37 @@ ${recorded}`
 \`set_port\` in \`src/main.cpp\` — ${recorded}`;
 };
 
+/**
+ * The section a workspace with static skins needs and the others must not carry.
+ *
+ * Two facts here are not visible from the generated C++: where each skin is
+ * served, and that the pages load nothing from the network. Both matter to a
+ * reader testing the workspace offline — a page that silently needed a CDN
+ * would look broken rather than static.
+ */
+const frontendReadme = (template: TemplateId, input: TemplateInput): string => {
+  const frontends = selectedFrontends(input);
+  if (frontends.length === 0) return "";
+  const list = frontends
+    .map((frontend) => `- \`/${frontend}/\` — ${UVP_FRONTEND_DEFINITIONS[frontend].description}`)
+    .join("\n");
+  const selector =
+    template === "websocket-test" && selectedModules(input).includes("static-console")
+      ? "The console at `/` links each skin."
+      : "The page at `/` lists the skins.";
+  return `
+## Frontend
+
+The service serves \`./public\` as its document root. The selected static skins are:
+
+${list}
+
+${selector} Each skin is plain HTML, CSS, and JavaScript in its own directory and
+needs no build step. None of them loads a CDN, an external font, or a remote
+script, so every page works with the network unavailable.
+`;
+};
+
 const readme = (input: TemplateInput, template: TemplateId): string => `# ${input.name}
 
 Generated by [uvp](https://github.com/Antruly/uvp) from the \`${template}\` template.
@@ -1942,7 +2060,7 @@ binary's location:
 \`\`\`
 
 ${portNote(template, input)}
-${tlsReadme(input)}${databaseReadme(input)}${template === "http3-service" ? http3Readme(input) : ""}
+${tlsReadme(input)}${databaseReadme(input)}${template === "http3-service" ? http3Readme(input) : ""}${frontendReadme(template, input)}
 ## Verify
 
 \`\`\`bash
@@ -1958,7 +2076,8 @@ export const renderTemplate = (
   // the same order. `selectedModules` is the reader for the fragments; this is
   // the writer of the input they read.
   const modules = resolveModules(input.modules ?? defaultModules(template));
-  const composed: TemplateInput = { ...input, modules };
+  const frontends = resolveFrontends(input.frontends ?? []);
+  const composed: TemplateInput = { ...input, modules, frontends };
   const files: GeneratedFile[] = [
     { path: "CMakeLists.txt", content: cmakeLists(composed) },
     { path: "src/main.cpp", content: MAIN_BY_TEMPLATE[template](composed) },
@@ -1977,11 +2096,16 @@ export const renderTemplate = (
   ];
   // The templates that bring their own page each own one asset path; a selected
   // `static-console` replaces it, because the console is the page that drives
-  // the routes the workspace actually serves.
+  // the routes the workspace actually serves. A selected skin replaces the
+  // `static-files` placeholder for the same reason: the placeholder has no
+  // function the selector does not have, and leaving it would hide the skins.
   if (template === "static-files") {
     files.push({
       path: "public/index.html",
-      content: `<!doctype html>\n<title>${composed.name}</title>\n<h1>${composed.name}</h1>\n`,
+      content:
+        frontends.length === 0
+          ? `<!doctype html>\n<title>${composed.name}</title>\n<h1>${composed.name}</h1>\n`
+          : frontendSelector(frontends, composed.name),
     });
   }
   for (const module of modules) {
@@ -1990,6 +2114,21 @@ export const renderTemplate = (
       const asset = { path: "public/index.html", content: websocketTestConsole(composed) };
       if (at === -1) files.push(asset);
       else files[at] = asset;
+    }
+  }
+  if (frontends.length > 0) {
+    // A page that already owns `/` — the console or the selector pushed above —
+    // is not replaced; the console links the skins itself. Otherwise the
+    // selector is the document at `/`, so every skin is reachable from the
+    // served root rather than only by a URL a reader had to be told.
+    if (!files.some((file) => file.path === "public/index.html")) {
+      files.push({
+        path: "public/index.html",
+        content: frontendSelector(frontends, composed.name),
+      });
+    }
+    for (const frontend of frontends) {
+      files.push(...frontendFiles(frontend, composed.name));
     }
   }
   return files;

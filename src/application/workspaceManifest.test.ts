@@ -7,6 +7,7 @@ import { renderTemplate } from "./templates.js";
 import type { TemplateId } from "./templates.js";
 import { manifestOf, manifestProblemOf, readWorkspaceManifest } from "./workspaceManifest.js";
 import type { UvpFeature } from "../domain/features.js";
+import type { UvpFrontend } from "../domain/frontends.js";
 import type { UvpModule } from "../domain/modules.js";
 
 /**
@@ -66,6 +67,7 @@ const writeWorkspace = async (
   template: TemplateId,
   features: readonly UvpFeature[],
   modules?: readonly UvpModule[],
+  frontends?: readonly UvpFrontend[],
 ): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "uvp-manifest-"));
   directories.push(root);
@@ -74,6 +76,7 @@ const writeWorkspace = async (
     port: 8080,
     features,
     ...(modules === undefined ? {} : { modules }),
+    ...(frontends === undefined ? {} : { frontends }),
   });
   for (const file of files) {
     const target = join(root, file.path);
@@ -159,6 +162,7 @@ describe("the toolchain declaration", () => {
       features: [],
       unrecognisedFeatures: [],
       unrecognisedModules: [],
+      unrecognisedFrontends: [],
       toolchain: { kind: "local" },
       path: join(root, "uvp.json"),
     });
@@ -307,6 +311,45 @@ describe("the module list", () => {
   });
 });
 
+describe("the static frontend list", () => {
+  it("round-trips the selection the generator recorded", async () => {
+    const root = await writeWorkspace("hello-http", [], undefined, ["h5-tech", "h5-minimal"]);
+    const manifest = await manifestAt(root);
+    expect(manifest?.frontends).toEqual(["h5-minimal", "h5-tech"]);
+    expect(manifest?.unrecognisedFrontends).toEqual([]);
+  });
+
+  it("reads an absent field as no skin rather than as a template default", async () => {
+    const manifest = await manifestAt(await writeWorkspace("hello-http", []));
+    expect(manifest?.frontends).toBeUndefined();
+    expect(manifest?.unrecognisedFrontends).toStrictEqual([]);
+  });
+
+  it("keeps an explicitly empty selection distinct from an absent one", async () => {
+    const manifest = await manifestAt(await manifestRoot({ name: "svc", frontends: [] }));
+    expect(manifest?.frontends).toStrictEqual([]);
+  });
+
+  it("reports an unknown skin beside the ones it kept", async () => {
+    const manifest = await manifestAt(
+      await manifestRoot({ name: "svc", frontends: ["h5-tech", "angular"] }),
+    );
+    expect(manifest?.frontends).toEqual(["h5-tech"]);
+    expect(manifest?.unrecognisedFrontends).toEqual(["angular"]);
+  });
+
+  it.each([
+    ["a `frontends` that is a string", { name: "svc", frontends: "h5-tech" }],
+    ["a `frontends` entry that is not a string", { name: "svc", frontends: ["h5-tech", 7] }],
+  ])("refuses %s rather than answering that no skin was generated", async (_label, body) => {
+    // Absent means "no skin". Folding a malformed declaration into that would
+    // describe a workspace as having no page when its file says it has one.
+    const read = await readWorkspaceManifest(await manifestRoot(body));
+    expect(read.state).toBe("unreadable");
+    expect(manifestProblemOf(read)).toContain("frontends");
+  });
+});
+
 describe("the evidence payload policy", () => {
   it("round-trips the policy the generator compiled into the source", async () => {
     const root = await writeWorkspace("hello-http", [], ["evidence-log"]);
@@ -353,6 +396,7 @@ describe("the fields a manifest carries", () => {
       features: ["tls"],
       unrecognisedFeatures: ["quantum"],
       unrecognisedModules: [],
+      unrecognisedFrontends: [],
       requiredLibuvcpp: "1.7.0",
       toolchain: { kind: "container", image: "localhost/uvp-base:12" },
       path: join(root, "uvp.json"),
@@ -372,6 +416,7 @@ describe("the fields a manifest carries", () => {
       features: [],
       unrecognisedFeatures: [],
       unrecognisedModules: [],
+      unrecognisedFrontends: [],
       path: join(root, "uvp.json"),
     });
   });
@@ -391,6 +436,7 @@ describe("the fields a manifest carries", () => {
       features: [],
       unrecognisedFeatures: [],
       unrecognisedModules: [],
+      unrecognisedFrontends: [],
       path: join(root, "uvp.json"),
     });
   });
@@ -412,6 +458,7 @@ describe("the fields a manifest carries", () => {
       features: [],
       unrecognisedFeatures: [],
       unrecognisedModules: [],
+      unrecognisedFrontends: [],
       path: join(root, "uvp.json"),
     });
   });
@@ -426,6 +473,7 @@ describe("the fields a manifest carries", () => {
       features: [],
       unrecognisedFeatures: [],
       unrecognisedModules: [],
+      unrecognisedFrontends: [],
       path: join(root, "uvp.json"),
     });
   });

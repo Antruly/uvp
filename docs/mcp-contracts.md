@@ -93,6 +93,18 @@ refused before any file is written.
 `summary` (the default) keeps its length and an FNV-1a hash, `verbatim` keeps the
 text itself. The policy is compiled into the service, recorded in `uvp.json`, and
 reported by `GET /api/events`; asking for it without `evidence-log` is refused,
+`frontends` selects built-in static skins — `h5-minimal`, `h5-dashboard`,
+`h5-tech` — generated as plain HTML, CSS, and JavaScript under
+`public/<skin>/`. Each is served at `/<skin>/`, and `/` lists the selection;
+`websocket-test`'s console keeps `/` and links the skins, and `static-files`'
+placeholder page is replaced by the selector. Absent or empty means no skin: no
+`public/` directory, and no `frontends` field in `uvp.json`. The skins load
+nothing remote, need no build step, and leave the CMake project unchanged. The
+result reports the resolved `frontends` beside `routes`, and the selection is
+recorded in `uvp.json` in canonical order. An unknown or repeated skin, and any
+skin on `http3-service` (whose source registers no document root), are refused
+before any file is written.
+
 because it would describe a log the workspace does not have.
 
 ### Build

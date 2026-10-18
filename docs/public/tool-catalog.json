@@ -538,6 +538,18 @@
               "verbatim"
             ]
           },
+          "frontends": {
+            "description": "Build-free static skins to write under `public/<skin>/` and serve from the workspace's document root: `h5-minimal`, `h5-dashboard`, `h5-tech`. Absent or empty means no skin; a template with its own page (the `static-files` placeholder or the `websocket-test` console) keeps that page either way. A selected skin is served at `/<skin>/`, and the page at `/` lists the skins unless the template's own page already owns `/`. Refused on `http3-service`, whose generated source registers no static document root. These skins use only local assets: no CDN, external font, or remote script. Node-based frameworks are a separate, later capability and are not selectable here.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "h5-minimal",
+                "h5-dashboard",
+                "h5-tech"
+              ]
+            }
+          },
           "force": {
             "default": false,
             "description": "Allow writing into a directory that already contains files.",
@@ -740,6 +752,17 @@
               ]
             }
           },
+          "frontends": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "h5-minimal",
+                "h5-dashboard",
+                "h5-tech"
+              ]
+            }
+          },
           "files": {
             "type": "array",
             "items": {
@@ -788,6 +811,7 @@
           "path",
           "template",
           "modules",
+          "frontends",
           "files",
           "routes",
           "next_steps"

@@ -24,6 +24,14 @@ import {
 } from "../domain/eventPayloadPolicy.js";
 import type { UvpFeature } from "../domain/features.js";
 import {
+  UVP_FRONTENDS,
+  duplicateFrontends,
+  isUvpFrontend,
+  resolveFrontends,
+  unknownFrontends,
+  type UvpFrontend,
+} from "../domain/frontends.js";
+import {
   UVP_MODULES,
   defaultModules,
   duplicateModules,
@@ -59,6 +67,13 @@ export interface CreateWorkspaceResult {
    * template's default expanded to.
    */
   readonly modules: readonly UvpModule[];
+  /**
+   * The static skins the workspace was born with, in canonical order.
+   *
+   * Reported because each one is a directory a caller reaches at `/<skin>/`;
+   * the list is the same one recorded in `uvp.json`.
+   */
+  readonly frontends: readonly UvpFrontend[];
   readonly files: readonly CreatedFile[];
   readonly routes: readonly string[];
   readonly nextSteps: readonly string[];
@@ -289,6 +304,13 @@ export class WorkspaceService {
      * is refused with a named error, not left to a cast upstream.
      */
     eventPayloads?: string | undefined;
+    /**
+     * The static skins to generate; absent means no skin.
+     *
+     * Strings rather than `UvpFrontend` for the same reason `modules` is: this
+     * method is the boundary that refuses an unknown name with a named error.
+     */
+    frontends?: readonly string[] | undefined;
   }): Promise<CreateWorkspaceResult> {
     const root = resolve(input.path);
 
@@ -448,11 +470,59 @@ export class WorkspaceService {
       }
     }
 
+    // A skin is a closed vocabulary too, and the refusals are before the first
+    // write for the same reason the module refusals are: a workspace that
+    // exists with a directory missing what its manifest names is a half-written
+    // claim, not a result the caller can use.
+    const requestedFrontends = input.frontends ?? [];
+    const unknownFrontendsFound = unknownFrontends(requestedFrontends);
+    if (unknownFrontendsFound.length > 0) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `Unknown static frontend${unknownFrontendsFound.length === 1 ? "" : "s"}: ` +
+          `${unknownFrontendsFound.join(", ")}. Known frontends: ${UVP_FRONTENDS.join(", ")}.`,
+        remediation: {
+          action: "Re-run with a skin from the list above; the set is a closed vocabulary.",
+        },
+        details: { unknown: [...unknownFrontendsFound], known: [...UVP_FRONTENDS] },
+      });
+    }
+    const duplicatedFrontends = duplicateFrontends(requestedFrontends);
+    if (duplicatedFrontends.length > 0) {
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `The frontend list names ${duplicatedFrontends.join(", ")} more than once. ` +
+          "A skin is either selected or it is not.",
+        remediation: { action: "Remove the repeated name from the frontend list." },
+        details: { duplicated: [...duplicatedFrontends] },
+      });
+    }
+    const frontends = resolveFrontends(requestedFrontends.filter(isUvpFrontend));
+    if (input.template === "http3-service" && frontends.length > 0) {
+      // Not a preference: this template's routes are registered on a plain
+      // `uvcpp_http_server`, and the generated code never gives that server a
+      // document root. Accepting the selection would write skins nothing serves.
+      throw new UvpFailure({
+        code: "invalid_request",
+        message:
+          `The http3-service template cannot serve a static frontend (${frontends.join(", ")}): ` +
+          "its generated source registers no static document root.",
+        remediation: {
+          action:
+            "Choose a web-app template for a frontend, or generate http3-service without --frontend/--frontends.",
+        },
+        details: { template: input.template, frontends: [...frontends] },
+      });
+    }
+
     const files = renderTemplate(input.template, {
       name: input.name,
       port: input.port,
       features: input.features,
       modules,
+      frontends,
       ...(input.eventPayloads === undefined ? {} : { eventPayloads: input.eventPayloads }),
     });
 
@@ -470,8 +540,9 @@ export class WorkspaceService {
       path: root,
       template: input.template,
       modules,
+      frontends,
       files: created,
-      routes: templateRoutes(input.template, input.features, modules),
+      routes: templateRoutes(input.template, input.features, modules, frontends),
       nextSteps: [
         `cmake -S ${root} -B ${join(root, "build")} -DCMAKE_BUILD_TYPE=Debug`,
         `cmake --build ${join(root, "build")}`,

@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -831,6 +832,138 @@ describe("a refused invocation writes nothing", () => {
     const error = parseUvpError(soleJson(init.stderr, "uvp init"));
     expect(error.code).toBe("invalid_request");
     expect(String(error.details?.["usage"])).toContain("--name");
+    expect(existsSync(target)).toBe(false);
+  });
+});
+
+describe("a static frontend selection", () => {
+  it("writes the skin named by --frontend and records it in the manifest", async () => {
+    const target = join(tmpdir(), `uvp init frontend ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--template",
+      "hello-http",
+      "--frontend",
+      "h5-tech",
+      "--json",
+    ]);
+    expect(init.exit, init.stderr).toBe(EXIT_OK);
+    const output = JSON.parse(init.stdout) as { frontends?: string[]; routes?: string[] };
+    expect(output.frontends).toEqual(["h5-tech"]);
+    expect(output.routes).toContain("GET /");
+    expect(existsSync(join(target, "public", "h5-tech", "index.html"))).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(target, "uvp.json"), "utf8")) as {
+      frontends?: string[];
+    };
+    expect(manifest.frontends).toEqual(["h5-tech"]);
+  });
+
+  it("treats --frontend none as no skin and writes no document root", async () => {
+    // `none` is a selection the caller typed, not an omission: it has to mean
+    // the same workspace as omitting the flag, and it must not leave a directory
+    // the service would then claim to serve.
+    const target = join(tmpdir(), `uvp init no frontend ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--template",
+      "hello-http",
+      "--frontend",
+      "none",
+      "--json",
+    ]);
+    expect(init.exit, init.stderr).toBe(EXIT_OK);
+    const output = JSON.parse(init.stdout) as { frontends?: string[] };
+    expect(output.frontends).toEqual([]);
+    expect(existsSync(join(target, "public"))).toBe(false);
+  });
+
+  it("refuses --frontend together with --frontends instead of picking one", async () => {
+    // Two flags naming one selection is an ambiguous request. Choosing one of
+    // them would generate a workspace the caller did not ask for.
+    const target = join(tmpdir(), `uvp init both frontends ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--frontend",
+      "h5-tech",
+      "--frontends",
+      "h5-minimal",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("--frontend");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses none listed beside a skin", async () => {
+    const target = join(tmpdir(), `uvp init none listed ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--frontends",
+      "none,h5-tech",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("none");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses an unknown skin before writing anything", async () => {
+    const target = join(tmpdir(), `uvp init unknown frontend ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke(["init", target, "--name", "svc", "--frontend", "vue", "--json"]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
+    // The contract's enumeration refuses it at the boundary, and the message
+    // names the field and the vocabulary that would have been accepted.
+    expect(error.message).toContain("frontends");
+    expect(error.message).toContain("h5-tech");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("refuses a skin on http3-service, which registers no document root", async () => {
+    const target = join(tmpdir(), `uvp init http3 frontend ${String(process.pid)}`);
+    rmSync(target, { recursive: true, force: true });
+    const init = await invoke([
+      "init",
+      target,
+      "--name",
+      "svc",
+      "--template",
+      "http3-service",
+      "--features",
+      "tls,http3",
+      "--frontend",
+      "h5-minimal",
+      "--json",
+    ]);
+    expect(init.exit).toBe(EXIT_WRONG);
+    expect(init.stdout.trim()).toBe("");
+    const error = parseUvpError(soleJson(init.stderr, "uvp init"));
+    expect(error.code).toBe("invalid_request");
     expect(existsSync(target)).toBe(false);
   });
 });

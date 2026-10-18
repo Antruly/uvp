@@ -5,6 +5,7 @@ import type { TemplateId } from "./templates.js";
 import type { UvpEventPayloadPolicy } from "../domain/eventPayloadPolicy.js";
 import { UVP_FEATURES } from "../domain/features.js";
 import type { UvpFeature } from "../domain/features.js";
+import { UVP_FRONTENDS, type UvpFrontend } from "../domain/frontends.js";
 import type { UvpModule } from "../domain/modules.js";
 
 /**
@@ -815,5 +816,151 @@ describe("application module composition", () => {
         tableCalls,
       );
     }
+  });
+});
+
+/**
+ * Render a template with a skin selection.
+ *
+ * `modules` stays undefined here unless a test needs to pin it, so the
+ * template's own default (which is what `uvp init` applies) is under test.
+ */
+const withFrontends = (
+  template: TemplateId,
+  frontends: readonly UvpFrontend[],
+  options: { modules?: readonly UvpModule[]; features?: readonly UvpFeature[] } = {},
+): readonly { path: string; content: string }[] =>
+  renderTemplate(template, {
+    name: "svc",
+    port: 8080,
+    features: options.features ?? [],
+    frontends,
+    ...(options.modules === undefined ? {} : { modules: options.modules }),
+  });
+
+const pathOf = (files: readonly { path: string }[], path: string): boolean =>
+  files.some((file) => file.path === path);
+
+describe("static frontend composition", () => {
+  it("writes no page for a backend template that selects none", () => {
+    // The acceptance criterion behind this: `--frontend none` (and omitting the
+    // flag) must not leave a `public/` directory behind. A backend template
+    // serves no files, and adding an empty document root would say otherwise.
+    const files = withFrontends("hello-http", []);
+    expect(files.every((file) => !file.path.startsWith("public/"))).toBe(true);
+    expect(mainOf(files)).not.toContain("app.serve_static(");
+  });
+
+  it("writes one skin under public/<skin>/ and serves the document root", () => {
+    const files = withFrontends("hello-http", ["h5-tech"]);
+    for (const asset of ["index.html", "app.css", "app.js"]) {
+      expect(pathOf(files, `public/h5-tech/${asset}`), asset).toBe(true);
+    }
+    const source = mainOf(files);
+    expect(source).toContain('app.serve_static("/", "./public")');
+    // serve_static answers every request it sees; registered before the exact
+    // route it would shadow it.
+    expect(source.indexOf('app.get("/hello"')).toBeLessThan(
+      source.indexOf('app.serve_static("/", "./public")'),
+    );
+    // The selector is the page at `/`, because this template has none.
+    expect(files.find((file) => file.path === "public/index.html")?.content).toContain(
+      'href="./h5-tech/"',
+    );
+  });
+
+  it("reports the routes the selected skins make the service answer", () => {
+    expect(templateRoutes("hello-http", [], [], [])).toEqual(["GET /hello"]);
+    expect(templateRoutes("hello-http", [], [], ["h5-tech"])).toEqual([
+      "GET /hello",
+      "GET /",
+      "HEAD /",
+      "GET /*path",
+      "HEAD /*path",
+    ]);
+  });
+
+  it("records the selection in the manifest in canonical order", () => {
+    const files = withFrontends("hello-http", ["h5-tech", "h5-minimal"]);
+    expect(manifestOf(files)["frontends"]).toEqual(["h5-minimal", "h5-tech"]);
+    // Two requests that name the same skins in another order generate the same
+    // workspace; the manifest is part of that file set.
+    expect(manifestOf(withFrontends("hello-http", ["h5-minimal", "h5-tech"]))).toEqual(
+      manifestOf(files),
+    );
+    expect(manifestOf(withFrontends("hello-http", []))["frontends"]).toBeUndefined();
+  });
+
+  it("writes every skin when several are asked for", () => {
+    const files = withFrontends("rest-api", ["h5-minimal", "h5-dashboard", "h5-tech"]);
+    for (const frontend of UVP_FRONTENDS) {
+      expect(pathOf(files, `public/${frontend}/index.html`), frontend).toBe(true);
+    }
+    const selector = files.find((file) => file.path === "public/index.html")?.content ?? "";
+    for (const frontend of UVP_FRONTENDS) {
+      expect(selector).toContain(`href="./${frontend}/"`);
+    }
+  });
+
+  it("keeps the websocket-test console at / and links the skins from it", () => {
+    // The console is the page that drives the routes this template serves, so a
+    // selector may not replace it. The skins are still reachable, and the
+    // console says where.
+    const files = withFrontends("websocket-test", ["h5-tech"], { features: ["websocket"] });
+    const index = files.find((file) => file.path === "public/index.html")?.content ?? "";
+    expect(index).toContain("WebSocket test");
+    expect(index).toContain('href="./h5-tech/"');
+    expect(index).not.toContain('Static skins:</strong> <a href="./h5-tech/">h5-tech</a>\n</html>');
+
+    const source = mainOf(files);
+    // The static-console module already registers the root; a second call would
+    // be two registrations over one tree and a route table that disagrees.
+    expect(source.match(/app\.serve_static\(/gu)?.length ?? 0).toBe(1);
+    // The module's four routes are named once, not twice.
+    const routes = templateRoutes("websocket-test", ["websocket"], undefined, ["h5-tech"]);
+    expect(routes.filter((route) => route === "GET /")).toHaveLength(1);
+  });
+
+  it("serves skins from websocket-test when the console module is not selected", () => {
+    const files = withFrontends("websocket-test", ["h5-minimal"], {
+      features: ["websocket"],
+      modules: ["health"],
+    });
+    expect(mainOf(files)).toContain('app.serve_static("/", "./public")');
+    expect(files.find((file) => file.path === "public/index.html")?.content).toContain(
+      'href="./h5-minimal/"',
+    );
+  });
+
+  it("replaces the static-files placeholder with the selector", () => {
+    // The placeholder is one heading and has no function the selector lacks;
+    // leaving it at `/` would hide the skins behind an unlisted path.
+    const files = withFrontends("static-files", ["h5-dashboard"]);
+    const index = files.find((file) => file.path === "public/index.html")?.content ?? "";
+    expect(index).toContain('href="./h5-dashboard/"');
+    expect(index).not.toBe(`<!doctype html>\n<title>svc</title>\n<h1>svc</h1>\n`);
+    expect(mainOf(files).match(/app\.serve_static\(/gu)).toHaveLength(1);
+  });
+
+  it("adds no document root to http3-service, because it registers none", () => {
+    // The service refuses this combination before rendering. The pure route
+    // table is tested here so it cannot claim a route the template does not
+    // register if that refusal is ever moved.
+    expect(templateRoutes("http3-service", ["tls", "http3"], [], ["h5-tech"])).toEqual([
+      "GET /hello",
+      "GET /healthz",
+    ]);
+  });
+
+  it("documents where each skin is served and that it loads nothing remote", () => {
+    const readmeFile = withFrontends("hello-http", ["h5-tech"]).find(
+      (file) => file.path === "README.md",
+    )?.content;
+    expect(readmeFile).toContain("## Frontend");
+    expect(readmeFile).toContain("- `/h5-tech/`");
+    expect(readmeFile).toContain("network unavailable");
+    expect(
+      withFrontends("hello-http", []).find((file) => file.path === "README.md")?.content,
+    ).not.toContain("## Frontend");
   });
 });

@@ -200,6 +200,45 @@ records `tls` in `features` and nothing else: the transport is a consequence of
 that list, so `uvp run` and the readiness probe read the scheme out of it instead
 of a field that could state it differently.
 
+### Static frontends
+
+`--frontend` writes one built-in static skin and `--frontends` writes several.
+A skin is three plain files under `public/<skin>/` — `index.html`, `app.css`,
+`app.js` — with no build step, no framework, and no runtime network access: no
+CDN, no external font, no analytics. `uvp build` never runs Node, and the
+generated `CMakeLists.txt` is the same with or without a skin. The service
+serves the directory with `app.serve_static("/", "./public")`, registered after
+the template's exact routes.
+
+| Skin           | What it is                                                                |
+| -------------- | ------------------------------------------------------------------------- |
+| `h5-minimal`   | a light, single-column page with a heading, a status line, a local clock  |
+| `h5-dashboard` | a dark card grid with locally rendered status tiles and a page-load count |
+| `h5-tech`      | a dark, monospace terminal-style page with a local render log             |
+
+```bash
+uvp init ./svc --name svc --template rest-api --frontends h5-minimal,h5-tech
+```
+
+Each skin is reachable at `/<skin>/`, and `/` serves a page that lists the
+selected skins. `websocket-test`'s console already owns `/` and links the skins
+instead of being replaced; `static-files`' placeholder page is replaced by the
+selector, which lists the skins the same way. `http3-service` refuses a skin
+before writing anything: its generated source registers no static document root,
+so the files would never be served.
+
+`--frontend none` means the same workspace as omitting both flags: no page, no
+`public/` directory, and no `frontends` field in `uvp.json`. The selection is
+recorded in `uvp.json` in canonical order (the order of the table above), so two
+requests naming the same skins in another order generate the same files. The
+result reports `frontends` beside `routes`; a workspace that serves skins
+registers the document root once — `GET /`, `HEAD /`, `GET /*path`, `HEAD
+/*path` — whether that registration comes from the template, the
+`static-console` module, or the skin selection.
+
+Refused before a file is written: an unknown or repeated skin, `--frontend`
+together with `--frontends`, and `none` listed beside a skin in `--frontends`.
+
 `uvp init` refuses to write into a non-empty directory without `--force`.
 
 ## `uvp build`
