@@ -75,6 +75,21 @@ const expectContractOutput = (tool: string, output: Record<string, unknown>): vo
   expect(parsed.success, `${tool} output did not match its schema: ${issues}`).toBe(true);
 };
 
+/** The first evidence reference; every template result must carry one. */
+const evidenceOf = (output: Record<string, unknown>): Record<string, unknown> => {
+  const evidence = output["evidence"];
+  const first = Array.isArray(evidence)
+    ? (evidence[0] as Record<string, unknown> | undefined)
+    : undefined;
+  expect(first, "the result carried no evidence").toBeDefined();
+  return first ?? {};
+};
+
+const unknownsOf = (output: Record<string, unknown>): readonly Record<string, unknown>[] =>
+  Array.isArray(output["unknowns"])
+    ? (output["unknowns"] as readonly Record<string, unknown>[])
+    : [];
+
 describe("the template commands", () => {
   it("validates, imports, searches, gets, exports, and removes a package", async () => {
     const root = await temporaryRoot();
@@ -119,6 +134,71 @@ describe("the template commands", () => {
     expect(json(after)["matches"]).toEqual([]);
   });
 
+  it("records what each call examined, and what the scan left unread", async () => {
+    const root = await temporaryRoot();
+    const store = path.join(root, "store");
+    const env = { UVP_TEMPLATE_HOME: store };
+    // More credential-shaped lines than the scan's findings limit, so the walk
+    // stops early and some of the package's text is never read.
+    const content = Array.from(
+      { length: 250 },
+      (_, index) => `AKIA${String(index).padStart(16, "0")}`,
+    ).join("\n");
+    const fixture = await makeTemplatePackage({ root, content });
+
+    const validated = await run(["template", "validate", fixture.dir, "--json"], env);
+    expect(validated.code).toBe(0);
+    const validatedOutput = json(validated);
+    const validateEvidence = evidenceOf(validatedOutput);
+    expect(validateEvidence["kind"]).toBe("template");
+    expect(validateEvidence["coverage"]).toMatchObject({ status: "complete" });
+    expect((validateEvidence["sources"] as readonly { ref: string }[])[0]?.ref).toBe(
+      path.resolve(fixture.dir),
+    );
+    // Validation answers the format question only, so the scan is an admitted
+    // gap rather than an empty findings list that looks like a clean result.
+    expect(unknownsOf(validatedOutput).map((unknown) => unknown["reason"])).toEqual([
+      "not_attempted",
+    ]);
+
+    const imported = await run(["template", "import", fixture.dir, "--json"], env);
+    expect(imported.code).toBe(0);
+    const importedOutput = json(imported);
+    const importEvidence = evidenceOf(importedOutput);
+    expect(importEvidence["kind"]).toBe("template");
+    // A walk the findings limit stopped is partial, and what it did not read is
+    // a question with a resource limit as its reason.
+    expect(importEvidence["coverage"]).toMatchObject({ status: "partial" });
+    expect((importedOutput["scan"] as { truncated: boolean }).truncated).toBe(true);
+    expect(unknownsOf(importedOutput).map((unknown) => unknown["reason"])).toEqual([
+      "resource_limit",
+    ]);
+
+    const searched = await run(["template", "search", "--json"], env);
+    expect(searched.code).toBe(0);
+    const searchEvidence = evidenceOf(json(searched));
+    expect(searchEvidence["kind"]).toBe("template");
+    expect(searchEvidence["coverage"]).toMatchObject({ status: "complete" });
+    expect((searchEvidence["sources"] as readonly { ref: string }[])[0]?.ref).toBe(store);
+
+    const got = await run(["template", "get", "acme-dashboard@1.2.0", "--json"], env);
+    expect(evidenceOf(json(got))["coverage"]).toMatchObject({ status: "complete" });
+
+    const target = path.join(root, "exported");
+    const exported = await run(
+      ["template", "export", "acme-dashboard@1.2.0", "--target", target, "--json"],
+      env,
+    );
+    expect(exported.code).toBe(0);
+    expect(evidenceOf(json(exported))["coverage"]).toMatchObject({ status: "complete" });
+
+    const removed = await run(["template", "remove", "acme-dashboard@1.2.0", "--json"], env);
+    expect(removed.code).toBe(0);
+    expect(evidenceOf(json(removed))["coverage"]).toMatchObject({ status: "complete" });
+  });
+});
+
+describe("the template commands' failures", () => {
   it("reports a missing package as a failure, not an empty result", async () => {
     const root = await temporaryRoot();
     const result = await run(["template", "get", "missing@1.0.0", "--json"], {
