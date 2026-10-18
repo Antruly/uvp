@@ -340,6 +340,22 @@
               },
               "note": {
                 "type": "string"
+              },
+              "remediation": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "docs": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [

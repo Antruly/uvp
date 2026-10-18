@@ -3,6 +3,7 @@ import type {
   BuildPhase,
   BuildRemediation,
 } from "../application/ToolchainProvider.js";
+import { LIBUVCPP_INSTALL_REMEDIATION } from "../domain/libuvcpp.js";
 
 /**
  * Reading a build's failures out of the text the tools printed.
@@ -291,14 +292,89 @@ const PKG_CONFIG_REMEDY: BuildRemediation = {
 };
 
 /**
+ * The packages CMake listed under `The following required packages were not
+ * found:`.
+ *
+ * The message is a sentence, a blank line, then one `- <package>` line per missing
+ * package; `cmakeMessage` joins those lines with a space, so the entries arrive
+ * space-separated and the list is read back out of that. An entry is
+ * `<name>` or `<name><operator><version>` (`uvcpp>=1.7.0`), and only the name is
+ * compared: a package called `uvcpp-absent` is a different package, not this one.
+ */
+const missingPackages = (said: string): readonly string[] => {
+  const marker = "The following required packages were not found:";
+  const at = said.indexOf(marker);
+  if (at === -1) return [];
+  return [...said.slice(at + marker.length).matchAll(/(?:^|\s)-\s+([^\s]+)/gu)]
+    .map((match) => match[1] ?? "")
+    .filter((entry) => entry !== "");
+};
+
+const packageNameOf = (entry: string): string => entry.split(/[<>=]/u)[0] ?? entry;
+
+/**
+ * CMake 3.20 and older's `_pkg_check_modules_internal`, captured on the reporter's
+ * CentOS 8 host as `FindPkgConfig.cmake:556`.
+ *
+ * The sentence names neither the package nor libuvcpp, so it is not a remedy on
+ * its own: the caller's discovery answer is what makes it this workspace's
+ * `uvcpp` requirement rather than some other pkg-config package, and that answer
+ * arrives as `DiagnosticContext`. CMake 3.28 spells the same failure as a named
+ * package list instead, which `missingPackages` can read without help.
+ *
+ * The sentence arrives as `message: A required package was not found`: the
+ * header CMake prints for it is `CMake Error at FindPkgConfig.cmake:556
+ * (message):`, and `parseCmakeDiagnostic` leads the message with the command
+ * from that header so the diagnostic keeps CMake's context. The prefix is that
+ * command, not a module name — matching only `message:` keeps this exact.
+ */
+const UNNAMED_REQUIRED_PACKAGE = /^(?:message:\s+)?A required package was not found\.?$/u;
+
+/**
  * A remedy for a CMake message, when this module knows one.
  *
  * Matched against the message CMake printed, not the command it was running:
  * `pkg_check_modules` can fail for a missing package and for a missing
  * pkg-config, and only the text says which.
  */
-const remediationFor = (said: string): BuildRemediation | undefined =>
-  PKG_CONFIG_EXECUTABLE_MISSING.test(said) ? PKG_CONFIG_REMEDY : undefined;
+const remediationFor = (said: string): BuildRemediation | undefined => {
+  if (PKG_CONFIG_EXECUTABLE_MISSING.test(said)) return PKG_CONFIG_REMEDY;
+  return missingPackages(said).some((entry) => packageNameOf(entry) === "uvcpp")
+    ? LIBUVCPP_INSTALL_REMEDIATION
+    : undefined;
+};
+
+/**
+ * What the caller knows about the build that the tool's own text does not say.
+ *
+ * `libuvcppFound` is discovery's answer: `false` means uvp looked and found no
+ * install, `true` means it found one, and absent means the caller did not look —
+ * a container build, where the install lives in an image this host never saw. Only
+ * `false` licenses the unnamed-package remedy; the other two say nothing about
+ * what CMake was missing.
+ */
+export interface DiagnosticContext {
+  readonly libuvcppFound?: boolean;
+}
+
+/**
+ * The named-package remedy needs no context, but the unnamed sentence does.
+ *
+ * Attached after parsing rather than inside `parseCmakeDiagnostic`, because the
+ * decision needs the caller's discovery answer and a CMake message block is one
+ * diagnostic — the same block is not re-read here, only its parsed message is
+ * consulted.
+ */
+const withContextRemedy = (
+  diagnostic: BuildDiagnostic,
+  context: DiagnosticContext | undefined,
+): BuildDiagnostic => {
+  if (diagnostic.remediation !== undefined) return diagnostic;
+  if (diagnostic.phase !== "configure") return diagnostic;
+  if (context?.libuvcppFound !== false) return diagnostic;
+  if (!UNNAMED_REQUIRED_PACKAGE.test(diagnostic.message)) return diagnostic;
+  return { ...diagnostic, remediation: LIBUVCPP_INSTALL_REMEDIATION };
+};
 
 /**
  * One CMake error or warning starting at `lines[at]`, with the lines it consumed.
@@ -607,14 +683,16 @@ export const parseDiagnostics = (
   stdout: string,
   stderr: string,
   phase: BuildPhase,
+  context?: DiagnosticContext,
 ): readonly BuildDiagnostic[] => {
   const diagnostics: BuildDiagnostic[] = [];
   const seen = new Set<string>();
   const add = (diagnostic: BuildDiagnostic): void => {
-    const key = identity(diagnostic);
+    const resolved = withContextRemedy(diagnostic, context);
+    const key = identity(resolved);
     if (seen.has(key)) return;
     seen.add(key);
-    diagnostics.push(diagnostic);
+    diagnostics.push(resolved);
   };
 
   let summary: BuildDiagnostic | undefined;

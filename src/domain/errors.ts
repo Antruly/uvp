@@ -64,6 +64,8 @@ export const uvpRemediationSchema = z.object({
   docs: z.string().optional(),
 });
 
+export type UvpRemediation = z.infer<typeof uvpRemediationSchema>;
+
 export const uvpErrorSchema = z.object({
   code: uvpErrorCodeSchema,
   category: uvpErrorCategorySchema,

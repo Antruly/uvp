@@ -28,7 +28,8 @@ const manifest = JSON.parse(await read("package.json"));
 const lock = JSON.parse(await read("package-lock.json"));
 
 const { TOOL_CONTRACTS } = await importCompiled("contracts/toolContracts.js");
-const { TEMPLATE_IDS, LIBUVCPP_BASELINE } = await importCompiled("application/templates.js");
+const { TEMPLATE_IDS } = await importCompiled("application/templates.js");
+const { LIBUVCPP_BASELINE } = await importCompiled("domain/libuvcpp.js");
 const { UVP_FEATURES } = await importCompiled("domain/features.js");
 const { FEATURE_REQUIREMENTS } = await importCompiled("application/ToolchainProvider.js");
 

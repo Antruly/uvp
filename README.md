@@ -48,7 +48,11 @@ can walk away from uvp and keep the project.
 - A C++14 toolchain (`g++` or `clang++`; MSVC 2019+ on Windows, where CI has
   exercised Visual Studio 2026 / MSVC 14.51 only) and CMake 3.20+
 - [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 or newer**, either
-  `cmake --install`ed or unpacked from a release archive
+  `cmake --install`ed or unpacked from a
+  [release archive](https://github.com/Antruly/libuvcpp/releases). `uvp doctor`
+  and a failed `uvp build` both name this requirement, with the release URL and
+  the environment variables that make an install discoverable, when none is
+  found.
 - `pkg-config` (or `pkgconf`, which CMake 3.22 and newer search) when libuvcpp
   comes from a release archive. Those ship only `lib/pkgconfig/uvcpp.pc` and no
   CMake package, so the generated project's pkg-config fallback is the route

@@ -2,6 +2,8 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { UvpFailure, isUvpFailure } from "../domain/errors.js";
+import type { UvpRemediation } from "../domain/errors.js";
+import { LIBUVCPP_INSTALL_REMEDIATION } from "../domain/libuvcpp.js";
 import { assessFeatures } from "./ToolchainProvider.js";
 import type {
   HeaderProbe,
@@ -453,6 +455,9 @@ export class DoctorService {
       ...(build.installPrefix === undefined ? {} : { install_prefix: build.installPrefix }),
       modules: [...build.modules],
       ...(build.note === undefined ? {} : { note: build.note }),
+      // The remedy travels only with a negative finding: an install that was
+      // found has nothing to install, and advice there would read as a problem.
+      ...(build.found ? {} : { remediation: LIBUVCPP_INSTALL_REMEDIATION }),
     };
 
     if (wanted.features.length > 0) {
@@ -768,6 +773,8 @@ export interface DoctorLibuvcpp {
   install_prefix?: string;
   modules: string[];
   note?: string;
+  /** How to get an install, present only when none was found. */
+  remediation?: UvpRemediation;
 }
 
 /** One feature's verdict, as the tool contract reports it. */
