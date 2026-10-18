@@ -284,6 +284,46 @@ The run summary records the helper commit and labels the run a bootstrap.
 This is a one-time exception for tags that predate the helpers. Every later tag
 contains them; leave `helpers_ref` empty.
 
+### The 0.2.0 mirror is observed {#github-packages-observed}
+
+`uvp-agents@0.2.0` was the first release published through this path and the
+first bootstrap. The runs are recorded here so a later reader can separate what
+was observed from what the workflow promises:
+
+- **The bootstrap path works on a real tag.** The dispatch used
+  `tag=uvp-agents-0.2.0` and
+  `helpers_ref=7b703598cf0de2eec42ac9b57bf2c76dede19f9a`; run
+  [39055283828](https://github.com/Antruly/uvp/actions/runs/39055283828)
+  succeeded, and its log shows the staged helpers accepted as on `origin/main`
+  and complete before anything was derived.
+- **The registry serves the artifact the run packed.**
+  `@antruly/uvp-agents@0.2.0` has integrity
+  `sha512-DZRVol7eBm7DzK8mfaz/v7CQ5qYQL5im43MhLH21Se2Dn0j+rFCI8h6QZdhySpT3FCQiKuTL5uXWl4tS4GtM2A==`.
+  The post-upload comparison printed `GitHub Packages serves
+  @antruly/uvp-agents@0.2.0 with the digest this run packed.`
+- **An authenticated install works.** The same run installed the package from
+  GitHub Packages into an empty prefix, and its version check accepted what
+  `uvp --version` printed: `uvp-agents 0.2.0`, the canonical identity.
+- **The mirror's copy answers the CLI and the MCP contract.** `uvp doctor`
+  exited 1 and reported libuvcpp absent, which is what the run expects on a
+  machine with none; the packaged MCP check passed, with
+  `io.github.Antruly/uvp` advertising 15 of 15 tools.
+- **Visibility is unknown.** GitHub Packages defaults a first publish to private,
+  and nothing in these runs observed the package's setting; the workflow cannot
+  report or change it. Do not describe the mirror as public or private.
+- **This says nothing about npmjs.** The trusted-publisher entry for
+  `publish.yml` is a separate mechanism: a successful mirror publish neither
+  attaches it nor depends on it, and its status is the one recorded at the top
+  of this page.
+
+**Why the pack passes `--ignore-scripts`.** The `prepare` lifecycle is husky,
+and with `HUSKY=0` — which the workflow sets — it prints `HUSKY=0 skip install`.
+That line lands in `npm pack --json`'s output: run
+[39053130363](https://github.com/Antruly/uvp/actions/runs/39053130363) shows the
+result, `SyntaxError: Unexpected token 'H', "HUSKY=0 sk"... is not valid JSON`.
+The pack step now passes `--ignore-scripts`, and `verify:pack-reproducible`
+packs the same way, so the two digests compare like for like.
+
 Consumers install the mirror with a scoped `.npmrc` and a token:
 
 ```ini
