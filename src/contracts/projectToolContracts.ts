@@ -472,6 +472,16 @@ export const runContract = defineTool({
     /** True when the service was still running at the end of the call. */
     still_running: z.boolean(),
     /**
+     * How the process ended, when the supervisor observed it ending.
+     *
+     * Absent while the process runs, and absent after `detach` releases the
+     * pipes: a released child's exit reaches nobody, which the `detached`
+     * limitation states. Present together: a process killed by a signal has
+     * `exit_code: null` and the signal named, rather than no code at all.
+     */
+    exit_code: z.number().int().nullable().optional(),
+    exit_signal: z.string().nullable().optional(),
+    /**
      * True when the process was released rather than left under supervision.
      *
      * `still_running: true, detached: true` is the ordinary result of a

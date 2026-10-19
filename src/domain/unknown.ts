@@ -15,6 +15,15 @@ export const unknownReasonSchema = z.enum([
   "unsupported_by_build",
   "out_of_scope",
   "resource_limit",
+  /**
+   * The thing being observed stopped before it could be observed.
+   *
+   * Distinct from `resource_limit`, which says a bound was reached while the
+   * subject was still there: a service that exited during a readiness wait did
+   * not time out, and reporting a timeout would send the caller to a longer
+   * wait instead of to the process's own output.
+   */
+  "process_exit",
   "cancelled",
   "ambiguous_requirement",
 ]);

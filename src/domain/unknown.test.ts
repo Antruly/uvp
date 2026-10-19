@@ -47,6 +47,7 @@ describe("the reason vocabulary", () => {
       "unsupported_by_build",
       "out_of_scope",
       "resource_limit",
+      "process_exit",
       "cancelled",
       "ambiguous_requirement",
     ];

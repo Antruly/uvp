@@ -265,6 +265,20 @@ export const renderRun = (output: Record<string, unknown>): string[] => {
     ),
   ];
 
+  // Only when the supervisor observed the end. A released process has no exit
+  // to show, and drawing a `code -` line for it would read as an exit the call
+  // did not see; the `released` supervision line below says why.
+  if (Object.hasOwn(output, "exit_code")) {
+    const signal = str(output["exit_signal"]);
+    const code = num(output["exit_code"]);
+    lines.push(
+      row(
+        "exit",
+        signal === "" ? `code ${code === undefined ? "none" : String(code)}` : `signal ${signal}`,
+      ),
+    );
+  }
+
   // Stated in the rendering, not only in `limitations`. `still_running: yes`
   // beside `detached: yes` is the one combination whose consequence a reader
   // would otherwise have to infer, and the consequence is that nothing is

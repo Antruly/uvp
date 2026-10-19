@@ -116,6 +116,16 @@ export interface RunResult {
   readonly stderrTail: string;
   readonly stillRunning: boolean;
   /**
+   * How the process ended, when the supervisor observed it ending.
+   *
+   * `undefined` while it runs, and `undefined` once `detach` releases the pipes:
+   * after release nothing receives the exit event, so "not observed" and "still
+   * running" are the same absence here and the `detached` limitation says why.
+   * A signal death reports `code: null` with the signal named — the null is an
+   * observation, not a missing value.
+   */
+  readonly exitStatus: { readonly code: number | null; readonly signal: string | null } | undefined;
+  /**
    * True when the process was released rather than kept under observation.
    *
    * The distinction reaches the caller because it changes what can be promised:
@@ -880,6 +890,10 @@ export class WorkspaceService {
     const stdoutTail = tailWithin(process_.stdoutTail(), REPORT_TAIL_UNITS);
     const stderrTail = tailWithin(process_.stderrTail(), REPORT_TAIL_UNITS);
     const stillRunning = process_.isRunning();
+    // Read before `release()` for the same reason as the tails: after release
+    // nothing receives the exit event, so the observation has to be taken while
+    // something is still watching.
+    const exitStatus = process_.exitInfo();
     const detached = input.detach && stillRunning;
     if (detached) process_.release();
 
@@ -895,6 +909,7 @@ export class WorkspaceService {
       stdoutTail,
       stderrTail,
       stillRunning,
+      exitStatus,
       detached,
     };
   }
