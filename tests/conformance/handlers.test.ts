@@ -87,6 +87,16 @@ const SLEEPS_WITHOUT_LISTENING = fileURLToPath(
   new URL("./fixtures/sleepsWithoutListening.mjs", import.meta.url),
 );
 
+/**
+ * A process that ends by signal rather than by an exit code.
+ *
+ * The third way a child can be gone: `exit_code: 0`, a bound reached while it
+ * lived, and a signal death must not look like either.
+ */
+const KILLS_ITSELF_WITH_SIGTERM = fileURLToPath(
+  new URL("./fixtures/killsItselfWithSigterm.mjs", import.meta.url),
+);
+
 type Handlers = Readonly<Record<string, ReturnType<typeof createToolHandlers>[string]>>;
 
 interface Harness {
@@ -1262,6 +1272,39 @@ describe("launch and stop", () => {
       } finally {
         await call("uvp_run_stop", { run_id: run["run_id"] });
       }
+    },
+    TIMEOUT,
+  );
+
+  // Windows has no signals: `process.kill(pid, "SIGTERM")` terminates through
+  // TerminateProcess and the exit event reports a code with a null signal, so a
+  // fixture that signals itself cannot exercise this branch there.
+  it.skipIf(process.platform === "win32")(
+    process.platform === "win32"
+      ? "reports a signal death as the signal, with a null code — skipped: Windows has no POSIX signals, so a self-SIGTERM reports an exit code instead"
+      : "reports a signal death as the signal, with a null code",
+    async () => {
+      const svc = await writeFakeBinary(harness.workspace, "sigterm", {
+        module: KILLS_ITSELF_WITH_SIGTERM,
+      });
+      const port = await freePort();
+      const run = await call("uvp_run", {
+        path: harness.workspace,
+        args: svc.args,
+        ready: { port, path: "/healthz", timeout_ms: 600 },
+      });
+      expectConforms("uvp_run", run);
+      expect(run["ready"]).toBe(false);
+      expect(run["still_running"]).toBe(false);
+      // The null code is an observation, not a missing value: the process ended
+      // by signal, and `exit_code: 0` would claim it exited cleanly.
+      expect(run["exit_code"]).toBeNull();
+      expect(run["exit_signal"]).toBe("SIGTERM");
+      const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
+      expect(unknowns.map((unknown) => unknown.reason)).toContain("process_exit");
+      expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
+        "was killed by SIGTERM before the probe answered",
+      );
     },
     TIMEOUT,
   );
