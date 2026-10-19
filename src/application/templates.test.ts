@@ -70,6 +70,27 @@ describe("the generated CMake tells MSVC what character set the sources use", ()
   });
 });
 
+describe("the generated CMake makes indirect dependencies resolvable on Linux", () => {
+  it.each(TEMPLATE_IDS)("%s asks the linker for the transitive tag", (template) => {
+    // glibc reads a dependency's own dependencies from that library's DT_RUNPATH,
+    // not the executable's, so a prebuilt libuvcpp.so needing a sibling such as
+    // libllhttp.so fails to start even though the executable's RUNPATH names the
+    // directory holding both. DT_RPATH is inherited down that search; asking for
+    // it is what makes the generated binary start.
+    const cmake = cmakeLists(template, template === "http3-service" ? ["tls", "http3"] : []);
+    expect(cmake).toContain('if(CMAKE_SYSTEM_NAME STREQUAL "Linux")');
+    expect(cmake).toContain('"LINKER:--disable-new-dtags"');
+  });
+
+  it("applies the option to the executable, inside the Linux condition", () => {
+    const cmake = cmakeLists("hello-http", []);
+    const start = cmake.indexOf('if(CMAKE_SYSTEM_NAME STREQUAL "Linux")');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = cmake.slice(start, cmake.indexOf("endif()", start));
+    expect(block).toContain('target_link_options(svc PRIVATE "LINKER:--disable-new-dtags")');
+  });
+});
+
 /**
  * Every template that starts a `uvcpp_web_app` — which is no longer all of them.
  *
