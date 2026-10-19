@@ -309,6 +309,27 @@ const server = createServer((request, response) => {
     json(response, 418, { error: "short and stout" });
     return;
   }
+  // Two headers a normal map loses: repeated lines and their spelling. Written as
+  // raw pairs because that is the only form Node sends without lower-casing the
+  // names and folding the duplicates.
+  if (route === "/duplicate-headers") {
+    response.writeHead(200, [
+      "Set-Cookie",
+      "a=1; Path=/",
+      "Set-Cookie",
+      "b=2; Path=/",
+      "X-Dupe",
+      "one",
+      "X-Dupe",
+      "two",
+      "content-type",
+      "text/plain",
+      "content-length",
+      "2",
+    ]);
+    response.end("ok");
+    return;
+  }
   if (route === "/headers") {
     json(response, 200, {
       headers: request.headers,

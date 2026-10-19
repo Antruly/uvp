@@ -46,6 +46,13 @@ export interface HttpRequestOutput {
   http_version: string;
   request_http_version: string;
   headers: Record<string, string>;
+  /**
+   * The response headers in wire order, one entry per line, with the peer's
+   * spelling and duplicates kept. Absent when the transport did not expose them
+   * (HTTP/2 folds the response before uvp sees it; the HTTP/3 probe reports the
+   * set it parsed), which is a fact about the transport, not about the response.
+   */
+  headers_raw?: { name: string; value: string }[];
   timing: TimingOutput;
   body: {
     bytes: number;
