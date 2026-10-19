@@ -1307,6 +1307,10 @@ describe("a process that ends before readiness", () => {
       const port = await freePort();
       const run = await call("uvp_run", {
         path: harness.workspace,
+        // The path, not just the workspace: the fixture is installed under its own
+        // name, so a case run on its own must name the binary it wrote rather than
+        // the manifest's default that an earlier case happened to leave behind.
+        binary: svc.path,
         args: svc.args,
         ready: { port, path: "/healthz", timeout_ms: 400 },
       });
@@ -1342,6 +1346,9 @@ describe("a process that ends before readiness", () => {
       const port = await freePort();
       const run = await call("uvp_run", {
         path: harness.workspace,
+        // Named, so filtering the runner to this case does not spawn the fixture
+        // an earlier case installed.
+        binary: svc.path,
         args: svc.args,
         ready: { port, path: "/healthz", timeout_ms: 600 },
       });
