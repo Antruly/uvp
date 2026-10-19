@@ -385,6 +385,17 @@ endforeach()
 
 target_link_libraries(${input.name} PRIVATE \${UVP_UVCPP_TARGET})
 
+# glibc resolves the dependencies of a dependency from that library's own
+# DT_RUNPATH, never from the executable's: a prebuilt libuvcpp.so that needs a
+# sibling such as libllhttp.so therefore fails to start even though this
+# executable's RUNPATH names the directory that holds both. DT_RPATH is
+# inherited down the dependency search, so ask the linker for the legacy tag.
+# This reaches the build tree only; nothing generated here is installed, and
+# macOS resolves indirect dependencies by install name instead.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(${input.name} PRIVATE "LINKER:--disable-new-dtags")
+endif()
+
 if (MSVC)
   # MSVC reads a source without a BOM in the system code page. On a Chinese
   # Windows install that is GBK (936), so a UTF-8 source with Chinese comments or
