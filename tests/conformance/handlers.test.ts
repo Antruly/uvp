@@ -1218,6 +1218,58 @@ describe("launch and stop", () => {
   );
 
   it(
+    "keeps a run it did not detach in this session's registry, so it can still be stopped",
+    async () => {
+      // `detach: false` says "do not let go of the pipes", not "this process is
+      // no longer uvp's". Registering only the detached runs made the result's
+      // own limitation — "The process is still running; stop it with
+      // uvp_run_stop" — name a remedy that did not exist: the stop found an empty
+      // registry, which it reports as `stopped: []` and a `cleanup_complete`
+      // that is true of nothing.
+      const { run } = await launchOnReservedPort(async (port) => {
+        const svc = await writeFakeService(harness.workspace, "svc", port);
+        return await call("uvp_run", {
+          path: harness.workspace,
+          args: svc.args,
+          ready: { port, path: "/healthz", timeout_ms: 15_000 },
+          detach: false,
+        });
+      });
+      expectConforms("uvp_run", run);
+      expect(run["ready"]).toBe(true);
+      expect(run["still_running"]).toBe(true);
+      expect(run["detached"]).toBe(false);
+
+      try {
+        const stop = await call("uvp_run_stop", { run_id: run["run_id"] });
+        expectConforms("uvp_run_stop", stop);
+        const stopped = stop["stopped"] as { run_id: string; outcome: string }[];
+        expect(stopped.map((entry) => entry.run_id)).toEqual([run["run_id"]]);
+        expect(["exited", "already_gone"]).toContain(stopped[0]?.outcome);
+        expect(stop["cleanup_complete"]).toBe(true);
+      } finally {
+        // The stop above is the assertion; this is hygiene, so a failure before
+        // it cannot leave a fixture process holding a port for the next test.
+        await call("uvp_run_stop", { all: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  it("reports an empty stop as complete, because nothing left running is a good answer", async () => {
+    const stop = await call("uvp_run_stop", { all: true });
+    expectConforms("uvp_run_stop", stop);
+    expect(stop["cleanup_complete"]).toBe(true);
+    expect(stop["stopped"]).toEqual([]);
+  });
+
+  it("refuses a run_id that is not of the declared shape", async () => {
+    expect(await failureCodeOf("uvp_run_stop", { run_id: "not-a-run-id" })).toBe("invalid_request");
+  });
+});
+
+describe("a process that ends before readiness", () => {
+  it(
     "reports `ready: false` instead of waiting forever when nothing listens",
     async () => {
       const svc = await writeFakeBinary(harness.workspace, "svc", { module: REFUSES_TO_BIND });
@@ -1308,56 +1360,6 @@ describe("launch and stop", () => {
     },
     TIMEOUT,
   );
-
-  it(
-    "keeps a run it did not detach in this session's registry, so it can still be stopped",
-    async () => {
-      // `detach: false` says "do not let go of the pipes", not "this process is
-      // no longer uvp's". Registering only the detached runs made the result's
-      // own limitation — "The process is still running; stop it with
-      // uvp_run_stop" — name a remedy that did not exist: the stop found an empty
-      // registry, which it reports as `stopped: []` and a `cleanup_complete`
-      // that is true of nothing.
-      const { run } = await launchOnReservedPort(async (port) => {
-        const svc = await writeFakeService(harness.workspace, "svc", port);
-        return await call("uvp_run", {
-          path: harness.workspace,
-          args: svc.args,
-          ready: { port, path: "/healthz", timeout_ms: 15_000 },
-          detach: false,
-        });
-      });
-      expectConforms("uvp_run", run);
-      expect(run["ready"]).toBe(true);
-      expect(run["still_running"]).toBe(true);
-      expect(run["detached"]).toBe(false);
-
-      try {
-        const stop = await call("uvp_run_stop", { run_id: run["run_id"] });
-        expectConforms("uvp_run_stop", stop);
-        const stopped = stop["stopped"] as { run_id: string; outcome: string }[];
-        expect(stopped.map((entry) => entry.run_id)).toEqual([run["run_id"]]);
-        expect(["exited", "already_gone"]).toContain(stopped[0]?.outcome);
-        expect(stop["cleanup_complete"]).toBe(true);
-      } finally {
-        // The stop above is the assertion; this is hygiene, so a failure before
-        // it cannot leave a fixture process holding a port for the next test.
-        await call("uvp_run_stop", { all: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  it("reports an empty stop as complete, because nothing left running is a good answer", async () => {
-    const stop = await call("uvp_run_stop", { all: true });
-    expectConforms("uvp_run_stop", stop);
-    expect(stop["cleanup_complete"]).toBe(true);
-    expect(stop["stopped"]).toEqual([]);
-  });
-
-  it("refuses a run_id that is not of the declared shape", async () => {
-    expect(await failureCodeOf("uvp_run_stop", { run_id: "not-a-run-id" })).toBe("invalid_request");
-  });
 });
 
 describe("the web primitives", () => {
