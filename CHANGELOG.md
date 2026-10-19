@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.5.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.4.0...uvp-agents-0.5.0) (2026-10-19)
+
+
+### Features
+
+* **run:** report the exit status when a service dies before readiness ([5d0a3da](https://github.com/Antruly/uvp/commit/5d0a3da654f4272dea6bcc84437f7bd5a9d018e8))
+* **run:** report the exit status when a service dies before readiness ([a5ce0dd](https://github.com/Antruly/uvp/commit/a5ce0dd2a3524a2285a878d0076550ca79e0e661))
+* **web:** report response headers in wire order for HTTP/1.1 ([3bdc07b](https://github.com/Antruly/uvp/commit/3bdc07b385accd49c8e019df761225903fd43780))
+* **web:** report response headers in wire order for HTTP/1.1 ([f32bc23](https://github.com/Antruly/uvp/commit/f32bc23daf3b30db27fc333d83dddfae4fd3ede4))
+
+
+### Bug Fixes
+
+* **contracts:** declare the libuvcpp install uvp_build reports ([0754eb2](https://github.com/Antruly/uvp/commit/0754eb2aca3d5e2a512883d2c225c03599ed1ed7))
+* **contracts:** declare the libuvcpp install uvp_build reports ([4d5c0a4](https://github.com/Antruly/uvp/commit/4d5c0a4468d7e8bd01cb569f115306c0b1d4b19e))
+* **templates:** emit the transitive loader tag so prebuilt libuvcpp starts ([d6669c9](https://github.com/Antruly/uvp/commit/d6669c9b3444829f5865dda8577d72cf5c5f4b88))
+* **templates:** emit the transitive loader tag so prebuilt libuvcpp starts ([f111789](https://github.com/Antruly/uvp/commit/f111789b22e0c06e1a0437ad728e8b7b0e070374))
+
+
+### Tests
+
+* **run:** cover the branch where the service dies by signal ([a2ad225](https://github.com/Antruly/uvp/commit/a2ad2252ec55e7f0f7795cacf9fecf427deba3da))
+* **run:** cover the branch where the service dies by signal ([2610fcd](https://github.com/Antruly/uvp/commit/2610fcdd06275388b73966eab57ec751241446c4))
+* **run:** keep the launch suite inside its lint budget ([4adf419](https://github.com/Antruly/uvp/commit/4adf419d6c33eb30a099a769c5168eaaebf55d45))
+* **run:** make the readiness cases name the binary they wrote ([b3bd315](https://github.com/Antruly/uvp/commit/b3bd315f11c7be38a567841408154d34bc6fb739))
+
 ## [0.4.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.3.0...uvp-agents-0.4.0) (2026-10-18)
 
 
