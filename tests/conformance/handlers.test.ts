@@ -87,6 +87,16 @@ const SLEEPS_WITHOUT_LISTENING = fileURLToPath(
   new URL("./fixtures/sleepsWithoutListening.mjs", import.meta.url),
 );
 
+/**
+ * A process that ends by signal rather than by an exit code.
+ *
+ * The third way a child can be gone: `exit_code: 0`, a bound reached while it
+ * lived, and a signal death must not look like either.
+ */
+const KILLS_ITSELF_WITH_SIGTERM = fileURLToPath(
+  new URL("./fixtures/killsItselfWithSigterm.mjs", import.meta.url),
+);
+
 type Handlers = Readonly<Record<string, ReturnType<typeof createToolHandlers>[string]>>;
 
 interface Harness {
@@ -1208,65 +1218,6 @@ describe("launch and stop", () => {
   );
 
   it(
-    "reports `ready: false` instead of waiting forever when nothing listens",
-    async () => {
-      const svc = await writeFakeBinary(harness.workspace, "svc", { module: REFUSES_TO_BIND });
-
-      const run = await runUntilNothingListens(harness.workspace, svc.args);
-      expect(run["ready"]).toBe(false);
-      // A process that died is not still running, and saying otherwise would leave
-      // a caller probing an endpoint nothing is behind.
-      expect(run["still_running"]).toBe(false);
-      expect(String(run["stderr_tail"])).toContain("cannot bind");
-
-      // The exit is the finding here, not the bound. A caller told
-      // `resource_limit` would lengthen `timeout_ms`; the process was already
-      // gone, and what it said is in the tails.
-      expect(run["exit_code"]).toBe(3);
-      expect(run["exit_signal"]).toBeNull();
-      const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
-      expect(unknowns.map((unknown) => unknown.reason)).toContain("process_exit");
-      expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
-        "exited with code 3 before the probe answered",
-      );
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "keeps a bound-bound failure a resource limit while the process is alive",
-    async () => {
-      // The other side of the same branch: a child that is still running when
-      // the probe expires did time out. Its exit was never observed, so the
-      // result must not carry one, and the reason must stay the bound.
-      const svc = await writeFakeBinary(harness.workspace, "sleepy", {
-        module: SLEEPS_WITHOUT_LISTENING,
-      });
-      const port = await freePort();
-      const run = await call("uvp_run", {
-        path: harness.workspace,
-        args: svc.args,
-        ready: { port, path: "/healthz", timeout_ms: 400 },
-      });
-      expectConforms("uvp_run", run);
-      try {
-        expect(run["ready"]).toBe(false);
-        expect(run["still_running"]).toBe(true);
-        expect(run).not.toHaveProperty("exit_code");
-        expect(run).not.toHaveProperty("exit_signal");
-        const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
-        expect(unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
-        expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
-          "the probe did not answer within 400 ms",
-        );
-      } finally {
-        await call("uvp_run_stop", { run_id: run["run_id"] });
-      }
-    },
-    TIMEOUT,
-  );
-
-  it(
     "keeps a run it did not detach in this session's registry, so it can still be stopped",
     async () => {
       // `detach: false` says "do not let go of the pipes", not "this process is
@@ -1315,6 +1266,107 @@ describe("launch and stop", () => {
   it("refuses a run_id that is not of the declared shape", async () => {
     expect(await failureCodeOf("uvp_run_stop", { run_id: "not-a-run-id" })).toBe("invalid_request");
   });
+});
+
+describe("a process that ends before readiness", () => {
+  it(
+    "reports `ready: false` instead of waiting forever when nothing listens",
+    async () => {
+      const svc = await writeFakeBinary(harness.workspace, "svc", { module: REFUSES_TO_BIND });
+
+      const run = await runUntilNothingListens(harness.workspace, svc.args);
+      expect(run["ready"]).toBe(false);
+      // A process that died is not still running, and saying otherwise would leave
+      // a caller probing an endpoint nothing is behind.
+      expect(run["still_running"]).toBe(false);
+      expect(String(run["stderr_tail"])).toContain("cannot bind");
+
+      // The exit is the finding here, not the bound. A caller told
+      // `resource_limit` would lengthen `timeout_ms`; the process was already
+      // gone, and what it said is in the tails.
+      expect(run["exit_code"]).toBe(3);
+      expect(run["exit_signal"]).toBeNull();
+      const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
+      expect(unknowns.map((unknown) => unknown.reason)).toContain("process_exit");
+      expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
+        "exited with code 3 before the probe answered",
+      );
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps a bound-bound failure a resource limit while the process is alive",
+    async () => {
+      // The other side of the same branch: a child that is still running when
+      // the probe expires did time out. Its exit was never observed, so the
+      // result must not carry one, and the reason must stay the bound.
+      const svc = await writeFakeBinary(harness.workspace, "sleepy", {
+        module: SLEEPS_WITHOUT_LISTENING,
+      });
+      const port = await freePort();
+      const run = await call("uvp_run", {
+        path: harness.workspace,
+        // The path, not just the workspace: the fixture is installed under its own
+        // name, so a case run on its own must name the binary it wrote rather than
+        // the manifest's default that an earlier case happened to leave behind.
+        binary: svc.path,
+        args: svc.args,
+        ready: { port, path: "/healthz", timeout_ms: 400 },
+      });
+      expectConforms("uvp_run", run);
+      try {
+        expect(run["ready"]).toBe(false);
+        expect(run["still_running"]).toBe(true);
+        expect(run).not.toHaveProperty("exit_code");
+        expect(run).not.toHaveProperty("exit_signal");
+        const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
+        expect(unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
+        expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
+          "the probe did not answer within 400 ms",
+        );
+      } finally {
+        await call("uvp_run_stop", { run_id: run["run_id"] });
+      }
+    },
+    TIMEOUT,
+  );
+
+  // Windows has no signals: `process.kill(pid, "SIGTERM")` terminates through
+  // TerminateProcess and the exit event reports a code with a null signal, so a
+  // fixture that signals itself cannot exercise this branch there.
+  it.skipIf(process.platform === "win32")(
+    process.platform === "win32"
+      ? "reports a signal death as the signal, with a null code — skipped: Windows has no POSIX signals, so a self-SIGTERM reports an exit code instead"
+      : "reports a signal death as the signal, with a null code",
+    async () => {
+      const svc = await writeFakeBinary(harness.workspace, "sigterm", {
+        module: KILLS_ITSELF_WITH_SIGTERM,
+      });
+      const port = await freePort();
+      const run = await call("uvp_run", {
+        path: harness.workspace,
+        // Named, so filtering the runner to this case does not spawn the fixture
+        // an earlier case installed.
+        binary: svc.path,
+        args: svc.args,
+        ready: { port, path: "/healthz", timeout_ms: 600 },
+      });
+      expectConforms("uvp_run", run);
+      expect(run["ready"]).toBe(false);
+      expect(run["still_running"]).toBe(false);
+      // The null code is an observation, not a missing value: the process ended
+      // by signal, and `exit_code: 0` would claim it exited cleanly.
+      expect(run["exit_code"]).toBeNull();
+      expect(run["exit_signal"]).toBe("SIGTERM");
+      const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
+      expect(unknowns.map((unknown) => unknown.reason)).toContain("process_exit");
+      expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
+        "was killed by SIGTERM before the probe answered",
+      );
+    },
+    TIMEOUT,
+  );
 });
 
 describe("the web primitives", () => {
