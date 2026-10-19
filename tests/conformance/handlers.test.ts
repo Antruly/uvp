@@ -181,6 +181,24 @@ const expectConforms = (name: string, output: Record<string, unknown>): void => 
     throw new Error(`${name} produced output its own contract rejects:\n${issues}`);
   }
 
+  // The fields the schema advertises, compared against the fields the handler
+  // returned. `safeParse` cannot make this comparison: Zod reads an object
+  // schema as a strip transform, so an undeclared key passes there and then
+  // fails at the MCP edge, where the SDK validates `structuredContent` against
+  // the JSON Schema it generated — the same one `tools/list` advertised, closed
+  // with `additionalProperties: false`. Answering that question here is the
+  // point: a client's schema violation is a test failure in this repository,
+  // not something discovered by whoever calls the tool first.
+  const advertised = z.toJSONSchema(contract.outputSchema) as {
+    readonly properties?: Record<string, unknown>;
+  };
+  const declared = new Set(Object.keys(advertised.properties ?? {}));
+  const undeclared = Object.keys(output).filter((key) => !declared.has(key));
+  expect(
+    undeclared,
+    `${name} returned fields its contract does not declare: ${undeclared.join(", ")}`,
+  ).toEqual([]);
+
   // The envelope checked as values, not as types. A schema can require
   // `evidence` to be an array and still be satisfied by an empty one when
   // something was in fact observed.
@@ -1011,6 +1029,22 @@ describe("build", () => {
     for (const artifact of output["artifacts"] as { digest: string }[]) {
       expect(artifact.digest).toMatch(/^[0-9a-f]{64}$/u);
     }
+    // The install the build was attributed to. It is a declared field because a
+    // caller cannot otherwise tell which libuvcpp the reported version of
+    // anything refers to — and because a field the handler returns but the
+    // schema does not describe fails validation at the MCP edge.
+    expect(output["libuvcpp"]).toMatchObject({ version: "1.7.0" });
+  });
+
+  it("omits the libuvcpp field when no install was discovered", async () => {
+    const output = await callWith([createProviderWithoutLibuvcpp()], "uvp_build", {
+      path: harness.workspace,
+    });
+    expectConforms("uvp_build", output);
+    expect(output).not.toHaveProperty("libuvcpp");
+    expect((output["limitations"] as string[]).join(" ")).toContain(
+      "No libuvcpp install was discovered",
+    );
   });
 
   it("rejects a non-string path at the boundary, before any compiler is invoked", async () => {

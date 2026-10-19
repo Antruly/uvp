@@ -303,6 +303,26 @@ export const buildContract = defineTool({
     ),
     artifacts: z.array(z.object({ path: z.string(), bytes: z.number().int(), digest: z.string() })),
     commands: z.array(z.string()),
+    /**
+     * The install uvp discovered and handed to CMake, so a result can be
+     * attributed to the library the build actually used.
+     *
+     * Present only when one was found. Absent means none was discovered and CMake
+     * searched for itself, which the result's `limitations` say in words — the
+     * absence is the observation, not a missing field. `version` and
+     * `install_prefix` are each optional because a discovery can establish one
+     * without the other; neither being present still means the install was found.
+     */
+    libuvcpp: z
+      .object({
+        version: z.string().optional(),
+        install_prefix: z.string().optional(),
+      })
+      .optional()
+      .describe(
+        "The libuvcpp install uvp discovered and passed to CMake. Absent when none was " +
+          "found; the limitations then say CMake searched for one itself.",
+      ),
   }),
   effects: {
     readsFilesystem: true,
