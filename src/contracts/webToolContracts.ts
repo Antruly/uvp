@@ -99,6 +99,21 @@ export const httpRequestContract = defineTool({
     http_version: z.string(),
     request_http_version: z.string(),
     headers: headerMapSchema,
+    /**
+     * The same headers as the peer sent them. `headers` is the convenience view
+     * and loses three things a proxy-shaped consumer needs: repeated lines
+     * collapse into one comma-joined value, the spelling is lower-cased, and the
+     * order is gone. Absent when this transport did not expose a raw list.
+     */
+    headers_raw: z
+      .array(z.object({ name: z.string(), value: z.string() }))
+      .optional()
+      .describe(
+        "Response headers in the order the peer sent them, one entry per line, with the " +
+          "original spelling and duplicates kept. Absent when the transport did not expose " +
+          "them: HTTP/1.1 over the in-process client reports them, while HTTP/2 and HTTP/3 " +
+          "report only the normalized `headers` view.",
+      ),
     timing: timingSchema,
     body: z.object({
       bytes: z.number().int(),

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createServer as createHttp2Server } from "node:http2";
+import type { ServerHttp2Stream } from "node:http2";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -416,6 +418,65 @@ describe("a body the text is not", () => {
       expect(whole.exit).toBe(EXIT_OK);
       expect(whole.text).not.toContain("lossy");
       expect(whole.text).not.toContain("--json");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("repeated response headers", () => {
+  it(
+    "keeps the wire's order, spelling and duplicates in headers_raw",
+    async () => {
+      const output = await conforming({ url: `${fixture.origin}/duplicate-headers` });
+      const raw = output["headers_raw"] as { name: string; value: string }[];
+      expect(raw).toBeDefined();
+      // Only this route's headers, in the order the fixture wrote them. Node
+      // adds its own (date, connection), so the assertion is on the subset the
+      // test controls rather than on an exact list the host would decide.
+      const ours = raw.filter((header) =>
+        ["set-cookie", "x-dupe"].includes(header.name.toLowerCase()),
+      );
+      expect(ours).toEqual([
+        { name: "Set-Cookie", value: "a=1; Path=/" },
+        { name: "Set-Cookie", value: "b=2; Path=/" },
+        { name: "X-Dupe", value: "one" },
+        { name: "X-Dupe", value: "two" },
+      ]);
+
+      // The convenience view is still there, and still shows what it lost: one
+      // comma-joined value per name, lower-cased.
+      const headers = output["headers"] as Record<string, string>;
+      expect(headers["x-dupe"]).toBe("one, two");
+      expect(headers["set-cookie"]).toBe("a=1; Path=/, b=2; Path=/");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "does not claim a raw list over HTTP/2, where the client exposes none",
+    async () => {
+      // A real h2c server rather than the fixture: the point is the transport's
+      // own limitation, and a plain HTTP/1.1 socket cannot show it.
+      const server = createHttp2Server();
+      server.on("stream", (stream: ServerHttp2Stream) => {
+        stream.respond({ ":status": 200, "x-dupe": "one, two", "content-type": "text/plain" });
+        stream.end("ok");
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      try {
+        const output = await conforming({
+          url: `http://127.0.0.1:${String(port)}/`,
+          http_version: "2",
+        });
+        expect(output["http_version"]).toBe("2.0");
+        // The map answers; the raw list is absent rather than an empty claim.
+        expect((output["headers"] as Record<string, string>)["x-dupe"]).toBe("one, two");
+        expect(output).not.toHaveProperty("headers_raw");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     },
     TIMEOUT,
   );

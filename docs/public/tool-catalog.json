@@ -4911,6 +4911,26 @@
               "type": "string"
             }
           },
+          "headers_raw": {
+            "description": "Response headers in the order the peer sent them, one entry per line, with the original spelling and duplicates kept. Absent when the transport did not expose them: HTTP/1.1 over the in-process client reports them, while HTTP/2 and HTTP/3 report only the normalized `headers` view.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
           "timing": {
             "type": "object",
             "properties": {

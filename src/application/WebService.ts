@@ -738,6 +738,9 @@ export class WebService {
       http_version: exchange.httpVersion,
       request_http_version: exchange.requestHttpVersion,
       headers: { ...exchange.headers },
+      ...(exchange.rawHeaders === undefined
+        ? {}
+        : { headers_raw: exchange.rawHeaders.map((header) => ({ ...header })) }),
       timing: toTiming(exchange.timing),
       body: toBody(exchange, contentType, decoded, truncated),
       redirects: [...exchange.redirects],
@@ -830,6 +833,8 @@ export class WebService {
             httpVersion: "1.1",
             requestHttpVersion: "1.1",
             headers: result.handshake.headers,
+            // The probe reports the handshake headers as a map; no wire list.
+            rawHeaders: undefined,
             body: Buffer.alloc(0),
             bodyBytes: 0,
             bodyTruncated: false,

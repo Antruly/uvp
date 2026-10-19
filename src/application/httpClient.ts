@@ -330,6 +330,19 @@ const peerCertificateInfo = (
   };
 };
 
+/**
+ * One response header line, as the peer sent it.
+ *
+ * Name spelling, order, and duplicates are the wire's, not the map's: two
+ * `Set-Cookie` lines are two entries here, and `X-Dupe` keeps its case. The
+ * normalized `headers` map stays the convenience view, because it is what makes
+ * `headers["content-type"]` answer the common question.
+ */
+export interface RawHeader {
+  readonly name: string;
+  readonly value: string;
+}
+
 export interface HttpExchange {
   readonly url: string;
   readonly method: string;
@@ -339,6 +352,13 @@ export interface HttpExchange {
   readonly httpVersion: string;
   readonly requestHttpVersion: string;
   readonly headers: Readonly<Record<string, string>>;
+  /**
+   * The headers in wire order, or `undefined` when this transport did not expose
+   * them. Node's HTTP/1.1 client has them (`rawHeaders`); its HTTP/2 client folds
+   * the response into an object before uvp sees it, so there is no raw list to
+   * report — absence is that fact, not a missing value.
+   */
+  readonly rawHeaders: readonly RawHeader[] | undefined;
   readonly body: Buffer;
   readonly bodyBytes: number;
   readonly bodyTruncated: boolean;
@@ -346,6 +366,15 @@ export interface HttpExchange {
   readonly tls: TlsInfo | undefined;
   readonly redirects: readonly { status: number; location: string }[];
 }
+
+/** Turn Node's flat `[name, value, …]` list into entries, keeping both halves. */
+const rawHeaderList = (flat: readonly string[]): RawHeader[] => {
+  const out: RawHeader[] = [];
+  for (let index = 0; index + 1 < flat.length; index += 2) {
+    out.push({ name: flat[index] ?? "", value: flat[index + 1] ?? "" });
+  }
+  return out;
+};
 
 const normaliseHeaders = (raw: NodeJS.Dict<string | string[]>): Record<string, string> => {
   const out: Record<string, string> = {};
@@ -357,6 +386,7 @@ const normaliseHeaders = (raw: NodeJS.Dict<string | string[]>): Record<string, s
 };
 
 interface SingleShotResult {
+  readonly rawHeaders: readonly RawHeader[] | undefined;
   readonly status: number;
   readonly statusText: string;
   readonly httpVersion: string;
@@ -479,6 +509,7 @@ const performHttp1 = (
           statusText: res.statusMessage ?? "",
           httpVersion: res.httpVersion,
           headers: normaliseHeaders(res.headers),
+          rawHeaders: rawHeaderList(res.rawHeaders),
           body: Buffer.concat(chunks),
           bodyTruncated: truncated,
           timing: {
@@ -723,6 +754,10 @@ const performHttp2 = (
         statusText: "",
         httpVersion: "2.0",
         headers,
+        // Node's h2 client exposes the response as an object with folded
+        // duplicates and no wire spelling, so there is nothing raw to report.
+        // `headers_raw` being absent is that observation.
+        rawHeaders: undefined,
         body: Buffer.concat(chunks),
         bodyTruncated: truncated,
         timing: {
@@ -814,6 +849,7 @@ export const performRequest = async (
         httpVersion: result.httpVersion,
         requestHttpVersion: spec.httpVersion,
         headers: result.headers,
+        rawHeaders: result.rawHeaders,
         body: result.body,
         bodyBytes: result.body.byteLength,
         bodyTruncated: result.bodyTruncated,

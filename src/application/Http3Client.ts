@@ -446,6 +446,9 @@ const toExchange = (report: NativeHttp3Report, input: Http3RequestInput): HttpEx
     httpVersion: "3",
     requestHttpVersion: "3",
     headers: { ...report.headers },
+    // The probe reports the headers it parsed, as a map. It has no wire list to
+    // hand over, so there is no raw form to claim.
+    rawHeaders: undefined,
     body,
     bodyBytes: report.bodyBytes,
     bodyTruncated: report.bodyOmitted !== undefined,
