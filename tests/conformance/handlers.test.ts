@@ -76,6 +76,17 @@ const FROZEN_CLOCK = (): Date => new Date("2026-10-15T12:00:00.000Z");
  */
 const REFUSES_TO_BIND = fileURLToPath(new URL("./fixtures/refusesToBind.mjs", import.meta.url));
 
+/**
+ * A process that stays alive without listening.
+ *
+ * The pair to `REFUSES_TO_BIND`: that one exits, this one does not, so the two
+ * together decide whether a readiness failure's reason follows the process's
+ * state rather than the fact that the probe failed.
+ */
+const SLEEPS_WITHOUT_LISTENING = fileURLToPath(
+  new URL("./fixtures/sleepsWithoutListening.mjs", import.meta.url),
+);
+
 type Handlers = Readonly<Record<string, ReturnType<typeof createToolHandlers>[string]>>;
 
 interface Harness {
@@ -1207,6 +1218,50 @@ describe("launch and stop", () => {
       // a caller probing an endpoint nothing is behind.
       expect(run["still_running"]).toBe(false);
       expect(String(run["stderr_tail"])).toContain("cannot bind");
+
+      // The exit is the finding here, not the bound. A caller told
+      // `resource_limit` would lengthen `timeout_ms`; the process was already
+      // gone, and what it said is in the tails.
+      expect(run["exit_code"]).toBe(3);
+      expect(run["exit_signal"]).toBeNull();
+      const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
+      expect(unknowns.map((unknown) => unknown.reason)).toContain("process_exit");
+      expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
+        "exited with code 3 before the probe answered",
+      );
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps a bound-bound failure a resource limit while the process is alive",
+    async () => {
+      // The other side of the same branch: a child that is still running when
+      // the probe expires did time out. Its exit was never observed, so the
+      // result must not carry one, and the reason must stay the bound.
+      const svc = await writeFakeBinary(harness.workspace, "sleepy", {
+        module: SLEEPS_WITHOUT_LISTENING,
+      });
+      const port = await freePort();
+      const run = await call("uvp_run", {
+        path: harness.workspace,
+        args: svc.args,
+        ready: { port, path: "/healthz", timeout_ms: 400 },
+      });
+      expectConforms("uvp_run", run);
+      try {
+        expect(run["ready"]).toBe(false);
+        expect(run["still_running"]).toBe(true);
+        expect(run).not.toHaveProperty("exit_code");
+        expect(run).not.toHaveProperty("exit_signal");
+        const unknowns = run["unknowns"] as { reason: string; blocked_by?: string }[];
+        expect(unknowns.map((unknown) => unknown.reason)).toContain("resource_limit");
+        expect(unknowns.map((unknown) => unknown.blocked_by ?? "").join(" ")).toContain(
+          "the probe did not answer within 400 ms",
+        );
+      } finally {
+        await call("uvp_run_stop", { run_id: run["run_id"] });
+      }
     },
     TIMEOUT,
   );

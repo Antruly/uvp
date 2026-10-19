@@ -453,6 +453,25 @@ const recordTemplateScanUnknown = (
   });
 };
 
+/**
+ * How a supervised process ended, as one clause.
+ *
+ * The two halves are reported together because either alone is ambiguous: a
+ * missing code with no signal reads as "not observed", and a signal name with a
+ * stale code would claim an exit status the process never produced.
+ */
+const describeExit = (exit: {
+  readonly code: number | null;
+  readonly signal: string | null;
+}): string =>
+  exit.signal !== null
+    ? `was killed by ${exit.signal}${exit.code === null ? "" : ` (exit code ${String(exit.code)})`}`
+    : exit.code === null
+      ? // Node reports one of the two, so this pair is not expected; saying
+        // "code null" if it happened would read as a status the host produced.
+        "exited without a reported status"
+      : `exited with code ${String(exit.code)}`;
+
 export const createToolHandlers = (
   services: UvpServices,
 ): Readonly<Record<string, ToolHandler>> => {
@@ -1165,7 +1184,14 @@ export const createToolHandlers = (
       record(recorder, {
         kind: "launch",
         subject: { run_id: run.runId, workspace_id: run.workspaceId },
-        observed: { pid: run.pid, ready: run.ready, still_running: run.stillRunning },
+        observed: {
+          pid: run.pid,
+          ready: run.ready,
+          still_running: run.stillRunning,
+          ...(run.exitStatus === undefined
+            ? {}
+            : { exit_code: run.exitStatus.code, exit_signal: run.exitStatus.signal }),
+        },
         ...(run.startupMs === undefined ? {} : { derived: { startup_ms: run.startupMs } }),
         coverage:
           run.ready || input.ready === undefined
@@ -1182,15 +1208,26 @@ export const createToolHandlers = (
       });
 
       if (!run.ready) {
+        // A service that was gone before the wait ended did not time out. The
+        // exit is the finding, and the timeout is only how long it took to
+        // notice: reporting `resource_limit` here sends the caller to a longer
+        // `timeout_ms` instead of to the process's own output.
+        const exit = run.exitStatus;
         recordUnknown(
           recorder,
           "Did the service accept requests?",
-          input.ready === undefined ? "not_attempted" : "resource_limit",
+          input.ready === undefined
+            ? "not_attempted"
+            : exit === undefined
+              ? "resource_limit"
+              : "process_exit",
           {
             blockedBy:
               input.ready === undefined
                 ? "no readiness probe was supplied, so nothing was tested"
-                : `the probe did not answer within ${String(input.ready.timeout_ms)} ms`,
+                : exit === undefined
+                  ? `the probe did not answer within ${String(input.ready.timeout_ms)} ms`
+                  : `the process ${describeExit(exit)} before the probe answered; its output is in stderr_tail`,
           },
         );
       }
@@ -1221,6 +1258,9 @@ export const createToolHandlers = (
         stdout_tail: run.stdoutTail,
         stderr_tail: run.stderrTail,
         still_running: run.stillRunning,
+        ...(run.exitStatus === undefined
+          ? {}
+          : { exit_code: run.exitStatus.code, exit_signal: run.exitStatus.signal }),
         detached: run.detached,
       };
     }),
