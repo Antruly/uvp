@@ -3577,6 +3577,19 @@
             "items": {
               "type": "string"
             }
+          },
+          "libuvcpp": {
+            "description": "The libuvcpp install uvp discovered and passed to CMake. Absent when none was found; the limitations then say CMake searched for one itself.",
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "install_prefix": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": [
