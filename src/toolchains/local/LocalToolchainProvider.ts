@@ -804,6 +804,22 @@ const findLibuvcpp = async (
 ): Promise<LibuvcppBuild> => await discoverLibuvcpp(libuvcppSearchRoots(workspacePath), signal);
 
 /**
+ * The prefixes a candidate root may hold an install at.
+ *
+ * A `cmake --install` prefix keeps `include/`, `lib/` and `lib64/` at the root
+ * uvp is handed. Some release archives — and every Debian-style staging tree —
+ * wrap the same layout in `usr/`, so a caller who unpacks
+ * `uvcpp-1.9.1-linux-x64.tar.gz` and points `UVCPP_ROOT` at the archive root
+ * gets a root whose `include/` is one level down. Before this, discovery
+ * examined only the root and reported "No libuvcpp installation found", even
+ * though the archive carried a complete install under `usr/`.
+ *
+ * The root is tried first so a prefix that happens to contain both layouts
+ * keeps the one the caller named; `usr` is only a fallback.
+ */
+const installPrefixesUnder = (root: string): readonly string[] => [root, join(root, "usr")];
+
+/**
  * The answer for a list of candidate roots.
  *
  * Separate from the environment lookup so it can be exercised against roots a
@@ -829,42 +845,46 @@ export const discoverLibuvcpp = async (
     // `found` has no reason to open. `doctor` renders that as a missing
     // toolchain and tells the user to install a library they may already have.
     if (signal.aborted) throw cancelledFailure(DISCOVERY_CANCELLED);
-    try {
-      const info = await stat(root);
-      if (!info.isDirectory()) continue;
-    } catch {
-      continue;
+    for (const prefix of installPrefixesUnder(root)) {
+      try {
+        const info = await stat(prefix);
+        if (!info.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      const modules = await readModules(prefix);
+      // Kept rather than folded into `hasConfig`: the generated project's first
+      // route is `find_package(uvcpp CONFIG)`, and whether this install answers
+      // it is what decides if pkg-config is a prerequisite. `hasConfig` is the
+      // broader question — "does this root hold anything at all" — and answering
+      // it by throwing this away would leave the doctor to infer the route from
+      // the version-source order.
+      const cmakePackage =
+        (await cmakePackageIn(prefix, "lib")) || (await cmakePackageIn(prefix, "lib64"));
+      const hasConfig = (modules?.length ?? 0) > 0 || cmakePackage;
+      if (!hasConfig) {
+        // A header that was read and defines nothing is not "missing development
+        // files"; only a root with no readable config source at all is.
+        if (modules === undefined) sharedLibrary ??= await sharedLibraryIn(prefix);
+        continue;
+      }
+      const version = await libuvcppVersionOf(prefix);
+      return {
+        found: true,
+        ...(version === undefined
+          ? {}
+          : { version: version.version, versionSource: version.source }),
+        installPrefix: prefix,
+        modules: modules ?? [],
+        cmakePackage,
+        ...(modules === undefined
+          ? {
+              modulesUnknown: true,
+              note: "Found CMake package files but no uvcpp_config.h could be read; module list is unknown.",
+            }
+          : {}),
+      };
     }
-    const modules = await readModules(root);
-    // Kept rather than folded into `hasConfig`: the generated project's first
-    // route is `find_package(uvcpp CONFIG)`, and whether this install answers
-    // it is what decides if pkg-config is a prerequisite. `hasConfig` is the
-    // broader question — "does this root hold anything at all" — and answering
-    // it by throwing this away would leave the doctor to infer the route from
-    // the version-source order.
-    const cmakePackage =
-      (await cmakePackageIn(root, "lib")) || (await cmakePackageIn(root, "lib64"));
-    const hasConfig = (modules?.length ?? 0) > 0 || cmakePackage;
-    if (!hasConfig) {
-      // A header that was read and defines nothing is not "missing development
-      // files"; only a root with no readable config source at all is.
-      if (modules === undefined) sharedLibrary ??= await sharedLibraryIn(root);
-      continue;
-    }
-    const version = await libuvcppVersionOf(root);
-    return {
-      found: true,
-      ...(version === undefined ? {} : { version: version.version, versionSource: version.source }),
-      installPrefix: root,
-      modules: modules ?? [],
-      cmakePackage,
-      ...(modules === undefined
-        ? {
-            modulesUnknown: true,
-            note: "Found CMake package files but no uvcpp_config.h could be read; module list is unknown.",
-          }
-        : {}),
-    };
   }
   return {
     found: false,
