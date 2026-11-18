@@ -1,6 +1,12 @@
 import { Buffer } from "node:buffer";
 
 import { UvpFailure } from "../domain/errors.js";
+import {
+  isUvpFrontendApp,
+  isUvpFrontendSelection,
+  type UvpFrontendApp,
+  type UvpFrontendSelection,
+} from "../domain/frontends.js";
 import type { StoredTemplatePackageSource } from "./TemplateStore.js";
 
 /**
@@ -34,6 +40,16 @@ import type { StoredTemplatePackageSource } from "./TemplateStore.js";
  * that differs from the project name. A package without one gets a minimal
  * manifest generated here, so `uvp build` and `uvp run` have the record they
  * read. This is the one file uvp writes rather than copies.
+ *
+ * ## Frontends
+ *
+ * A package that carries a Node app under `frontend/` has to record it in
+ * `frontends`, or `uvp frontend build` refuses with "records no Node frontend
+ * app in uvp.json" even though the app is right there. The package's declared
+ * `framework` (vue3, react, svelte) answers the question when it is one of the
+ * app ids; otherwise the dependency name in `frontend/package.json` does. Only
+ * a package with a `frontend/package.json` gets the record — a static page set
+ * or a package whose source happens to be a Vue file is not an app build.
  */
 
 export interface PackageWorkspaceRenderInput {
@@ -54,6 +70,8 @@ export interface RenderedPackageWorkspace {
    * package's manifest names none. `uvp run` reads the same field.
    */
   readonly binary: string;
+  /** The Node frontend app recorded in the manifest, or none. */
+  readonly frontends: readonly UvpFrontendSelection[];
   /** Exactly the routes the package declared, or none. */
   readonly routes: readonly string[];
   /** Present when the package declared no routes; the caller reports it. */
@@ -61,8 +79,61 @@ export interface RenderedPackageWorkspace {
 }
 
 const MANIFEST_FILE = "uvp.json";
+const FRONTEND_PACKAGE_FILE = "frontend/package.json";
 
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** The dependency whose presence identifies each app, used when the package declares no framework. */
+const FRONTEND_DEPENDENCY: Readonly<Record<UvpFrontendApp, string>> = {
+  vue3: "vue",
+  react: "react",
+  svelte: "svelte",
+};
+
+/**
+ * The app a package's `frontend/package.json` builds, when its dependencies name exactly one.
+ *
+ * A `package.json` may list both a framework and a tool that mentions another
+ * (`@vitejs/plugin-vue` carries `vue` as a peer, not as a dependency), so only
+ * the dependency keys themselves count. Two framework dependencies at once is
+ * ambiguous and answered as unknown rather than guessed.
+ */
+const frontendAppFromDependencies = (
+  files: readonly RenderedPackageFile[],
+): UvpFrontendApp | undefined => {
+  const manifest = files.find((file) => file.path === FRONTEND_PACKAGE_FILE);
+  if (manifest === undefined) return undefined;
+  const text = textOf(manifest.content);
+  if (text === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) return undefined;
+  const dependencies = {
+    ...(isRecord(parsed["dependencies"]) ? parsed["dependencies"] : {}),
+    ...(isRecord(parsed["devDependencies"]) ? parsed["devDependencies"] : {}),
+  };
+  const matches = (Object.keys(FRONTEND_DEPENDENCY) as UvpFrontendApp[]).filter(
+    (app) => FRONTEND_DEPENDENCY[app] in dependencies,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
+const frontendAppOf = (
+  source: StoredTemplatePackageSource,
+  files: readonly RenderedPackageFile[],
+): UvpFrontendApp | undefined => {
+  if (!files.some((file) => file.path === FRONTEND_PACKAGE_FILE)) return undefined;
+  const framework = source.package.framework;
+  if (framework !== undefined && isUvpFrontendApp(framework)) return framework;
+  return frontendAppFromDependencies(files);
+};
 
 const textOf = (bytes: Uint8Array): string | undefined => {
   try {
@@ -112,6 +183,7 @@ interface WorkspaceManifestFields {
   readonly binary: string;
   readonly port: number;
   readonly features: readonly string[];
+  readonly frontends?: readonly UvpFrontendSelection[];
   readonly libuvcpp?: string;
   readonly templatePackage: {
     readonly id: string;
@@ -126,6 +198,7 @@ const generatedManifest = (fields: WorkspaceManifestFields): Record<string, unkn
   binary: fields.binary,
   port: fields.port,
   features: [...fields.features],
+  ...(fields.frontends === undefined ? {} : { frontends: [...fields.frontends] }),
   template_package: { ...fields.templatePackage },
   ...(fields.libuvcpp === undefined ? {} : { requirements: { libuvcpp: fields.libuvcpp } }),
 });
@@ -168,6 +241,9 @@ const mergedManifest = (
   const manifest = { ...(parsed as Record<string, unknown>) };
   delete manifest["template"];
   manifest["template_package"] = { ...fields.templatePackage };
+  if (manifest["frontends"] === undefined && fields.frontends !== undefined) {
+    manifest["frontends"] = [...fields.frontends];
+  }
   const named = manifest["binary"];
   const binary =
     typeof named === "string" && named.length > 0
@@ -180,6 +256,37 @@ const mergedManifest = (
     file: { path: rendered.path, content: encode(`${JSON.stringify(manifest, null, 2)}\n`) },
     binary,
   };
+};
+
+/**
+ * The `frontends` a rendered manifest records, in its own order.
+ *
+ * Read back rather than assumed: a package's own `uvp.json` may have declared
+ * frontends, and the init result must report what the workspace actually says.
+ * Entries are not filtered by the selection vocabulary here — the manifest
+ * reader already refuses an unknown one, and this function's caller reports the
+ * file that was written.
+ */
+const recordedFrontends = (
+  files: readonly RenderedPackageFile[],
+): readonly UvpFrontendSelection[] => {
+  const file = files.find((entry) => entry.path === MANIFEST_FILE);
+  if (file === undefined) return [];
+  const text = textOf(file.content);
+  if (text === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!isRecord(parsed)) return [];
+    const value = parsed["frontends"];
+    return Array.isArray(value)
+      ? value.filter(
+          (entry): entry is UvpFrontendSelection =>
+            typeof entry === "string" && isUvpFrontendSelection(entry),
+        )
+      : [];
+  } catch {
+    return [];
+  }
 };
 
 /**
@@ -196,11 +303,13 @@ export const renderTemplatePackageWorkspace = (
   const rendered = input.source.files.map((file) =>
     renderFile(file, { name: input.name, port: input.port, features }),
   );
+  const inferredFrontend = frontendAppOf(input.source, rendered);
   const fields: WorkspaceManifestFields = {
     name: input.name,
     binary: input.name,
     port: input.port,
     features,
+    ...(inferredFrontend === undefined ? {} : { frontends: [inferredFrontend] }),
     ...(pkg.requires?.libuvcpp === undefined ? {} : { libuvcpp: pkg.requires.libuvcpp }),
     templatePackage: { id: pkg.id, version: pkg.version, digest: pkg.digest },
   };
@@ -221,6 +330,7 @@ export const renderTemplatePackageWorkspace = (
   return {
     files: rendered,
     binary,
+    frontends: recordedFrontends(rendered),
     routes: pkg.routes ?? [],
     ...(pkg.routes === undefined ? { routesLimitation: "The package declares no routes." } : {}),
   };

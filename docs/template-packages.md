@@ -216,6 +216,14 @@ The one file uvp writes rather than copies is `uvp.json`:
   `port`, `features`, `template_package`, and `requirements.libuvcpp` when the
   package declared one.
 
+A package that carries a Node app at `frontend/package.json` also gets
+`frontends: [<app>]` recorded, unless its own `uvp.json` already declares
+`frontends`. The app is the package's declared `framework` when that is one of
+`vue3`, `react`, `svelte`; otherwise it is inferred from the framework dependency
+in `frontend/package.json`. Without this record `uvp frontend build` refuses a
+workspace whose app is present, because the manifest is the authority on which
+frontends exist.
+
 The result reports the built-in `template` or the `template_package`
 identity, never both, and the routes exactly as the manifest declared them.
 
