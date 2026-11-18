@@ -243,6 +243,69 @@ describe("the workspace manifest", () => {
   });
 });
 
+describe("frontends", () => {
+  const frontendManifest = (dependencies: Record<string, string> = {}): StoredTemplatePackageFile =>
+    textFile("frontend/package.json", JSON.stringify({ dependencies }, null, 2));
+
+  it("records the package's declared framework when it ships a frontend app", () => {
+    const rendered = renderTemplatePackageWorkspace({
+      source: source([frontendManifest({ vue: "3.5.13" })], { framework: "vue3" }),
+      name: "svc",
+      port: 8080,
+    });
+
+    const manifest = JSON.parse(textOf(rendered, "uvp.json")) as Record<string, unknown>;
+    expect(manifest["frontends"]).toEqual(["vue3"]);
+    expect(rendered.frontends).toEqual(["vue3"]);
+  });
+
+  it("does not record a frontend when the package ships no frontend/package.json", () => {
+    // A Vue SFC in the package's source is not a Node app: `uvp frontend build`
+    // would run `npm ci` in a directory that does not exist.
+    const rendered = renderTemplatePackageWorkspace({
+      source: source([textFile("src/App.vue", "<template><div /></template>\n")], {
+        framework: "vue3",
+      }),
+      name: "svc",
+      port: 8080,
+    });
+
+    const manifest = JSON.parse(textOf(rendered, "uvp.json")) as Record<string, unknown>;
+    expect(manifest).not.toHaveProperty("frontends");
+    expect(rendered.frontends).toEqual([]);
+  });
+
+  it("infers the app from frontend/package.json when the package declares no framework", () => {
+    const rendered = renderTemplatePackageWorkspace({
+      source: source([frontendManifest({ react: "19.0.0", "react-dom": "19.0.0" })]),
+      name: "svc",
+      port: 8080,
+    });
+
+    const manifest = JSON.parse(textOf(rendered, "uvp.json")) as Record<string, unknown>;
+    expect(manifest["frontends"]).toEqual(["react"]);
+    expect(rendered.frontends).toEqual(["react"]);
+  });
+
+  it("keeps a frontends declaration the package's own manifest already carries", () => {
+    const rendered = renderTemplatePackageWorkspace({
+      source: source(
+        [
+          textFile("uvp.json", JSON.stringify({ uvp: 1, frontends: ["h5-tech"] })),
+          frontendManifest({ vue: "3.5.13" }),
+        ],
+        { framework: "vue3" },
+      ),
+      name: "svc",
+      port: 8080,
+    });
+
+    const manifest = JSON.parse(textOf(rendered, "uvp.json")) as Record<string, unknown>;
+    expect(manifest["frontends"]).toEqual(["h5-tech"]);
+    expect(rendered.frontends).toEqual(["h5-tech"]);
+  });
+});
+
 describe("routes", () => {
   it("returns exactly the declared routes", () => {
     const rendered = renderTemplatePackageWorkspace({
