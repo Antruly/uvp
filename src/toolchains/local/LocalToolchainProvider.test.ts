@@ -548,6 +548,42 @@ describe("the answer when a prefix has only half of an install", () => {
   });
 });
 
+describe("an archive that wraps its prefix in usr/", () => {
+  /**
+   * The shape `uvcpp-1.9.1-linux-x64.tar.gz` can arrive in: the archive root
+   * holds `usr/`, and the install is one level down. `UVCPP_ROOT` names the
+   * archive root, which is what a person who unpacked it naturally does, and
+   * discovery used to examine only that root and report nothing installed.
+   */
+  it("reports the usr/ prefix, not the archive root", async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "uvp-usr-"));
+    try {
+      const prefix = join(root, "usr");
+      mkdirSync(join(prefix, "include", "uvcpp"), { recursive: true });
+      mkdirSync(join(prefix, "lib", "cmake", "uvcpp"), { recursive: true });
+      mkdirSync(join(prefix, "lib", "pkgconfig"), { recursive: true });
+      writeFileSync(
+        join(prefix, "include", "uvcpp", "uvcpp_config.h"),
+        "#define UVCPP_WEB_ENABLE 1\n",
+      );
+      writeFileSync(
+        join(prefix, "lib", "cmake", "uvcpp", "uvcppConfigVersion.cmake"),
+        'set(PACKAGE_VERSION "1.9.1")\n',
+      );
+      writeFileSync(join(prefix, "lib", "pkgconfig", "uvcpp.pc"), "Name: uvcpp\nVersion: 1.9.1\n");
+
+      const found = await discoverLibuvcpp([root], signal);
+      expect(found.found).toBe(true);
+      expect(found.installPrefix).toBe(prefix);
+      expect(found.version).toBe("1.9.1");
+      expect(found.versionSource).toBe("cmake_package");
+      expect(found.modules).toContain("UVCPP_WEB_ENABLE");
+    } finally {
+      await removeTree(root);
+    }
+  });
+});
+
 describe("the process runner a local build is given", () => {
   it("uses that runner for both steps, rather than starting cmake itself", async () => {
     // The seam's own claim, on every host. The assertions on the requests are the
