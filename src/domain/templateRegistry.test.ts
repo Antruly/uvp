@@ -94,6 +94,64 @@ describe("parsing a uvp.registry/1 index", () => {
     expect(problems.length).toBeGreaterThan(0);
     expect(problems.join("\n")).toContain("routes.0: method must be one of");
   });
+
+  it("carries an optional archive entry through unchanged", () => {
+    // The registry publishes one tarball per version. The path is derivable
+    // from id and version, and the digest is over the .tgz, so it is a
+    // different fact from the manifest digest beside it.
+    const archive = {
+      path: "archives/acme-dashboard/1.0.0.tgz",
+      digest: digest("c"),
+      bytes: 1234,
+    };
+    const result = parseTemplateRegistryIndex(
+      index([packageEntry({ versions: [versionEntry({ archive })] })]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.index.packages[0]?.versions[0]?.archive).toEqual(archive);
+  });
+
+  it("refuses an archive path that names another package's bytes", () => {
+    const problems = problemsOf(
+      index([
+        packageEntry({
+          versions: [
+            versionEntry({
+              archive: {
+                path: "archives/acme-dashboard/9.9.9.tgz",
+                digest: digest("c"),
+                bytes: 1234,
+              },
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(problems.join("\n")).toContain(
+      "archive.path: must be 'archives/acme-dashboard/1.0.0.tgz'",
+    );
+  });
+
+  it("validates the archive digest and byte count", () => {
+    const problems = problemsOf(
+      index([
+        packageEntry({
+          versions: [
+            versionEntry({
+              archive: {
+                path: "archives/acme-dashboard/1.0.0.tgz",
+                digest: "sha256:not-a-digest",
+                bytes: 0,
+              },
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(problems.join("\n")).toContain("archive.digest:");
+    expect(problems.join("\n")).toContain("archive.bytes: must be a positive integer");
+  });
 });
 
 describe("the shape the registry's generator emits", () => {

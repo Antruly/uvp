@@ -13,7 +13,7 @@ import {
 } from "./templatePackage.js";
 import { templatePackageDigestProblem } from "./templatePackageFiles.js";
 import { validateTemplatePackage } from "./templatePackageManifest.js";
-import { Problems, asString, isRecord } from "./templatePackageProblems.js";
+import { Problems, asInteger, asString, isRecord } from "./templatePackageProblems.js";
 
 /**
  * The `uvp.registry/1` index — the reader for the shared registry's metadata.
@@ -47,12 +47,29 @@ import { Problems, asString, isRecord } from "./templatePackageProblems.js";
 
 export const TEMPLATE_REGISTRY_SCHEMA = "uvp.registry/1";
 
+/**
+ * The published tarball for one package version.
+ *
+ * The index names it, and the client verifies the archive before extraction and
+ * every `files[]` digest afterwards. It is optional so an index produced before
+ * the archive route existed is still readable.
+ */
+export interface TemplateRegistryArchive {
+  /** Repository-relative path: `archives/<id>/<version>.tgz`. */
+  readonly path: string;
+  /** `sha256:` over the `.tgz` bytes. */
+  readonly digest: string;
+  readonly bytes: number;
+}
+
 export interface TemplateRegistryVersion {
   readonly version: string;
   /** Repository-relative package directory: `packages/<id>/<version>`. */
   readonly path: string;
   /** `sha256:` over the manifest's canonical JSON, the rule `templatePackageDigest` uses. */
   readonly digest: string;
+  /** Present when the registry publishes an archive for this version. */
+  readonly archive?: TemplateRegistryArchive;
   readonly name: string;
   readonly description?: string;
   readonly category: TemplatePackageCategory;
@@ -100,6 +117,7 @@ const VERSION_KEYS = new Set([
   "version",
   "path",
   "digest",
+  "archive",
   "name",
   "description",
   "category",
@@ -191,6 +209,59 @@ const manifestRecord = (
   return record;
 };
 
+const ARCHIVE_KEYS = new Set(["path", "digest", "bytes"]);
+
+/**
+ * The optional archive object on a version entry.
+ *
+ * Its path is derivable from the coordinates the entry already carries, so it
+ * is checked rather than trusted: a client that fetches `archive.path` must not
+ * be pointed at another package's bytes. The digest is over the `.tgz`, not the
+ * manifest; both are verified, at different times.
+ */
+function readArchive(
+  value: unknown,
+  location: string,
+  packageId: string | undefined,
+  version: string | undefined,
+  problems: Problems,
+): TemplateRegistryArchive | undefined {
+  if (!isRecord(value)) {
+    problems.add(location, "must be an object");
+    return undefined;
+  }
+  problems.rejectUnknownKeys(value, `${location}.`, ARCHIVE_KEYS, TEMPLATE_REGISTRY_SCHEMA);
+
+  const archivePath = asString(value["path"]);
+  const archiveDigest = asString(value["digest"]);
+  const archiveBytes = asInteger(value["bytes"]);
+
+  if (archivePath === undefined) {
+    problems.add(`${location}.path`, "must be a string");
+  } else if (packageId !== undefined && version !== undefined) {
+    const expected = `archives/${packageId}/${version}.tgz`;
+    if (archivePath !== expected) {
+      problems.add(`${location}.path`, `must be '${expected}'`);
+    }
+  }
+  if (archiveDigest === undefined) {
+    problems.add(`${location}.digest`, "must be a string");
+  } else {
+    const problem = templatePackageDigestProblem(archiveDigest);
+    if (problem !== undefined) problems.add(`${location}.digest`, problem);
+  }
+  if (archiveBytes === undefined || archiveBytes < 1) {
+    problems.add(`${location}.bytes`, "must be a positive integer");
+  }
+
+  return archivePath === undefined ||
+    archiveDigest === undefined ||
+    archiveBytes === undefined ||
+    archiveBytes < 1
+    ? undefined
+    : { path: archivePath, digest: archiveDigest, bytes: archiveBytes };
+}
+
 function readVersionEntry(
   entry: unknown,
   location: string,
@@ -243,6 +314,11 @@ function readVersionEntry(
     if (digestProblem !== undefined) problems.add(`${location}.digest`, digestProblem);
   }
 
+  const archive =
+    entry["archive"] === undefined
+      ? undefined
+      : readArchive(entry["archive"], `${location}.archive`, packageId, version, problems);
+
   const validation = validateTemplatePackage({
     manifest: manifestRecord(entry, location, packageId, problems),
     limits,
@@ -265,6 +341,7 @@ function readVersionEntry(
     version: value.version,
     path: sourcePath,
     digest,
+    ...(archive === undefined ? {} : { archive }),
     name: value.name,
     ...(value.description === undefined ? {} : { description: value.description }),
     category: value.category,
