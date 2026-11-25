@@ -13,7 +13,7 @@
 [![Node.js requirements](https://img.shields.io/badge/Node.js-requirements-339933?style=flat-square&logo=nodedotjs&logoColor=white)](#requirements)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
-[Quick start](#quick-start) · [How uvp works](#how-uvp-works) · [What uvp can do](#what-uvp-can-do) · [Current status](#current-status) · [FAQ](#faq) · [Documentation](#documentation)
+[Quick start](#quick-start) · [How uvp works](#how-uvp-works) · [What uvp can do](#what-uvp-can-do) · [Template registry](#template-registry) · [Current status](#current-status) · [FAQ](#faq) · [Documentation](#documentation)
 
 <code>npx uvp-agents setup</code>
 
@@ -190,6 +190,40 @@ connection pool — SQLite, MySQL or PostgreSQL, from `UVP_DATABASE_URL`, with a
 SQLite file in the working directory as the default — in place of its in-memory
 map. The routes, status codes and JSON are the same either way. Declaring `db` on
 any other template is a build requirement, as every feature is, and no more.
+
+## Template registry
+
+The seven templates above are built in. More templates live in the official
+registry, [Antruly/uvp-templates](https://github.com/Antruly/uvp-templates), as
+immutable `uvp.template/1` packages: a manifest, a licence, provenance, and a
+source tree whose files are each declared with a SHA-256 digest. uvp owns the
+package format ([docs/template-packages.md](docs/template-packages.md)); the
+registry owns the data and the review that admits a version. Where the two
+disagree, uvp wins.
+
+A package is data, not code: nothing in it runs when it is searched, indexed, or
+validated. uvp's side is the local store and the six `uvp_template_*` tools:
+
+```bash
+# There is no package server: a checkout is the source for a package.
+git clone https://github.com/Antruly/uvp-templates
+cd uvp-templates
+
+# Check it, import it into the local store, then generate from it.
+uvp template validate ./packages/hello-package/1.0.0
+uvp template import ./packages/hello-package/1.0.0 --dry-run
+uvp template import ./packages/hello-package/1.0.0
+uvp template search --text hello
+uvp init ./svc --name svc --template-package hello-package@1.0.0
+```
+
+`uvp template search` reads the local store, not the registry's `index.json`.
+Remote search, download, and sync are still the registry-client work tracked in
+[#239](https://github.com/Antruly/uvp/issues/239); until that ships, the index at
+`https://raw.githubusercontent.com/Antruly/uvp-templates/main/index.json` is what
+a person or an agent reads to choose a package, and `uvp template import` is the
+hand-off. `uvp template export` writes a stored package back out in the same
+layout.
 
 <a id="current-status"></a>
 
@@ -398,6 +432,8 @@ otherwise.
   a verification report
 - [libuvcpp feature mapping](docs/libuvcpp-features.md) — what each feature needs
   from a libuvcpp build, verified against 1.7.0
+- [Template registry](https://github.com/Antruly/uvp-templates) — the official
+  package registry, its index, and the review that admits a version
 - [First-release support matrix](docs/support-matrix.md) — what the CI lanes have
   observed, derived, and left unknown
 - [Release notes](docs/release-notes.md) — what shipped in the first public

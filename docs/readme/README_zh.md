@@ -163,6 +163,37 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 指向 SQLite、MySQL 或 PostgreSQL，默认落到工作目录下的一个 SQLite 文件。路由、状态码和
 JSON 两者完全一致。在别的模板上声明 `db` 和其它特性一样，只是一条构建要求。
 
+## 模板仓库
+
+上面七个模板是内置的。更多模板放在官方仓库
+[Antruly/uvp-templates](https://github.com/Antruly/uvp-templates)，以不可变的
+`uvp.template/1` 包形式发布：清单、许可证、来源说明，以及一棵每个文件都带 SHA-256
+摘要的源码树。uvp 拥有包格式（[docs/template-packages.md](../template-packages.md)）；
+仓库拥有数据，以及决定某个版本能否进入的评审。两者冲突时以 uvp 为准。
+
+包是数据，不是代码：搜索、建索引、校验时都不会执行包里的任何东西。uvp 这一侧是
+本地存储和六个 `uvp_template_*` 工具：
+
+```bash
+# 没有包服务器：一个 checkout 就是包的来源。
+git clone https://github.com/Antruly/uvp-templates
+cd uvp-templates
+
+# 先校验，再导入本地存储，然后从它生成工程。
+uvp template validate ./packages/hello-package/1.0.0
+uvp template import ./packages/hello-package/1.0.0 --dry-run
+uvp template import ./packages/hello-package/1.0.0
+uvp template search --text hello
+uvp init ./svc --name svc --template-package hello-package@1.0.0
+```
+
+`uvp template search` 读的是本地存储，不是仓库的 `index.json`。远程搜索、下载和同步
+仍属于 [#239](https://github.com/Antruly/uvp/issues/239) 跟踪的仓库客户端工作；在它
+落地之前，
+`https://raw.githubusercontent.com/Antruly/uvp-templates/main/index.json` 这份索引
+就是人或 Agent 选包时读的东西，`uvp template import` 是交接点。
+`uvp template export` 会把已存储的包按同样的布局写回去。
+
 <a id="当前状态"></a>
 
 ## 当前状态
@@ -326,6 +357,7 @@ doctor 会如实报告这一点，而不是假装可以。
 - [架构](../architecture.md) —— 分层、依赖方向、provider 端口
 - [证据模型](../evidence.md) —— observed / derived / unknown，以及如何读懂验证报告
 - [libuvcpp 特性映射](../libuvcpp-features.md) —— 每项特性对构建的要求，已针对 1.7.0 验证
+- [模板仓库](https://github.com/Antruly/uvp-templates) —— 官方模板包仓库、索引，以及决定版本能否进入的评审
 - [工具设计](../tool-design.md) —— uvp 工具边界是如何划定的
 - [测试](../testing.md) —— 测试层次与真实工具链通道
 - [路线图](../roadmap.md) —— 计划中的内容与准入条件
