@@ -1,5 +1,5 @@
 import { access, readFile, readdir, stat } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -528,6 +528,31 @@ const extendPathList = (existing: string | undefined, entries: readonly string[]
 };
 
 /**
+ * Binds the configure to the install discovery reported.
+ *
+ * `CMAKE_PREFIX_PATH` is a hint, not a pin: `find_package(uvcpp CONFIG)` still
+ * searches the default prefixes, and CMake derives some of them from `PATH`
+ * (`~/.local/bin` makes `~/.local` a prefix on this host). A prebuilt archive
+ * ships a `.pc` file and no CMake package, so the generated project's
+ * `find_package(uvcpp CONFIG)` is supposed to fall through to pkg-config — but
+ * when another libuvcpp CMake package exists on a default prefix, it answers
+ * first and the build links a different library than `uvp doctor` named.
+ *
+ * A CMake package in the chosen prefix is named outright. When the prefix ships
+ * only pkg-config, the CONFIG search is disabled for this configure so the
+ * generated `CMakeLists.txt` takes its pkg-config branch with the
+ * `PKG_CONFIG_PATH` that already points at the same prefix. Either way the
+ * library described and the library compiled against are the same file.
+ */
+const configureBindingArgs = (prefix: string): readonly string[] => {
+  for (const lib of ["lib", "lib64"]) {
+    const cmakePackage = join(prefix, lib, "cmake", "uvcpp");
+    if (existsSync(cmakePackage)) return [`-Duvcpp_DIR=${cmakePackage}`];
+  }
+  return ["-DCMAKE_DISABLE_FIND_PACKAGE_uvcpp=ON"];
+};
+
+/**
  * Where a libuvcpp version can be read from, most authoritative first.
  *
  * The `.pc` entry is not optional decoration. A prebuilt release archive ships
@@ -991,6 +1016,7 @@ class LocalToolchainClient implements ToolchainClient {
         "-B",
         request.buildDir,
         `-DCMAKE_BUILD_TYPE=${request.buildType}`,
+        ...(libuvcppPrefix === undefined ? [] : configureBindingArgs(libuvcppPrefix)),
         ...generatorArgs(request.generator),
       ],
       env: buildEnvironment(libuvcppPrefix),
