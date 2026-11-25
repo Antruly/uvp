@@ -58,7 +58,7 @@
       },
       {
         "name": "uvp:lockfile-sha512",
-        "value": "0dc0a124023c0c34dfbfffc896b5c54837e8b859732cbe3aba2e900594299a4700429d83873fb3de7bd04d403b7a61950962cdc3125986be4ad4d29f86c93854"
+        "value": "e8e1b3f0e632b64a5ea13c39bbe9b20167aa137af10a0ba0dddfd93d0a72a89142e223a2a1b90b3ce6895d4258993e89fd1e2dac18693c43c65b027cb5399c69"
       },
       {
         "name": "uvp:closure",
@@ -211,5 +211,5 @@
       "dependsOn": []
     }
   ],
-  "serialNumber": "urn:uuid:a8c329f1-f539-5cef-bbe1-bc6310cbb062"
+  "serialNumber": "urn:uuid:56f57428-ec89-5404-9e88-204dcf47c015"
 }
