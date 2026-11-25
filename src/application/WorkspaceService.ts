@@ -449,7 +449,7 @@ export class WorkspaceService {
           digest: input.templatePackage.package.digest,
         },
         modules: [],
-        frontends: [],
+        frontends: [...rendered.frontends],
         files: createdFiles,
         routes: [...rendered.routes],
         nextSteps: [
