@@ -7,19 +7,19 @@
   "packages": [
     {
       "name": "@modelcontextprotocol/core",
-      "version": "2.3.1",
+      "version": "2.4.0",
       "license": "Apache-2.0",
       "direct": false,
       "optional": false,
-      "resolved_from": "https://registry.npmmirror.com/@modelcontextprotocol/core/-/core-2.3.1.tgz"
+      "resolved_from": "https://registry.npmjs.org/@modelcontextprotocol/core/-/core-2.4.0.tgz"
     },
     {
       "name": "@modelcontextprotocol/server",
-      "version": "2.3.1",
+      "version": "2.4.0",
       "license": "Apache-2.0",
       "direct": true,
       "optional": false,
-      "resolved_from": "https://registry.npmmirror.com/@modelcontextprotocol/server/-/server-2.3.1.tgz"
+      "resolved_from": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.4.0.tgz"
     },
     {
       "name": "canonicalize",
