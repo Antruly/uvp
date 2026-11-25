@@ -245,6 +245,59 @@ const buildWithoutPrefix = async () =>
     signal,
   });
 
+/**
+ * The binding tests, kept in their own function so the describe callback above
+ * stays inside the repository's function-length budget.
+ */
+const buildBindingTests = (): void => {
+  it("names the CMake package discovery found instead of leaving the search open", async () => {
+    // `CMAKE_PREFIX_PATH` is a hint. A second libuvcpp on a default prefix —
+    // CMake derives `~/.local` from `~/.local/bin` on PATH — answers
+    // `find_package(uvcpp CONFIG)` first when the discovered install ships only
+    // a `.pc` file, and the build links a library `uvp doctor` never named.
+    const configure = (await buildWithoutPrefix()).commands[0] ?? "";
+    expect(wordsOf(configure)).toContain(
+      `-Duvcpp_DIR=${join(installPrefix, "lib", "cmake", "uvcpp")}`,
+    );
+    expect(wordsOf(configure)).not.toContain("-DCMAKE_DISABLE_FIND_PACKAGE_uvcpp=ON");
+  });
+
+  it("forces the pkg-config route when the install ships no CMake package", async () => {
+    // The archive case: a CMake package elsewhere must not win over the prefix
+    // the caller named. Disabling the CONFIG search makes the generated
+    // CMakeLists take its pkg-config branch, whose PKG_CONFIG_PATH is the same
+    // prefix.
+    const prefix = join(root, "a pkg-config only install");
+    mkdirSync(join(prefix, "lib", "pkgconfig"), { recursive: true });
+    mkdirSync(join(prefix, "include", "uvcpp"), { recursive: true });
+    writeFileSync(
+      join(prefix, "include", "uvcpp", "uvcpp_config.h"),
+      "#define UVCPP_WEB_ENABLE 1\n",
+    );
+    writeFileSync(
+      join(prefix, "lib", "pkgconfig", "uvcpp.pc"),
+      `prefix=${prefix}\nName: uvcpp\nVersion: 1.11.0\nLibs: -L\${prefix}/lib -luvcpp\n`,
+    );
+
+    const outcome = await buildProvider.createClient().build({
+      workspacePath,
+      buildDir: join(root, "pkg-build"),
+      buildType: "Debug",
+      clean: false,
+      timeoutMs: 60_000,
+      configureOnly: false,
+      libuvcppPrefix: prefix,
+      signal,
+    });
+    const configure = outcome.commands[0] ?? "";
+    expect(wordsOf(configure)).toContain("-DCMAKE_DISABLE_FIND_PACKAGE_uvcpp=ON");
+    expect(wordsOf(configure).some((word) => word.startsWith("-Duvcpp_DIR="))).toBe(false);
+    expect(assignmentOf(configure, "PKG_CONFIG_PATH")).toBe(
+      [join(prefix, "lib", "pkgconfig"), join(prefix, "lib64", "pkgconfig")].join(delimiter),
+    );
+  });
+};
+
 describe("the libuvcpp a build points CMake at", () => {
   it("reads the fake install this file made, so the rest of the file means something", async () => {
     // The control. Without it, the assertions below could all hold on a host
@@ -350,6 +403,8 @@ describe("the libuvcpp a build points CMake at", () => {
       ),
     );
   });
+
+  buildBindingTests();
 
   it("keeps an existing CMAKE_PREFIX_PATH, since a caller put it there", async () => {
     // Appending rather than replacing: a caller who set a prefix path for a
