@@ -406,7 +406,13 @@ jobs:
           # Every later step rebuilds PATH from GITHUB_PATH, so the directory the
           # executable lives in has to be recorded there too. The session PATH above
           # covers this step only.
-          $pkgConfig = $pkgConfigExe.Source
+          # `Get-Command` answers a CommandInfo with `.Source`; the downloaded
+          # path is a FileInfo, which only has `.FullName`.
+          $pkgConfig = if ($pkgConfigExe -is [System.IO.FileInfo]) {
+            $pkgConfigExe.FullName
+          } else {
+            $pkgConfigExe.Source
+          }
           Split-Path -Parent $pkgConfig |
             Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           Write-Host "pkg-config.exe: $pkgConfig"
