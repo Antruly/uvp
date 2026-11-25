@@ -373,10 +373,21 @@ jobs:
             # The SourceForge archive is pinned by digest: a mirror that serves
             # different bytes fails here rather than becoming the toolchain.
             $pkgZip = Join-Path $env:RUNNER_TEMP 'pkg-config-lite-0.28-1_bin-win32.zip'
-            Invoke-WebRequest -Uri 'https://downloads.sourceforge.net/project/pkgconfiglite/0.28-1/pkg-config-lite-0.28-1_bin-win32.zip' -OutFile $pkgZip
+            # curl, not Invoke-WebRequest: SourceForge answers a PowerShell
+            # user-agent with the same 6-file payload but a different zip byte
+            # stream (observed 2026-11-25: 47,688 bytes, digest c5d10599… vs
+            # 2038c49d…), which the digest pin correctly refuses. curl's request
+            # is served the canonical archive.
+            & curl.exe -fsSL 'https://downloads.sourceforge.net/project/pkgconfiglite/0.28-1/pkg-config-lite-0.28-1_bin-win32.zip' -o $pkgZip
+            if ($LASTEXITCODE -ne 0) { throw "curl failed to download pkgconfiglite (exit $LASTEXITCODE)" }
             # Observed 2026-10-17 from this host, 47,688 bytes, identical on two
             # fetches; the archive the Chocolatey package used at 06:16Z.
+            $expectedPkgBytes = 47688
             $expectedPkgDigest = '2038c49d23b5ca19e2218ca89f06df18fe6d870b4c6b54c0498548ef88771f6f'
+            $actualPkgBytes = (Get-Item -LiteralPath $pkgZip).Length
+            if ($actualPkgBytes -ne $expectedPkgBytes) {
+              throw "the pkgconfiglite archive size changed: expected $expectedPkgBytes, got $actualPkgBytes"
+            }
             $actualPkgDigest = (Get-FileHash -LiteralPath $pkgZip -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actualPkgDigest -ne $expectedPkgDigest) {
               throw "the pkgconfiglite archive digest changed: expected $expectedPkgDigest, got $actualPkgDigest"
