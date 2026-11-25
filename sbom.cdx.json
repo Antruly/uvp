@@ -58,7 +58,7 @@
       },
       {
         "name": "uvp:lockfile-sha512",
-        "value": "60e7531c53e307afb57c591625c67639592e4c23881b41fb1b7940ea04370b7c171f8d52f421a5a1301f3cfb0e52edf83cf7a2fa4e582808643e3db5c502704f"
+        "value": "31f6e846da18d04e1d40313b12386da73e43f06ef9fff3dd51fd597f35a40278e8d63484f773d880abc4039d0defff768e2de040a80130486c6b5310074a92dc"
       },
       {
         "name": "uvp:closure",
@@ -68,23 +68,23 @@
   },
   "components": [
     {
-      "bom-ref": "@modelcontextprotocol/core@2.3.1",
+      "bom-ref": "@modelcontextprotocol/core@2.4.0",
       "type": "library",
       "name": "@modelcontextprotocol/core",
-      "version": "2.3.1",
+      "version": "2.4.0",
       "scope": "required",
-      "purl": "pkg:npm/%40modelcontextprotocol/core@2.3.1",
+      "purl": "pkg:npm/%40modelcontextprotocol/core@2.4.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmmirror.com/@modelcontextprotocol/core/-/core-2.3.1.tgz"
+          "url": "https://registry.npmjs.org/@modelcontextprotocol/core/-/core-2.4.0.tgz"
         }
       ],
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "95a5662213c6a568bbac6f6afb452281b9513741f0b3f62395beaa2c5b55aabc9754b91ce21fb237ccfbdf53ce0f62e700642515eeffb578549bb062d1807dd6"
+          "content": "cfc4012aa75f5cb3f390b42e1b8c69f21ad510c9b53d9d4883130ddac31b26216200a3965e7033a205e7d96e1aa880653f579ae94e728aa56abaf50d3350a3e9"
         }
       ],
       "licenses": [
@@ -96,23 +96,23 @@
       ]
     },
     {
-      "bom-ref": "@modelcontextprotocol/server@2.3.1",
+      "bom-ref": "@modelcontextprotocol/server@2.4.0",
       "type": "library",
       "name": "@modelcontextprotocol/server",
-      "version": "2.3.1",
+      "version": "2.4.0",
       "scope": "required",
-      "purl": "pkg:npm/%40modelcontextprotocol/server@2.3.1",
+      "purl": "pkg:npm/%40modelcontextprotocol/server@2.4.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmmirror.com/@modelcontextprotocol/server/-/server-2.3.1.tgz"
+          "url": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.4.0.tgz"
         }
       ],
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "7b9f4c7d6b92b2c8fa0e843de89093a9d5b50174f9fd7b674e5d1659de8c53529ae37e1f154186a2c08b25b18dc920e11c6bf1416a1158ad77ec55d816460d5b"
+          "content": "ae047dcb149a009f9b72c8bf5eba13fd2d807cf8885a5a17027add7d84829acf62bd58eed22b21bbfc16d09db51e8ebe64e475afb4727916e3891b85f3b8b1e5"
         }
       ],
       "licenses": [
@@ -184,21 +184,21 @@
     {
       "ref": "uvp-agents@0.4.0",
       "dependsOn": [
-        "@modelcontextprotocol/server@2.3.1",
+        "@modelcontextprotocol/server@2.4.0",
         "canonicalize@5.1.0",
         "zod@4.6.7"
       ]
     },
     {
-      "ref": "@modelcontextprotocol/core@2.3.1",
+      "ref": "@modelcontextprotocol/core@2.4.0",
       "dependsOn": [
         "zod@4.6.7"
       ]
     },
     {
-      "ref": "@modelcontextprotocol/server@2.3.1",
+      "ref": "@modelcontextprotocol/server@2.4.0",
       "dependsOn": [
-        "@modelcontextprotocol/core@2.3.1",
+        "@modelcontextprotocol/core@2.4.0",
         "zod@4.6.7"
       ]
     },
@@ -211,5 +211,5 @@
       "dependsOn": []
     }
   ],
-  "serialNumber": "urn:uuid:430d9823-9464-515d-b1d4-5cd356444177"
+  "serialNumber": "urn:uuid:2588b7cf-2271-5a8f-b949-253c4b7140a4"
 }
