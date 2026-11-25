@@ -366,9 +366,31 @@ jobs:
           # for one rather than depending on the image's CMake version.
           $pkgConfigExe = Get-Command pkg-config.exe -ErrorAction SilentlyContinue
           if ($null -eq $pkgConfigExe) {
-            choco install pkgconfiglite --no-progress -y
-            $env:Path = "$env:ProgramData\chocolatey\bin;$env:Path"
-            $pkgConfigExe = Get-Command pkg-config.exe -ErrorAction Stop
+            # Fetch the same pkgconfiglite payload the Chocolatey package
+            # downloads, without asking the community feed. That feed answered
+            # "Invalid credentials specified" to anonymous installs for a whole
+            # morning (#166) and took the lane down before it compiled anything.
+            # The SourceForge archive is pinned by digest: a mirror that serves
+            # different bytes fails here rather than becoming the toolchain.
+            $pkgZip = Join-Path $env:RUNNER_TEMP 'pkg-config-lite-0.28-1_bin-win32.zip'
+            Invoke-WebRequest -Uri 'https://downloads.sourceforge.net/project/pkgconfiglite/0.28-1/pkg-config-lite-0.28-1_bin-win32.zip' -OutFile $pkgZip
+            # Observed 2026-10-17 from this host, 47,688 bytes, identical on two
+            # fetches; the archive the Chocolatey package used at 06:16Z.
+            $expectedPkgDigest = '2038c49d23b5ca19e2218ca89f06df18fe6d870b4c6b54c0498548ef88771f6f'
+            $actualPkgDigest = (Get-FileHash -LiteralPath $pkgZip -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualPkgDigest -ne $expectedPkgDigest) {
+              throw "the pkgconfiglite archive digest changed: expected $expectedPkgDigest, got $actualPkgDigest"
+            }
+            Write-Host "pkgconfiglite archive sha256: $actualPkgDigest"
+            $pkgExtract = Join-Path $env:RUNNER_TEMP 'pkgconfiglite-extract'
+            if (Test-Path $pkgExtract) { Remove-Item -Recurse -Force $pkgExtract }
+            Expand-Archive -LiteralPath $pkgZip -DestinationPath $pkgExtract
+            $pkgConfigExe = Get-ChildItem -LiteralPath $pkgExtract -Filter 'pkg-config.exe' -Recurse |
+              Select-Object -First 1
+            if ($null -eq $pkgConfigExe) {
+              throw "the pkgconfiglite archive has no pkg-config.exe"
+            }
+            $env:Path = "$($pkgConfigExe.DirectoryName);$env:Path"
           }
           # Every later step rebuilds PATH from GITHUB_PATH, so the directory the
           # executable lives in has to be recorded there too. The session PATH above
