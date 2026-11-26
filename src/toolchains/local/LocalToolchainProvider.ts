@@ -15,7 +15,10 @@ import type {
   ToolchainIdentity,
   ToolchainProvider,
 } from "../../application/ToolchainProvider.js";
-import { selectedCmakePathSync, selectedLibuvcppPrefixSync } from "../../application/managedToolchains.js";
+import {
+  selectedCmakePathSync,
+  selectedLibuvcppPrefixSync,
+} from "../../application/managedToolchains.js";
 import { UvpFailure, cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
 import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
