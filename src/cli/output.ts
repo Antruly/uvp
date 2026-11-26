@@ -139,13 +139,64 @@ export interface OutputStreams {
   readonly err: (text: string) => void;
 }
 
+/**
+ * A downstream pipe may close before uvp has finished writing — `| head`,
+ * `| less`, `| grep -m1` all do it. That is a normal way to consume a CLI, not
+ * an error in uvp, and Node otherwise reports it as an unhandled `EPIPE` with a
+ * stack trace from the stream's `error` event.
+ *
+ * The guard marks the stream closed and stops writing to it. The command has
+ * already produced the result the consumer asked for; its exit code stays the
+ * command's own. A non-EPIPE stream error is still re-thrown, because a broken
+ * stdout for any other reason is a real failure and hiding it would make the
+ * command look successful while its output was lost.
+ */
+const isBrokenPipe = (error: unknown): boolean => {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { readonly code?: unknown }).code
+      : undefined;
+  return code === "EPIPE" || code === "ERR_STREAM_DESTROYED";
+};
+
+export const isBrokenPipeError = (error: unknown): boolean => isBrokenPipe(error);
+
+interface PipeGuard {
+  broken: boolean;
+}
+
+const stdoutGuard: PipeGuard = { broken: false };
+const stderrGuard: PipeGuard = { broken: false };
+const guardsInstalled = new WeakSet<object>();
+
+const guardStream = (stream: NodeJS.WriteStream, guard: PipeGuard): void => {
+  if (guardsInstalled.has(stream)) return;
+  guardsInstalled.add(stream);
+  stream.on("error", (error: unknown) => {
+    if (isBrokenPipe(error)) {
+      guard.broken = true;
+      return;
+    }
+    throw error;
+  });
+};
+
+const writeLine = (stream: NodeJS.WriteStream, guard: PipeGuard, text: string): void => {
+  if (guard.broken) return;
+  try {
+    stream.write(`${text}\n`);
+  } catch (error) {
+    if (!isBrokenPipe(error)) throw error;
+    guard.broken = true;
+  }
+};
+
+guardStream(process.stdout, stdoutGuard);
+guardStream(process.stderr, stderrGuard);
+
 export const processStreams = (): OutputStreams => ({
-  out: (text) => {
-    process.stdout.write(`${text}\n`);
-  },
-  err: (text) => {
-    process.stderr.write(`${text}\n`);
-  },
+  out: (text) => writeLine(process.stdout, stdoutGuard, text),
+  err: (text) => writeLine(process.stderr, stderrGuard, text),
 });
 
 export const emitResult = (
