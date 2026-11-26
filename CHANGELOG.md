@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.8.0...uvp-agents-0.9.0) (2026-11-26)
+
+
+### Features
+
+* **registry:** expose archive fetch through the CLI and MCP ([93ca59a](https://github.com/Antruly/uvp/commit/93ca59aecc2c047c2fb8321e376d04f794be6a96))
+* **registry:** fetch and verify a package archive ([78d195a](https://github.com/Antruly/uvp/commit/78d195a175fd48da3eac2c0ed4920b7dc4b47360))
+* **registry:** fetch and verify a package archive ([eda8f82](https://github.com/Antruly/uvp/commit/eda8f8247ccd192b7fb7b5371682ad1d77325c76))
+
+
+### Bug Fixes
+
+* **cli:** exit quietly when stdout closes early ([61931c8](https://github.com/Antruly/uvp/commit/61931c83aaac5c21f3caad860131c23975c51897))
+* **cli:** exit quietly when stdout closes early ([9e99699](https://github.com/Antruly/uvp/commit/9e99699deace1f4bb75c3b799ce8f0f111380708))
+
 ## [0.8.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.7.0...uvp-agents-0.8.0) (2026-11-26)
 
 
