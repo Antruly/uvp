@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.7.0...uvp-agents-0.8.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **env:** resolve the absolute PowerShell path on Windows ([34209a9](https://github.com/Antruly/uvp/commit/34209a9920dd7126a81ea50a43543cc097153690))
+* **env:** resolve the absolute PowerShell path on Windows ([875cc7a](https://github.com/Antruly/uvp/commit/875cc7a6c2317138a2de6b2e65b7c353af19a59f))
+
 ## [0.7.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.6.0...uvp-agents-0.7.0) (2026-11-26)
 
 
