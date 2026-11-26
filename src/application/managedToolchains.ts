@@ -334,6 +334,22 @@ export const defaultFetchBytes = async (url: string, maxBytes: number): Promise<
 
 const quotePowerShell = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
+/**
+ * `spawn("powershell.exe")` is not reliable from a Windows service or a shell
+ * whose PATH was replaced for one command, even when `where powershell.exe`
+ * finds it. Use the absolute path Windows installs PowerShell at; SystemRoot is
+ * present on every supported Windows version and the fallback covers a stripped
+ * environment.
+ */
+export const resolvePowerShellPath = (
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string => {
+  if (platform !== "win32") return "powershell.exe";
+  const root = env["SystemRoot"]?.trim() || "C:\\Windows";
+  return path.win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+};
+
 const listArchive = async (
   archive: string,
   release: ToolchainRelease,
@@ -404,7 +420,7 @@ const extractArchive = async (
 
   if (release.archive === "zip" && process.platform === "win32") {
     await execFileAsync(
-      "powershell.exe",
+      resolvePowerShellPath(),
       [
         "-NoProfile",
         "-NonInteractive",
@@ -552,9 +568,11 @@ export const installToolchain = async (
       await extractArchive(archive, extraction, release);
     } catch (error) {
       if (error instanceof ManagedToolchainError) throw error;
-      throw new ManagedToolchainError("extract_failed", `could not extract ${release.asset}`, [
-        String(error),
-      ]);
+      throw new ManagedToolchainError(
+        "extract_failed",
+        `could not extract ${release.asset}: ${String(error)}`,
+        [String(error)],
+      );
     }
     await rejectLinks(extraction);
     const root = await onlyChildDirectory(extraction);

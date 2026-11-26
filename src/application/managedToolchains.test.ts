@@ -14,6 +14,7 @@ import {
   installPath,
   installToolchain,
   readToolchainConfig,
+  resolvePowerShellPath,
   selectedCmakePathSync,
   selectedLibuvcppPrefixSync,
   writeToolchainConfig,
@@ -31,6 +32,24 @@ afterEach(async () => {
   for (const root of roots.splice(0)) {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe("the Windows PowerShell path", () => {
+  it("uses the absolute path under SystemRoot instead of relying on PATH", () => {
+    expect(resolvePowerShellPath({ SystemRoot: "C:\\Windows" }, "win32")).toBe(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    );
+  });
+
+  it("falls back to C:\\Windows when SystemRoot is absent", () => {
+    expect(resolvePowerShellPath({}, "win32")).toBe(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    );
+  });
+
+  it("keeps the bare name on non-Windows platforms", () => {
+    expect(resolvePowerShellPath({}, "linux")).toBe("powershell.exe");
+  });
 });
 
 describe("the managed toolchain configuration", () => {
