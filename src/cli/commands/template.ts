@@ -237,6 +237,58 @@ export const templateImportCommand: CommandSpec = {
   },
 };
 
+export const templateFetchCommand: CommandSpec = {
+  path: ["template", "fetch"],
+  tool: "uvp_template_fetch",
+  summary: "Download, verify, and import one registry package.",
+  usage:
+    "uvp template fetch ID@VERSION [--replace] [--offline] [--index-url URL] " +
+    "[--timeout MS] [--json]",
+  positionals: [referencePositional("ID@VERSION", "Package id and exact version.")],
+  flags: [
+    booleanFlag("replace", "Replace an existing id@version explicitly; never implicit."),
+    booleanFlag("offline", "Use only the cached index and archive; never contact the registry."),
+    stringFlag(
+      "index-url",
+      "URL",
+      "Registry index URL; defaults to the configured public registry.",
+    ),
+    {
+      name: "timeout",
+      type: "number",
+      value: "MS",
+      description: "Per-request timeout in milliseconds.",
+    },
+  ],
+  notes: [
+    "The archive is verified against the index digest and byte count before extraction, then",
+    "every declared file is verified before the store sees it.",
+    'The result is `network`, `cache`, or `undetermined`; undetermined is not "not found".',
+  ],
+  input: (parsed) => {
+    const reference = requirePositional(
+      parsed,
+      0,
+      "an id@version reference",
+      "uvp template fetch acme-dashboard@1.2.0",
+    );
+    const replace = asBoolean(parsed, "replace");
+    const offline = asBoolean(parsed, "offline");
+    const indexUrl = asString(parsed, "index-url");
+    const timeoutMs = asNumber(parsed, "timeout");
+    return {
+      ...splitReference(reference, {
+        requireVersion: true,
+        usage: "uvp template fetch acme-dashboard@1.2.0",
+      }),
+      ...(replace === undefined ? {} : { replace }),
+      ...(offline === undefined ? {} : { offline }),
+      ...(indexUrl === undefined ? {} : { registry_url: indexUrl }),
+      ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }),
+    };
+  },
+};
+
 export const templateExportCommand: CommandSpec = {
   path: ["template", "export"],
   tool: "uvp_template_export",
@@ -304,6 +356,7 @@ export const templateCommands: readonly CommandSpec[] = [
   templateGetCommand,
   templateValidateCommand,
   templateImportCommand,
+  templateFetchCommand,
   templateExportCommand,
   templateRemoveCommand,
 ];

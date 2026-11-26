@@ -1,6 +1,7 @@
 import { doctorContract } from "./toolchainToolContracts.js";
 import {
   templateExportContract,
+  templateFetchContract,
   templateGetContract,
   templateImportContract,
   templateRemoveContract,
@@ -46,6 +47,7 @@ export const TOOL_CONTRACTS = [
   workspaceCreateContract,
   templateSearchContract,
   templateGetContract,
+  templateFetchContract,
   templateValidateContract,
   templateImportContract,
   templateExportContract,

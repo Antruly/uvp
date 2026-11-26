@@ -78,6 +78,28 @@ export const renderTemplateGet = (output: Record<string, unknown>): string[] => 
   ];
 };
 
+export const renderTemplateFetch = (output: Record<string, unknown>): string[] => {
+  const state = str(output["state"]);
+  const pkg = at(output, "package");
+  const lines = [row("fetch", state === "" ? "unknown" : state)];
+  const reason = str(output["reason"]);
+  if (reason !== "") lines.push(row("reason", reason));
+  const stale = str(output["stale_reason"]);
+  if (stale !== "") lines.push(row("stale", stale));
+  const id = str(at(pkg, "id"));
+  if (id !== "") {
+    lines.push(
+      row("package", `${id}@${str(at(pkg, "version"))}  ${str(at(pkg, "name"))}`),
+      row("files", fileSummary(list(at(pkg, "files")))),
+      row("digest", shortDigest(str(at(pkg, "digest")))),
+    );
+    const path = str(output["path"]);
+    if (path !== "") lines.push(row("store", path));
+  }
+  for (const detail of strings(output["details"])) lines.push(row("detail", detail));
+  return lines;
+};
+
 export const renderTemplateValidate = (output: Record<string, unknown>): string[] => [
   row("valid", `${str(output["id"])}@${str(output["version"])}  ${str(output["name"])}`),
   row("category", categoryLine(output)),

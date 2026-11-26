@@ -13,6 +13,7 @@ import {
 import { webRenderers } from "./renderWeb.js";
 import {
   renderTemplateExport,
+  renderTemplateFetch,
   renderTemplateGet,
   renderTemplateImport,
   renderTemplateRemove,
@@ -47,6 +48,7 @@ const RENDERERS: Readonly<Record<string, Renderer>> = {
   uvp_bundle_diff: renderBundleDiff,
   uvp_template_search: renderTemplateSearch,
   uvp_template_get: renderTemplateGet,
+  uvp_template_fetch: renderTemplateFetch,
   uvp_template_validate: renderTemplateValidate,
   uvp_template_import: renderTemplateImport,
   uvp_template_export: renderTemplateExport,

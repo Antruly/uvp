@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "uvp",
-  "digest": "c96c874970170369be604f710cd2b046cdb376dfe9ad2e158ecfefe9586c6d95",
-  "tool_count": 22,
+  "digest": "49c1584a2d59ce5cbca56a2cf362ffe90bb242baaec82e692b7ff83bd9304499",
+  "tool_count": 23,
   "tools": [
     {
       "name": "uvp_doctor",
@@ -1776,6 +1776,448 @@
           "input": {
             "id": "acme-dashboard",
             "version": "1.2.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uvp_template_fetch",
+      "title": "Fetch a template package from the registry",
+      "description": "Download one exact `id@version` archive named by the template registry index, verify its digest and byte count, verify every declared file, and import the package into the local store. `offline` uses only a cached index and a digest-matching cached archive. The result distinguishes `network`, `cache` (with `stale_reason` when a network read failed), and `undetermined`; the last is never evidence that the package does not exist.",
+      "kind": "workspace",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Package id, a lowercase slug such as `acme-dashboard`."
+          },
+          "version": {
+            "type": "string",
+            "description": "An exact package version; ranges are not accepted."
+          },
+          "replace": {
+            "default": false,
+            "description": "Replace an existing id@version explicitly; never implicit.",
+            "type": "boolean"
+          },
+          "offline": {
+            "default": false,
+            "description": "Use only the cached index and archive; never make a network request.",
+            "type": "boolean"
+          },
+          "registry_url": {
+            "description": "Registry index URL; defaults to the configured public registry.",
+            "type": "string",
+            "format": "uri"
+          },
+          "timeout_ms": {
+            "description": "Per-request timeout in milliseconds; defaults to the registry reader's value.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "platform"
+            ],
+            "additionalProperties": false
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "toolchain",
+                    "build",
+                    "launch",
+                    "exchange",
+                    "capture",
+                    "assertion",
+                    "benchmark",
+                    "template",
+                    "comparison"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "coverage": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "complete",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "examined": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "file",
+                          "endpoint",
+                          "process"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "kind",
+                "observed_at",
+                "digest",
+                "coverage",
+                "sources",
+                "limitations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unknown_id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "blocked_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "unknown_id",
+                "question",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "network",
+              "cache",
+              "undetermined"
+            ]
+          },
+          "package": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "frontend",
+                  "backend",
+                  "fullstack",
+                  "module"
+                ]
+              },
+              "framework": {
+                "type": "string",
+                "enum": [
+                  "h5",
+                  "vue3",
+                  "react",
+                  "svelte",
+                  "alpine",
+                  "htmx"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "requires": {
+                "type": "object",
+                "properties": {
+                  "uvp": {
+                    "type": "string"
+                  },
+                  "libuvcpp": {
+                    "type": "string"
+                  },
+                  "features": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "tls",
+                        "http2",
+                        "http3",
+                        "grpc",
+                        "websocket",
+                        "soap",
+                        "db"
+                      ]
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "license": {
+                "type": "object",
+                "properties": {
+                  "spdx": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              },
+              "provenance": {
+                "type": "object",
+                "properties": {
+                  "author": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "author",
+                  "createdAt"
+                ],
+                "additionalProperties": false
+              },
+              "digest": {
+                "type": "string",
+                "description": "The package digest over the manifest's canonical JSON."
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path relative to the package's `files/` directory."
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "digest": {
+                      "type": "string",
+                      "description": "`sha256:` and 64 lowercase hex characters."
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "bytes",
+                    "digest"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "preview": {
+                "type": "string"
+              },
+              "unverified": {
+                "type": "boolean",
+                "description": "True only when the package was admitted without licence or provenance."
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "name",
+              "category",
+              "digest",
+              "files",
+              "unverified"
+            ],
+            "additionalProperties": false
+          },
+          "path": {
+            "description": "Where the package was written, when it was imported.",
+            "type": "string"
+          },
+          "stale_reason": {
+            "description": "Why a cached answer was used; absent for a fresh or explicit offline read.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the answer is undetermined.",
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tool",
+          "provider",
+          "evidence",
+          "unknowns",
+          "limitations",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "effects": {
+        "readsFilesystem": true,
+        "writesFilesystem": true,
+        "network": true,
+        "spawnsProcess": false,
+        "mutatesTarget": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "returns_target_content": true,
+      "examples": [
+        {
+          "description": "Fetch and install one package version",
+          "input": {
+            "id": "acme-dashboard",
+            "version": "1.2.0"
+          }
+        },
+        {
+          "description": "Read a cached package when offline",
+          "input": {
+            "id": "acme-dashboard",
+            "version": "1.2.0",
+            "offline": true
           }
         }
       ]

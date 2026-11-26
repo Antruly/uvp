@@ -36,6 +36,7 @@ import {
 } from "../contracts/webToolContracts.js";
 import {
   templateExportContract,
+  templateFetchContract,
   templateGetContract,
   templateImportContract,
   templateRemoveContract,
@@ -57,6 +58,10 @@ import {
 import { searchTemplatePackages } from "../application/TemplateSearch.js";
 import { exportTemplatePackage } from "../application/TemplateExport.js";
 import { scanTemplatePackage, type TemplateScanResult } from "../application/TemplateScan.js";
+import {
+  fetchTemplateRegistryPackage,
+  TemplateRegistryFetchError,
+} from "../application/TemplateRegistryFetch.js";
 import { toolNames } from "../contracts/toolContracts.js";
 import { unevaluatedQuestion } from "../application/assertions.js";
 import { selectToolchain } from "../application/toolchainSelection.js";
@@ -369,6 +374,61 @@ const templateFailure = (error: unknown, origin: "source" | "stored"): UvpFailur
             "invalid_request",
             "Fix the problems listed in details.problems in the package directory, then retry.",
           );
+  }
+};
+
+/**
+ * Project a registry-fetch failure into the error contract.
+ *
+ * The download layer distinguishes a missing package, a missing archive, a bad
+ * archive, a bad file, and a temporary-IO failure because each one calls for a
+ * different next step. Flattening them to `execution_failure` would make the
+ * caller retry a package that does not exist, or trust a digest that failed.
+ */
+const registryFetchFailure = (error: TemplateRegistryFetchError): UvpFailure => {
+  const details = {
+    location: error.location,
+    ...(error.details.length === 0 ? {} : { problems: [...error.details] }),
+  };
+  const failure = (code: UvpErrorCode, action: string): UvpFailure =>
+    new UvpFailure({
+      code,
+      message: error.message,
+      remediation: { action },
+      details,
+    });
+  switch (error.code) {
+    case "invalid_coordinates":
+      return failure(
+        "invalid_request",
+        "Pass an exact lowercase package id and a SemVer version, then retry.",
+      );
+    case "package_not_found":
+    case "archive_missing":
+      return failure(
+        "template_not_found",
+        "Check the id and version against the registry index, then retry with one it lists.",
+      );
+    case "archive_url":
+    case "archive_size":
+    case "archive_digest":
+    case "archive_invalid":
+    case "file_missing":
+    case "file_digest":
+      return failure(
+        "artifact_modified",
+        "The downloaded archive does not match the registry's digest; discard the cache entry and retry.",
+      );
+    case "temp_io":
+      return failure(
+        "execution_failure",
+        "Check that this user can read and write the template store and its cache, then retry.",
+      );
+    case "import_failed":
+      return failure(
+        "execution_failure",
+        "The verified package could not be imported; inspect the store and retry.",
+      );
   }
 };
 
@@ -696,6 +756,103 @@ export const createToolHandlers = (
           }),
           ...templatePackageOutput(pkg),
           path: pkg.path,
+        };
+      },
+    ),
+
+    [templateFetchContract.name]: handler(
+      templateFetchContract.inputSchema,
+      async (input, recorder) => {
+        let result;
+        try {
+          result = await fetchTemplateRegistryPackage({
+            id: input.id,
+            version: input.version,
+            ...(input.replace === true ? { replace: true } : {}),
+            ...(input.offline === true ? { offline: true } : {}),
+            ...(input.registry_url === undefined ? {} : { indexUrl: input.registry_url }),
+            ...(input.timeout_ms === undefined ? {} : { timeoutMs: input.timeout_ms }),
+          });
+        } catch (error) {
+          if (error instanceof TemplateRegistryFetchError) throw registryFetchFailure(error);
+          throw templateFailure(error, "source");
+        }
+
+        const registry = input.registry_url ?? "the configured template registry";
+        if (result.state === "undetermined") {
+          const evidence = recordTemplate(recorder, {
+            subject: { registry, id: input.id, version: input.version },
+            observed: { state: result.state, reason: result.reason },
+            coverage: coveragePartial(
+              `the registry index and archive for ${input.id}@${input.version}`,
+              result.reason,
+            ),
+            sources: [],
+            limitations: [
+              "Neither a fresh registry read nor a cached answer was available; this is not " +
+                "evidence that the package does not exist.",
+            ],
+          });
+          recordUnknown(
+            recorder,
+            `Can ${input.id}@${input.version} be fetched from ${registry}?`,
+            "not_attempted",
+            {
+              blockedBy: result.reason,
+              partialEvidence: [evidence.evidence_id],
+            },
+          );
+          return {
+            ...envelopeOf(recorder, {
+              tool: templateFetchContract.name,
+              provider: identity,
+              limitations: [
+                "The registry answer is undetermined; retry when the registry or cache is available.",
+              ],
+            }),
+            state: result.state,
+            reason: result.reason,
+            ...(result.details.length === 0 ? {} : { details: [...result.details] }),
+          };
+        }
+
+        const pkg = result.package;
+        recordTemplate(recorder, {
+          subject: { registry, id: pkg.id, version: pkg.version },
+          observed: {
+            state: result.state,
+            digest: pkg.digest,
+            files: pkg.files.length,
+            bytes: filesBytes(pkg.files),
+            unverified: pkg.unverified,
+            ...(result.staleReason === undefined ? {} : { stale_reason: result.staleReason }),
+          },
+          coverage: coverageComplete(
+            `the registry index, archive, and every declared file for ${pkg.id}@${pkg.version}`,
+          ),
+          sources: [fileSource(pkg.path, pkg.digest)],
+          limitations: [
+            "The package was verified and stored, but its files were not compiled; build a " +
+              "generated workspace for that evidence.",
+          ],
+        });
+        return {
+          ...envelopeOf(recorder, {
+            tool: templateFetchContract.name,
+            provider: identity,
+            limitations: [
+              "The package was verified and stored, but its files were not compiled.",
+              "The registry index and archive are remote data; their signatures and provenance " +
+                "were not checked beyond the published digests.",
+            ],
+          }),
+          state: result.state,
+          package: templatePackageOutput(pkg),
+          path: pkg.path,
+          ...(result.staleReason === undefined ? {} : { stale_reason: result.staleReason }),
+          ...(result.details === undefined || result.details.length === 0
+            ? {}
+            : { details: [...result.details] }),
         };
       },
     ),

@@ -141,23 +141,23 @@ libuvcpp —— 于是失败变成一行可读的错误，而不是 libuvcpp 自
 
 ## uvp 能做什么
 
-| 任务                                                     | 工具                                                                                                                                                                                  |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 检查工具链以及存在哪些 libuvcpp 模块                     | `uvp_doctor`                                                                                                                                                                          |
-| 生成可编译的工程（7 个模板）                             | `uvp_workspace_create`                                                                                                                                                                |
-| 搜索、校验、导入、导出、删除模板包，并从模板包生成工作区 | `uvp_template_search`、`uvp_template_get`、`uvp_template_validate`、`uvp_template_import`、`uvp_template_export`、`uvp_template_remove`；`uvp_workspace_create`（`template_package`） |
-| 用 CMake 配置并编译                                      | `uvp_build`                                                                                                                                                                           |
-| 安装并构建生成的 Node 前端应用                           | `uvp_frontend_build`                                                                                                                                                                  |
-| 启动服务，并等待它真正能应答                             | `uvp_run`、`uvp_run_stop`                                                                                                                                                             |
-| 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS         | `uvp_http_request`                                                                                                                                                                    |
-| 探测 WebSocket 端点                                      | `uvp_websocket_probe`                                                                                                                                                                 |
-| 发送 SOAP 信封并读取应答                                 | `uvp_soap_call`                                                                                                                                                                       |
-| 测量吞吐与延迟分位数                                     | `uvp_load_test`                                                                                                                                                                       |
-| 录制一段会话中的请求往来，供之后读取                     | `uvp_capture_start`、`uvp_capture_read`                                                                                                                                               |
-| 把录制的会话对着一个活动目标重放                         | `uvp_capture_replay`                                                                                                                                                                  |
-| 针对已录制的请求往来求值断言                             | `uvp_assert_exchange`                                                                                                                                                                 |
-| 把以上全部作为一次托管流程执行                           | `uvp_verify`                                                                                                                                                                          |
-| 对比两份验证报告，看清到底哪里变了                       | `uvp_bundle_diff`                                                                                                                                                                     |
+| 任务                                                           | 工具                                                                                                                                                                                                        |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 检查工具链以及存在哪些 libuvcpp 模块                           | `uvp_doctor`                                                                                                                                                                                                |
+| 生成可编译的工程（7 个模板）                                   | `uvp_workspace_create`                                                                                                                                                                                      |
+| 搜索、下载、校验、导入、导出、删除模板包，并从模板包生成工作区 | `uvp_template_search`、`uvp_template_get`、`uvp_template_fetch`、`uvp_template_validate`、`uvp_template_import`、`uvp_template_export`、`uvp_template_remove`；`uvp_workspace_create`（`template_package`） |
+| 用 CMake 配置并编译                                            | `uvp_build`                                                                                                                                                                                                 |
+| 安装并构建生成的 Node 前端应用                                 | `uvp_frontend_build`                                                                                                                                                                                        |
+| 启动服务，并等待它真正能应答                                   | `uvp_run`、`uvp_run_stop`                                                                                                                                                                                   |
+| 发起 HTTP/1.1、HTTP/2 与 HTTP/3 请求，并报告 TLS               | `uvp_http_request`                                                                                                                                                                                          |
+| 探测 WebSocket 端点                                            | `uvp_websocket_probe`                                                                                                                                                                                       |
+| 发送 SOAP 信封并读取应答                                       | `uvp_soap_call`                                                                                                                                                                                             |
+| 测量吞吐与延迟分位数                                           | `uvp_load_test`                                                                                                                                                                                             |
+| 录制一段会话中的请求往来，供之后读取                           | `uvp_capture_start`、`uvp_capture_read`                                                                                                                                                                     |
+| 把录制的会话对着一个活动目标重放                               | `uvp_capture_replay`                                                                                                                                                                                        |
+| 针对已录制的请求往来求值断言                                   | `uvp_assert_exchange`                                                                                                                                                                                       |
+| 把以上全部作为一次托管流程执行                                 | `uvp_verify`                                                                                                                                                                                                |
+| 对比两份验证报告，看清到底哪里变了                             | `uvp_bundle_diff`                                                                                                                                                                                           |
 
 模板：`hello-http`、`rest-api`、`websocket-echo`、`websocket-test`、`soap-service`、
 `static-files`、`http3-service`。
@@ -183,7 +183,7 @@ JSON 两者完全一致。在别的模板上声明 `db` 和其它特性一样，
 仓库拥有数据，以及决定某个版本能否进入的评审。两者冲突时以 uvp 为准。
 
 包是数据，不是代码：搜索、建索引、校验时都不会执行包里的任何东西。uvp 这一侧是
-本地存储和六个 `uvp_template_*` 工具：
+本地存储和七个 `uvp_template_*` 工具：
 
 ```bash
 # 没有包服务器：一个 checkout 就是包的来源。
@@ -194,6 +194,7 @@ cd uvp-templates
 uvp template validate ./packages/hello-package/1.0.0
 uvp template import ./packages/hello-package/1.0.0 --dry-run
 uvp template import ./packages/hello-package/1.0.0
+uvp template fetch hello-package@1.0.0
 uvp template search --text hello
 uvp init ./svc --name svc --template-package hello-package@1.0.0
 ```

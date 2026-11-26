@@ -237,6 +237,80 @@ export const templateGetContract = defineTool({
 });
 
 /**
+ * Download one exact registry archive, verify it, and import it.
+ *
+ * The network read is explicit: this is the only template tool that contacts a
+ * registry. The archive and every declared file are verified before the store
+ * sees them, and `offline` uses only a cached index and a digest-matching cached
+ * archive. An `undetermined` result is not "the package does not exist"; it says
+ * neither a fresh read nor a cache could answer.
+ */
+export const templateFetchContract = defineTool({
+  name: "uvp_template_fetch",
+  title: "Fetch a template package from the registry",
+  description:
+    "Download one exact `id@version` archive named by the template registry index, verify its " +
+    "digest and byte count, verify every declared file, and import the package into the local " +
+    "store. `offline` uses only a cached index and a digest-matching cached archive. The result " +
+    "distinguishes `network`, `cache` (with `stale_reason` when a network read failed), and " +
+    "`undetermined`; the last is never evidence that the package does not exist.",
+  kind: "workspace",
+  inputSchema: z.object({
+    id: templateId,
+    version: templateVersion,
+    replace: z
+      .boolean()
+      .default(false)
+      .describe("Replace an existing id@version explicitly; never implicit."),
+    offline: z
+      .boolean()
+      .default(false)
+      .describe("Use only the cached index and archive; never make a network request."),
+    registry_url: z
+      .string()
+      .url()
+      .optional()
+      .describe("Registry index URL; defaults to the configured public registry."),
+    timeout_ms: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Per-request timeout in milliseconds; defaults to the registry reader's value."),
+  }),
+  outputSchema: z.object({
+    ...toolEnvelopeShape,
+    state: z.enum(["network", "cache", "undetermined"]),
+    package: z.object(packageFields).optional(),
+    path: z.string().optional().describe("Where the package was written, when it was imported."),
+    stale_reason: z
+      .string()
+      .optional()
+      .describe("Why a cached answer was used; absent for a fresh or explicit offline read."),
+    reason: z.string().optional().describe("Why the answer is undetermined."),
+    details: z.array(z.string()).optional(),
+  }),
+  effects: {
+    readsFilesystem: true,
+    writesFilesystem: true,
+    network: true,
+    spawnsProcess: false,
+    mutatesTarget: true,
+  },
+  returnsTargetContent: true,
+  examples: [
+    {
+      description: "Fetch and install one package version",
+      input: { id: "acme-dashboard", version: "1.2.0" },
+    },
+    {
+      description: "Read a cached package when offline",
+      input: { id: "acme-dashboard", version: "1.2.0", offline: true },
+    },
+  ],
+});
+
+/**
  * Validate a package directory without importing it.
  *
  * This is the import's format verdict without the write. It does not consult the
