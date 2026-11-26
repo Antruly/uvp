@@ -205,6 +205,10 @@ uvp 尚未发布 1.0，正在积极建设中。说清楚这意味着什么，比
 package 时走 `find_package(uvcpp 1.7.0 CONFIG)`，不存在时回退到 `pkg-config`
 —— 因为预编译发布包只带后者、不带前者。两条路径都会强制校验版本下限。
 
+Linux x64 的 1.11.0 发布包（仅 pkg-config）也通过了 12 项真实工具链用例；
+独立的 `uvp-templates` runtime lane 用同一个 prefix 通过了全部 7 个包。
+1.7.0 仍是版本下限与 CI 固定版本；1.11.0 是兼容性样本，不是第二个基线。
+
 CLI 与 MCP 服务端都已经建好，而且两者都是作为**进程**被检验，而不是作为模块：
 `tests/boundary/cli/cliContract.test.ts` 运行 CLI，检查它打印出什么、以什么码退出；
 `tests/boundary/mcp/mcpSurface.test.ts` 用 stdio 协议与服务端对话。CI 会在干净机器上跑同样的
@@ -337,6 +341,9 @@ unverified http2 responsiveness — requested feature http2 is not present in th
 1.7.0 是功能最完整的版本，也是这些模板经过验证所基于的基线。
 它设为下限而非精确锁定，是因为模板用到的 API 在 1.x 系列中一直保持稳定，
 锁定只会迫使用户无谓地重建 libuvcpp。
+
+下限不等于「1.7.0 是验证过的最新构建」：Linux x64 的 1.11.0 包已于 2026-11-26
+通过真实工具链 lane；Windows 与 1.11.0 的 CMake package 路线尚未采样。
 
 版本过旧时校验会失败，并在消息中写明它实际找到的版本。
 </details>
