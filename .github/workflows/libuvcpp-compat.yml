@@ -7,12 +7,7 @@ name: libuvcpp compatibility
 # sample, not the baseline, and a failure here should not block a change that
 # the floor lane already covers.
 #
-# The push trigger exists only so the lane can be exercised on its own branch
-# before it lands. Remove it once the workflow is on main.
-
 on:
-  push:
-    branches: [compat/311-libuvcpp-1.11]
   schedule:
     # Weekly, Monday 04:23 UTC. The nightly qualification run already covers the
     # 1.7.0 floor; this is a slower compatibility signal.
