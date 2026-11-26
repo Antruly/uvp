@@ -57,6 +57,7 @@ capabilities each gap actually blocks.
 
 | Task                                          | Guides                                                           |
 | --------------------------------------------- | ---------------------------------------------------------------- |
+| Install libuvcpp and CMake with uvp           | [Install the C++ toolchain](environment.md)                      |
 | Install and connect an agent                  | [Installation and setup](installation.md)                        |
 | Learn the command surface and its output      | [CLI and evidence](cli.md)                                       |
 | Understand how uvp is put together            | [Architecture](architecture.md)                                  |

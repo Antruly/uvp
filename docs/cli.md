@@ -46,6 +46,31 @@ naming it (`uvp buidl` reports `No command named "buidl".`), and a word that
 matches the start of a two-word command names the whole thing
 (`uvp capture statr`).
 
+## `uvp env`
+
+```bash
+uvp env                     # guided setup; Enter accepts every default
+uvp env setup --yes         # defaults without prompting
+uvp env status
+uvp env list
+uvp env install libuvcpp@1.11.0 --variant linux-x64
+uvp env install cmake@3.31.6
+uvp env use libuvcpp@1.9.1:linux-x64
+uvp env remove libuvcpp@1.9.1
+uvp env mirror libuvcpp https://mirror.example/uvcpp/
+```
+
+Installs libuvcpp and CMake under `~/.uvp/toolchains`, verifies each download
+against a SHA-256 pinned in uvp, and records the selection in
+`~/.uvp/toolchains.json`. `uvp build` and `uvp doctor` read that selection; an
+explicit `UVCPP_ROOT` still wins.
+
+The host default is `linux-x64`/`linux-arm64` on Linux and `mingw-x64`/
+`mingw-arm64` on Windows; `--variant msvc-x64` selects the Visual Studio
+libuvcpp archive. A mirror may be a directory or a template containing
+`{version}`, `{variant}`, and `{asset}`. See
+[Install the C++ toolchain](environment.md).
+
 ## `uvp doctor`
 
 ```bash

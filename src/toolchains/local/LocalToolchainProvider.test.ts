@@ -131,6 +131,8 @@ let savedRoot: string | undefined;
 let savedNodeOptions: string | undefined;
 let savedCmakePrefixPath: string | undefined;
 let savedPkgConfigPath: string | undefined;
+let savedToolchainHome: string | undefined;
+let savedToolchainConfig: string | undefined;
 
 /** The signal a build under test is given. Real, and never aborted. */
 const signal = new AbortController().signal;
@@ -204,6 +206,12 @@ beforeAll(async () => {
   savedPkgConfigPath = process.env["PKG_CONFIG_PATH"];
   delete process.env["CMAKE_PREFIX_PATH"];
   delete process.env["PKG_CONFIG_PATH"];
+  // A managed selection is another caller preference that would otherwise
+  // outrank the fixture in this file. Tests for that layer set it themselves.
+  savedToolchainHome = process.env["UVP_TOOLCHAIN_HOME"];
+  savedToolchainConfig = process.env["UVP_TOOLCHAIN_CONFIG"];
+  delete process.env["UVP_TOOLCHAIN_HOME"];
+  delete process.env["UVP_TOOLCHAIN_CONFIG"];
 });
 
 afterAll(async () => {
@@ -217,6 +225,10 @@ afterAll(async () => {
   else process.env["CMAKE_PREFIX_PATH"] = savedCmakePrefixPath;
   if (savedPkgConfigPath === undefined) delete process.env["PKG_CONFIG_PATH"];
   else process.env["PKG_CONFIG_PATH"] = savedPkgConfigPath;
+  if (savedToolchainHome === undefined) delete process.env["UVP_TOOLCHAIN_HOME"];
+  else process.env["UVP_TOOLCHAIN_HOME"] = savedToolchainHome;
+  if (savedToolchainConfig === undefined) delete process.env["UVP_TOOLCHAIN_CONFIG"];
+  else process.env["UVP_TOOLCHAIN_CONFIG"] = savedToolchainConfig;
   await removeTree(root);
 });
 

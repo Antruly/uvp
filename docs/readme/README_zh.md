@@ -42,9 +42,20 @@ uvp 把一段关于 C++ Web 服务的描述变成真实的 CMake 工程：针对
 ### 环境要求
 
 - Node.js `^22.19.0 || ^24.11.0 || >=26.0.0`
-- C++14 工具链（`g++` 或 `clang++`）以及 CMake 3.20+
-- [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 或更新版本**，
-  通过 `cmake --install` 安装，或从发布压缩包解压
+- C++14 编译器（`g++`、`clang++`，Windows 上为 MSVC 或 MinGW-w64）。
+  这是 `uvp env` 唯一不负责下载的主机依赖。
+- CMake 与 [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 或更新版本**
+  可以由 uvp 一键安装并选中：
+
+  ```bash
+  npm install -g uvp-agents
+  uvp env
+  ```
+
+  `uvp env` 会为当前系统推荐最新的 libuvcpp（1.11.0）和 CMake（3.31.6），
+  每个问题都有默认值，直接按回车即可完成安装。Windows 默认下载 MinGW 版
+  libuvcpp，传 `--variant msvc-x64` 可改用 MSVC 版。
+  详见 [安装 C++ 工具链](../environment.md)。
 
 先跑 doctor。它会报告哪些组件已就绪、哪些缺失，以及每个缺口究竟挡住了哪些能力
 —— 而不是把一切笼统地当作一个整体失败：

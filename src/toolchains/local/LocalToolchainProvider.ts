@@ -15,6 +15,7 @@ import type {
   ToolchainIdentity,
   ToolchainProvider,
 } from "../../application/ToolchainProvider.js";
+import { selectedCmakePathSync, selectedLibuvcppPrefixSync } from "../../application/managedToolchains.js";
 import { UvpFailure, cancelledFailure } from "../../domain/errors.js";
 import { discoverArtifacts } from "../artifacts.js";
 import { buildOutputEnvironment, noWorkWasDone, parseDiagnostics } from "../diagnostics.js";
@@ -440,6 +441,10 @@ const libuvcppSearchRoots = (workspacePath: string | undefined): readonly string
   const fromEnv = [
     process.env["UVCPP_ROOT"],
     process.env["LIBUVCPP_ROOT"],
+    // A prefix chosen with `uvp env use` sits below an explicit environment
+    // override and above conventional discovery: the caller's shell still wins,
+    // but a managed install is not left to chance when several are present.
+    selectedLibuvcppPrefixSync(),
     ...pathListEntries(process.env["CMAKE_PREFIX_PATH"]),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
@@ -719,8 +724,18 @@ export class LocalToolchainProvider implements ToolchainProvider {
     }
 
     const buildSystems: BuildSystemDescriptor[] = [];
+    const managedCmake = selectedCmakePathSync();
     for (const candidate of BUILD_SYSTEM_CANDIDATES) {
       if (signal.aborted) throw cancelledFailure(INSPECTION_CANCELLED);
+      if (candidate.id === "cmake" && managedCmake !== undefined) {
+        const version = await versionOf(managedCmake, ["--version"]);
+        buildSystems.push({
+          id: "cmake",
+          path: managedCmake,
+          ...(version === undefined ? {} : { version }),
+        });
+        continue;
+      }
       for (const command of candidate.commands) {
         const path = await whichOnPath(command);
         if (path === undefined) continue;
@@ -1009,7 +1024,7 @@ class LocalToolchainClient implements ToolchainClient {
     const configureStart = Date.now();
     const jobs = request.jobs === undefined ? [] : ["-j", String(request.jobs)];
     const configure = await this.run({
-      command: "cmake",
+      command: selectedCmakePathSync() ?? "cmake",
       args: [
         "-S",
         request.workspacePath,
@@ -1066,7 +1081,7 @@ class LocalToolchainClient implements ToolchainClient {
     if (request.clean) buildArgs.push("--clean-first");
 
     const compile = await this.run({
-      command: "cmake",
+      command: selectedCmakePathSync() ?? "cmake",
       args: buildArgs,
       // No prefix: `cmake --build` searches for nothing, because the configure
       // already wrote the paths into the build tree. The message locale is a

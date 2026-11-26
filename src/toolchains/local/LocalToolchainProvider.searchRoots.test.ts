@@ -67,12 +67,18 @@ beforeEach(() => {
     UVCPP_ROOT: process.env["UVCPP_ROOT"],
     LIBUVCPP_ROOT: process.env["LIBUVCPP_ROOT"],
     CMAKE_PREFIX_PATH: process.env["CMAKE_PREFIX_PATH"],
+    UVP_TOOLCHAIN_HOME: process.env["UVP_TOOLCHAIN_HOME"],
+    UVP_TOOLCHAIN_CONFIG: process.env["UVP_TOOLCHAIN_CONFIG"],
   };
   // The single-root variables are cleared so the only way the fixture can be
   // found is the variable each test is about. A host that happens to have one of
   // them set would otherwise make every test below pass for the wrong reason.
+  // The managed-toolchain variables are cleared for the same reason: a previous
+  // `uvp env use` must not outrank the `CMAKE_PREFIX_PATH` under test.
   delete process.env["UVCPP_ROOT"];
   delete process.env["LIBUVCPP_ROOT"];
+  delete process.env["UVP_TOOLCHAIN_HOME"];
+  delete process.env["UVP_TOOLCHAIN_CONFIG"];
 });
 
 afterEach(() => {
