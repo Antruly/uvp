@@ -313,11 +313,6 @@ export const LATEST_TOOLCHAIN_VERSION: Readonly<Record<ManagedToolName, string>>
   cmake: CMAKE_LATEST,
 };
 
-export const DEFAULT_VARIANTS: Readonly<Record<ManagedToolName, readonly ToolchainVariant[]>> = {
-  libuvcpp: ["linux-x64", "linux-arm64", "mingw-x64", "mingw-arm64", "msvc-x64", "msvc-arm64"],
-  cmake: ["linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-universal"],
-};
-
 export const TOOLCHAIN_VERSIONS: Readonly<Record<ManagedToolName, readonly string[]>> = {
   libuvcpp: [...new Set(LIBUVCPP_ROWS.map((row) => row[0]))],
   cmake: [...new Set(CMAKE_ROWS.map((row) => row[0]))],
@@ -338,9 +333,6 @@ export const findRelease = (
   tool: ManagedToolName,
   options: { readonly version?: string; readonly variant?: ToolchainVariant } = {},
 ): ToolchainRelease | undefined => releasesFor(tool, options)[0];
-
-export const variantsFor = (tool: ManagedToolName): readonly ToolchainVariant[] =>
-  DEFAULT_VARIANTS[tool];
 
 /** The archive a host of this shape gets when the caller names no variant. */
 export const hostVariant = (

@@ -5,7 +5,6 @@
     "src/cli.ts",
     "src/version.ts",
     "src/contracts/errorSchemas.ts",
-    "scripts/licenses.mjs",
     "scripts/ci/*.mjs"
   ],
   "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"],

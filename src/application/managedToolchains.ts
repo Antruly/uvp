@@ -641,28 +641,6 @@ export const installManaged = async (
   return installToolchain(release, options);
 };
 
-export const selectedToolchain = async (
-  tool: ManagedToolName,
-  options: { readonly home?: string; readonly configPath?: string } = {},
-): Promise<InstalledToolchain | undefined> => {
-  const home = options.home ?? resolveToolchainHome();
-  const configPath = options.configPath ?? resolveToolchainConfigPath();
-  const config = await readToolchainConfig(configPath);
-  const selection = config.selected[tool];
-  if (selection === undefined) return undefined;
-  const release = findRelease(tool, selection);
-  if (release === undefined) return undefined;
-  const target = installPath(home, release);
-  if (!(await pathExists(target))) return undefined;
-  return {
-    release,
-    path: target,
-    ...(release.executable === undefined
-      ? {}
-      : { executable: path.join(target, release.executable) }),
-  };
-};
-
 export const listInstalled = async (
   options: { readonly home?: string } = {},
 ): Promise<readonly InstalledToolchain[]> => {
@@ -792,15 +770,6 @@ export const managedStatus = async (
     mirrors: config.mirrors,
   };
 };
-
-export const recommendedReleases = (
-  platform: NodeJS.Platform = process.platform,
-  arch: string = process.arch,
-): readonly ToolchainRelease[] =>
-  (["libuvcpp", "cmake"] as const).flatMap((tool) => {
-    const release = defaultRelease(tool, platform, arch);
-    return release === undefined ? [] : [release];
-  });
 
 /** The prefix a build should use, read synchronously by the toolchain provider. */
 export const selectedLibuvcppPrefixSync = (
