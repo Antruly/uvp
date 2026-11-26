@@ -13,17 +13,17 @@
       {
         "vendor": "uvp",
         "name": "scripts/sbom.mjs",
-        "version": "0.5.0"
+        "version": "0.6.0"
       }
     ],
     "component": {
-      "bom-ref": "uvp-agents@0.5.0",
+      "bom-ref": "uvp-agents@0.6.0",
       "type": "library",
       "name": "uvp-agents",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "scope": "required",
       "description": "Build, run, and verify libuvcpp-powered C++ web services from your terminal or agent with one CLI and MCP server.",
-      "purl": "pkg:npm/uvp-agents@0.5.0",
+      "purl": "pkg:npm/uvp-agents@0.6.0",
       "properties": [],
       "externalReferences": [
         {
@@ -58,7 +58,7 @@
       },
       {
         "name": "uvp:lockfile-sha512",
-        "value": "e8e1b3f0e632b64a5ea13c39bbe9b20167aa137af10a0ba0dddfd93d0a72a89142e223a2a1b90b3ce6895d4258993e89fd1e2dac18693c43c65b027cb5399c69"
+        "value": "6c8d9564d533130e27479b7f72ca49a60b7d415f08c72435b694c745be412ccbcff2233afe514f7573d38281c88df310fa41fce9c4e749ea82621b72b3b21b2f"
       },
       {
         "name": "uvp:closure",
@@ -182,7 +182,7 @@
   ],
   "dependencies": [
     {
-      "ref": "uvp-agents@0.5.0",
+      "ref": "uvp-agents@0.6.0",
       "dependsOn": [
         "@modelcontextprotocol/server@2.4.0",
         "canonicalize@5.1.0",
@@ -211,5 +211,5 @@
       "dependsOn": []
     }
   ],
-  "serialNumber": "urn:uuid:56f57428-ec89-5404-9e88-204dcf47c015"
+  "serialNumber": "urn:uuid:e53b5bf5-5107-5693-bd71-de839e762395"
 }
