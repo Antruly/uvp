@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.5.0...uvp-agents-0.6.0) (2026-11-26)
+
+
+### Features
+
+* **registry:** accept published package archives in the index ([abfeac5](https://github.com/Antruly/uvp/commit/abfeac50ddbedf8fcf5ce38ddf491431d8879fed))
+* **registry:** accept published package archives in the index ([a36802c](https://github.com/Antruly/uvp/commit/a36802cc38eda7b14b5360bb4a61ca48dc3d3d75))
+
+
+### Bug Fixes
+
+* **ci:** fetch pkgconfiglite with curl for canonical bytes ([59c08c7](https://github.com/Antruly/uvp/commit/59c08c77fea6f980082ca0e6c629edc4a9ab7675))
+* **ci:** normalize the downloaded pkg-config path before use ([0ce6dd8](https://github.com/Antruly/uvp/commit/0ce6dd8defb5e2d7634d244b93079bde763d385f))
+* **ci:** pin the pkgconfiglite archive instead of Chocolatey ([ee2bb8b](https://github.com/Antruly/uvp/commit/ee2bb8b703caa810eea94a95daceabedc0d214ac))
+* **ci:** pin the pkgconfiglite archive instead of Chocolatey ([d1154da](https://github.com/Antruly/uvp/commit/d1154dab4bd8180cc652dd0c2b501f230cccc084))
+
 ## [0.5.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.4.0...uvp-agents-0.5.0) (2026-11-25)
 
 
