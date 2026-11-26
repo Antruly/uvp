@@ -1,16 +1,18 @@
 # Installation and setup
 
-uvp runs on your machine and drives the tools you already have. Installing it
-does not install a compiler, CMake, or libuvcpp, and it never invokes `sudo`.
+uvp runs on your machine. Installing uvp itself needs only Node.js; the C++
+toolchain is the one host prerequisite it does not install. `uvp env` installs
+and selects a managed CMake and libuvcpp into `~/.uvp/toolchains`, verifies their
+downloads against pinned SHA-256 values, and never invokes `sudo`.
 
 ## Requirements
 
-|               |                                                     |
-| ------------- | --------------------------------------------------- |
-| Node.js       | `^22.19.0`, `^24.11.0`, or `>=26.0.0`               |
-| CMake         | 3.20 or newer, on `PATH`                            |
-| C++ toolchain | A C++14 compiler: GCC, Clang, or MSVC               |
-| libuvcpp      | **1.7.0 or newer**, installed where uvp can find it |
+|               |                                                                |
+| ------------- | -------------------------------------------------------------- |
+| Node.js       | `^22.19.0`, `^24.11.0`, or `>=26.0.0`                          |
+| CMake         | 3.20 or newer; `uvp env` can install 3.31.6 or 4.0.3           |
+| C++ toolchain | A C++14 compiler: GCC, Clang, MSVC, or MinGW-w64               |
+| libuvcpp      | **1.7.0 or newer**; `uvp env` can install 1.7.0 through 1.11.0 |
 
 Node is the only hard requirement for the CLI and MCP server to _start_.
 `uvp doctor` exists precisely because the other three are often incomplete, and
@@ -87,9 +89,21 @@ what the publish does and does not establish.
 
 ## libuvcpp
 
-uvp does not vendor libuvcpp, download it, or build it for you. It finds one you
-have. There are two install shapes and a generated project handles both, but
-`uvp doctor` reports which route answered and it is worth knowing the difference.
+The fast path is the managed install:
+
+```bash
+uvp env
+```
+
+Press Enter through the prompts, or run `uvp env setup --yes`. This installs a
+pinned release archive under `~/.uvp/toolchains` and selects it for `uvp build`
+and `uvp doctor`; no environment variables or shell profile changes are needed.
+`uvp env list` shows the supported versions and variants, and
+[Install the C++ toolchain](environment.md) covers mirrors and switching.
+
+If you prefer to manage libuvcpp yourself, uvp still finds it. There are two
+install shapes and a generated project handles both, but `uvp doctor` reports
+which route answered and it is worth knowing the difference.
 
 ### Route 1 — build and install from source
 

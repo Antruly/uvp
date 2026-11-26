@@ -43,18 +43,23 @@ can walk away from uvp and keep the project.
 ### Requirements
 
 - Node.js `^22.19.0 || ^24.11.0 || >=26.0.0`
-- A C++14 toolchain (`g++` or `clang++`; MSVC 2019+ on Windows, where CI has
-  exercised Visual Studio 2026 / MSVC 14.51 only) and CMake 3.20+
-- [libuvcpp](https://github.com/Antruly/libuvcpp) **1.7.0 or newer**, either
-  `cmake --install`ed or unpacked from a
-  [release archive](https://github.com/Antruly/libuvcpp/releases). `uvp doctor`
-  and a failed `uvp build` both name this requirement, with the release URL and
-  the environment variables that make an install discoverable, when none is
-  found.
-- `pkg-config` (or `pkgconf`, which CMake 3.22 and newer search) when libuvcpp
-  comes from a release archive. Those ship only `lib/pkgconfig/uvcpp.pc` and no
-  CMake package, so the generated project's pkg-config fallback is the route
-  that runs; an install made with `cmake --install` answers
+- A C++14 compiler (`g++` or `clang++`; MSVC 2019+ or MinGW-w64 on Windows).
+  This is the one host prerequisite `uvp env` does not download.
+- Everything else is installed by uvp:
+
+  ```bash
+  npm install -g uvp-agents
+  uvp env
+  ```
+
+  `uvp env` proposes the newest supported [libuvcpp](https://github.com/Antruly/libuvcpp)
+  (1.11.0) and CMake (3.31.6) for this host and selects them. Every question has
+  a default, so pressing Enter through the prompts is a complete install. On
+  Windows the default libuvcpp archive is MinGW; pass `--variant msvc-x64` to use
+  the MSVC one. See [Install the C++ toolchain](docs/environment.md).
+
+- `pkg-config` (or `pkgconf`) is still needed for the release archive's
+  `lib/pkgconfig/uvcpp.pc` route. A `cmake --install`ed libuvcpp answers
   `find_package(uvcpp CONFIG)` instead and does not need it.
 
 On Windows the archive route uses the same `pkg-config` lookup CMake does:
@@ -431,6 +436,8 @@ otherwise.
 
 ## Documentation
 
+- [Install the C++ toolchain](docs/environment.md) — one-command libuvcpp and
+  CMake install, versions, variants, and mirrors
 - [Installation and setup](docs/installation.md) — requirements, libuvcpp
   discovery, agent configuration
 - [CLI and evidence](docs/cli.md) — every command, output shape, exit status

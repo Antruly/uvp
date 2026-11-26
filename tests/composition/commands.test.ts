@@ -141,15 +141,16 @@ describe("the command registry", () => {
     }
   });
 
-  it("leaves mcp and setup without a contract, and everything else with one", () => {
-    // These two are the documented exceptions: a contract exists so a model can
+  it("leaves mcp, setup, and env without a contract, and everything else with one", () => {
+    // These three are the documented exceptions: a contract exists so a model can
     // call it, and a model cannot usefully call "start the server it is already
-    // talking to". Pinning the exact set keeps a third exception from appearing
+    // talking to", write a client config, or answer an interactive install
+    // prompt. Pinning the exact set keeps a fourth exception from appearing
     // unnoticed — that is the sort of thing coverage would not catch, since a
     // contract-less command is not `missing` or `unknown`, just unreachable by
     // tool name.
     const local = COMMANDS.filter((command) => !isToolCommand(command)).map(commandName);
-    expect(local.sort()).toEqual(["uvp mcp", "uvp setup"]);
+    expect(local.sort()).toEqual(["uvp env", "uvp mcp", "uvp setup"]);
   });
 
   it("declares no flag that collides with a universal one", () => {
