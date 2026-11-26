@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.6.0...uvp-agents-0.7.0) (2026-11-26)
+
+
+### Features
+
+* **cli:** install and select the C++ toolchains uvp needs ([1987c3b](https://github.com/Antruly/uvp/commit/1987c3b7c8e9345905d223c944fd097192c9bcf4))
+* **cli:** install and select the C++ toolchains uvp needs ([255d54d](https://github.com/Antruly/uvp/commit/255d54dd853f9d427d8adb3018f692c7ce24ad3b))
+
+
+### Documentation
+
+* name the weekly libuvcpp sample in the support matrix ([2097872](https://github.com/Antruly/uvp/commit/20978728011576cff4d3afe147110bc77e2ece44))
+* name the weekly libuvcpp sample in the support matrix ([50b22c7](https://github.com/Antruly/uvp/commit/50b22c7108c1944f2bb79a00b415e7573b4b4a60)), closes [#302](https://github.com/Antruly/uvp/issues/302)
+* record libuvcpp 1.11.0 as a sampled build ([d8d56e2](https://github.com/Antruly/uvp/commit/d8d56e2ca9465083597bc8893a883c3465fab3b6))
+* record libuvcpp 1.11.0 as a sampled build ([23e3ecf](https://github.com/Antruly/uvp/commit/23e3ecfd8ba32a6842a06953fbdcca5c4c43513c)), closes [#302](https://github.com/Antruly/uvp/issues/302)
+
+
+### Continuous Integration
+
+* drop the branch-only trigger from the compatibility lane ([6b494ff](https://github.com/Antruly/uvp/commit/6b494ffc45604710475fbb0873b17cdfde058170))
+* sample the newest libuvcpp release weekly ([0d5d673](https://github.com/Antruly/uvp/commit/0d5d673babc7167a32db295147f4e758b374e710))
+* sample the newest libuvcpp release weekly ([bbc28d6](https://github.com/Antruly/uvp/commit/bbc28d67856017324a89adccf5796684fe96b7c7))
+
 ## [0.6.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.5.0...uvp-agents-0.6.0) (2026-11-26)
 
 
