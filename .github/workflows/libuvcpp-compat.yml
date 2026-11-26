@@ -1,0 +1,100 @@
+name: libuvcpp compatibility
+
+# The main CI lanes pin libuvcpp 1.7.0 so the floor stays exercised on every
+# push. This lane samples a newer release against the same real-toolchain tests,
+# which is how "1.7.0 or newer" stops being an untested claim. It is deliberately
+# not part of the required PR checks: a newer libuvcpp is a compatibility
+# sample, not the baseline, and a failure here should not block a change that
+# the floor lane already covers.
+#
+# The push trigger exists only so the lane can be exercised on its own branch
+# before it lands. Remove it once the workflow is on main.
+
+on:
+  push:
+    branches: [compat/311-libuvcpp-1.11]
+  schedule:
+    # Weekly, Monday 04:23 UTC. The nightly qualification run already covers the
+    # 1.7.0 floor; this is a slower compatibility signal.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: libuvcpp release to sample, without the leading v
+        required: true
+        default: "1.11.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libuvcpp-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: libuvcpp ${{ github.event.inputs.version || '1.11.0' }} on Linux x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ github.event.inputs.version || '1.11.0' }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Cache npm package downloads
+        id: npm-cache
+        uses: ./.github/actions/npm-cache
+
+      - name: Install the C++ toolchain
+        run: |
+          sudo apt-get update
+          # libsqlite3-dev is the rest-api store's compile-time backend. The
+          # release archive carries libuvcpp, not SQLite.
+          sudo apt-get install --no-install-recommends -y \
+            cmake ninja-build g++ pkg-config libsqlite3-dev unzip
+
+      - name: Install the workspace dependencies
+        run: npm ci
+
+      - name: Compile uvp
+        run: npm run compile
+
+      - name: Download the libuvcpp release archive
+        run: |
+          set -euo pipefail
+          archive="libuvcpp-${VERSION}-linux-x64.zip"
+          url="https://github.com/Antruly/libuvcpp/releases/download/v${VERSION}/${archive}"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$RUNNER_TEMP/$archive" "$url"
+          unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP/libuvcpp"
+          prefix="$RUNNER_TEMP/libuvcpp/libuvcpp-${VERSION}-linux-x64"
+          test -f "$prefix/lib/pkgconfig/uvcpp.pc"
+          test -f "$prefix/include/uvcpp/uvcpp_config.h"
+          echo "UVCPP_ROOT=$prefix" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+      - name: Record what the archive actually provides
+        run: |
+          set -euo pipefail
+          pkg-config --modversion uvcpp
+          # A version string is a claim; the configuration header is what the
+          # build will actually see. Print the modules this lane relies on.
+          header="$UVCPP_ROOT/include/uvcpp/uvcpp_config.h"
+          for symbol in UVCPP_WEB_ENABLE UVCPP_WEBAPP_ENABLE UVCPP_DB_ENABLE; do
+            grep -qE "^#[[:space:]]*define[[:space:]]+${symbol}[[:space:]]+1\b" "$header" ||
+              {
+                echo "the archive does not define $symbol=1 in $header" >&2
+                exit 1
+              }
+          done
+          node scripts/uvp.mjs doctor --json
+
+      - name: Run the real toolchain cases against the sampled release
+        run: npm run test:toolchain
