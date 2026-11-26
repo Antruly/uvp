@@ -239,6 +239,11 @@ where a CMake package exists and via `pkg-config` where it does not, because the
 prebuilt release archives ship the latter and not the former. The version floor
 is enforced on both routes.
 
+A Linux x64 1.11.0 release archive (pkg-config only) also passed the 12 real
+toolchain cases, and the separate `uvp-templates` runtime lane passed all seven
+packages against the same prefix. 1.7.0 remains the floor and the CI pin; the
+1.11.0 sample is compatibility evidence, not a second baseline.
+
 The CLI and the MCP server are both built, and both are exercised as processes
 rather than as modules: `tests/boundary/cli/cliContract.test.ts` runs the CLI and
 checks what it prints and what it exits with, and
@@ -403,6 +408,10 @@ routes. 1.7.0 is the most feature-complete release and is the baseline the
 templates are verified against. It is a floor rather than a pin because the API
 the templates use has been stable across the 1.x line, and pinning would force a
 rebuild of libuvcpp for no benefit.
+
+The floor is not a claim that 1.7.0 is the newest build exercised. A Linux x64
+1.11.0 archive passed the real-toolchain lane on 2026-11-26; Windows and the
+CMake-package route for 1.11.0 have not been sampled.
 
 An older libuvcpp fails the check with the version it found named in the message.
 </details>

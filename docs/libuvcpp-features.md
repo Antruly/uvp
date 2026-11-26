@@ -8,11 +8,16 @@ Everything here was established by building and running against libuvcpp
 **1.7.0**, not by reading documentation. Where the two disagree, the build wins
 and this page is a bug.
 
+A Linux x64 **1.11.0** release archive was sampled on 2026-11-26: the 12 real
+toolchain cases and the seven-package `uvp-templates` runtime lane passed without
+a mapping change. The table below remains the 1.7.0 observation; 1.11.0 is a
+compatibility sample, not a second baseline.
+
 ## The baseline
 
 |               |                                                           |
 | ------------- | --------------------------------------------------------- |
-| Version       | 1.7.0                                                     |
+| Version       | 1.7.0 (floor; 1.11.0 sampled on Linux x64)                |
 | License       | MIT                                                       |
 | Upstream      | [`Antruly/libuvcpp`](https://github.com/Antruly/libuvcpp) |
 | C++ namespace | `uvcpp` (everything, without exception)                   |
