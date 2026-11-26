@@ -63,7 +63,16 @@ export const DEFAULT_TEMPLATE_REGISTRY_MAX_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_TEMPLATE_REGISTRY_TIMEOUT_MS = 10_000;
 
 const MAX_REDIRECTS = 3;
-const CACHE_DIRECTORY = ".registry";
+
+/** The directory, under the template store, that holds index and archive caches. */
+export const TEMPLATE_REGISTRY_CACHE_DIRECTORY = ".registry";
+
+/**
+ * Resolve the registry cache root once, so the index and archive caches agree
+ * on where a caller that supplied no `cacheRoot` writes.
+ */
+export const resolveTemplateRegistryCacheRoot = (cacheRoot?: string): string =>
+  cacheRoot ?? path.join(resolveTemplateStoreRoot(), TEMPLATE_REGISTRY_CACHE_DIRECTORY);
 
 export type TemplateRegistryFailureCode =
   | "unreachable"
@@ -164,7 +173,7 @@ const describeError = (error: unknown): string => {
  */
 const cachePathOf = (options: TemplateRegistryOptions, indexUrl: string): string =>
   path.join(
-    options.cacheRoot ?? path.join(resolveTemplateStoreRoot(), CACHE_DIRECTORY),
+    resolveTemplateRegistryCacheRoot(options.cacheRoot),
     `index-${createHash("sha256").update(indexUrl).digest("hex")}.json`,
   );
 
@@ -453,7 +462,9 @@ export const readTemplateRegistryIndex = async (
         state: "read",
         source: "network",
         index: validation.index,
-        url,
+        // Relative archive paths resolve against where the index actually came
+        // from, not the URL that was requested before redirects.
+        url: response.url,
         ...(cacheError === undefined ? {} : { cacheError }),
       };
     } catch (error) {

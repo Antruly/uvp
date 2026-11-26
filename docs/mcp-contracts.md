@@ -1,6 +1,6 @@
 # MCP contracts
 
-uvp exposes 22 tools over MCP, from the same contracts that back the CLI. This
+uvp exposes 23 tools over MCP, from the same contracts that back the CLI. This
 page is the reference: what each tool does, what it touches, and what a result
 contains.
 
@@ -33,6 +33,7 @@ whose results can contain bytes that did not originate with uvp.
 | `uvp_workspace_create`  | workspace |  ●  |  ●  |     |      |     |           |
 | `uvp_template_search`   | workspace |  ●  |     |     |      |     |     ●     |
 | `uvp_template_get`      | workspace |  ●  |     |     |      |     |     ●     |
+| `uvp_template_fetch`    | workspace |  ●  |  ●  |  ●  |      |  ●  |     ●     |
 | `uvp_template_validate` | workspace |  ●  |     |     |      |     |     ●     |
 | `uvp_template_import`   | workspace |  ●  |  ●  |     |      |  ●  |     ●     |
 | `uvp_template_export`   | workspace |  ●  |  ●  |     |      |  ●  |           |
@@ -143,7 +144,8 @@ nothing.
 
 ### Template packages
 
-The six `uvp_template_*` tools read and write the local template store. The
+The seven `uvp_template_*` tools read and write the local template store, and
+one of them downloads a package from the registry. The
 store root is resolved from `UVP_TEMPLATE_HOME`, or `~/.uvp/templates` when it
 is unset; it is not a tool input, so two callers cannot silently use different
 stores.
@@ -154,6 +156,12 @@ stores.
   default is the latest version per id; `all_versions` returns every version.
 - **`uvp_template_get`** reads one exact `id@version`, re-verifying every file
   against the manifest before it returns the file list and store path.
+- **`uvp_template_fetch`** downloads the archive the registry index names for one
+  exact `id@version`, verifies its digest and byte count, verifies every declared
+  file, and imports the package. `offline` uses only a cached index and a
+  digest-matching cached archive. The result distinguishes `network`, `cache`
+  (with `stale_reason` when a network read failed), and `undetermined`; the last
+  is never evidence that the package does not exist.
 - **`uvp_template_validate`** applies the import's format verdict to a directory
   without writing anything. It does not check whether the package is already in
   the store.
@@ -175,10 +183,11 @@ stores.
 
 `import`, `export`, and `remove` declare `mutatesTarget: true` because they
 change state outside the uvp workspace (the local store, or a caller-named
-destination). None of the six declares a network request, a process spawn, or a
-credential.
+destination). `uvp_template_fetch` also declares a network request because it
+reads the registry index and the named archive; none of the seven spawns a
+process or handles a credential.
 
-`search`, `get`, `validate`, and `import` are marked `untrusted` because their
+`search`, `get`, `fetch`, `validate`, and `import` are marked `untrusted` because their
 results include manifest text the package author wrote — `name`, `description`,
 `tags`, and `preview` — and a client must render it as data, never as
 instructions. `export` and `remove` return only paths, digests, and counts that

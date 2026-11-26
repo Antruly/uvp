@@ -143,7 +143,11 @@ describe("effects and annotations", () => {
     // workspace names in the call: `npm ci` may fetch the packages the
     // workspace's committed lockfile pins. The build runs on this host, so the
     // traffic is `npm`'s, but it is traffic the caller started.
+    // `uvp_template_fetch` is the template store's one network tool: it
+    // downloads the registry index and the named archive. The other template
+    // tools read or write the local store and stay absent.
     expect(reaching).toEqual([
+      "uvp_template_fetch",
       "uvp_frontend_build",
       "uvp_run",
       "uvp_http_request",
@@ -206,6 +210,7 @@ describe("effects and annotations", () => {
       // `workspace_create`, so the exact order is the declaration order.
       "uvp_template_search",
       "uvp_template_get",
+      "uvp_template_fetch",
       "uvp_template_validate",
       "uvp_template_import",
       "uvp_build",

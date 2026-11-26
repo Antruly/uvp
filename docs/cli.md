@@ -869,13 +869,15 @@ uvp template search [--text TEXT] [--category C] [--framework F] [--tags a,b] \
   [--tag-mode all|any] [--features websocket,ssl] [--version 1.2.0] [--all-versions] \
   [--limit 20] [--offset 0]
 uvp template get acme-dashboard@1.2.0
+uvp template fetch acme-dashboard@1.2.0 [--replace] [--offline] [--index-url URL]
 uvp template validate ./acme-dashboard [--allow-unverified]
 uvp template import ./acme-dashboard [--replace] [--allow-unverified] [--dry-run]
 uvp template export acme-dashboard@1.2.0 --target ./exported
 uvp template remove acme-dashboard[@1.2.0]
 ```
 
-The six commands read and write the local template store. The store root is
+The seven commands read and write the local template store; `fetch` is the one
+that downloads from the registry. The store root is
 `$UVP_TEMPLATE_HOME` when set, otherwise `~/.uvp/templates`; it is not a flag,
 so a person and an agent reached through MCP use the same store.
 
@@ -888,6 +890,13 @@ a corrupt entry is not an absent one.
 manifest, and returns the store path. A missing package and a tampered package
 are different failures — `template_not_found` and `artifact_modified` — because
 the remedies differ.
+
+`fetch` downloads the archive named by the registry index for one exact
+`id@version`, verifies its digest and byte count, verifies every declared file,
+and imports the package. `--offline` uses only the cached index and a
+digest-matching cached archive. The result is `network`, `cache`, or
+`undetermined`; undetermined is not "not found". `--index-url` points at a
+different registry index; `--timeout` bounds each request.
 
 `validate` runs the import's format check without writing. It does not consult
 the store, so a package already installed still validates here and is refused
