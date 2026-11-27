@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.9.0...uvp-agents-0.10.0) (2026-11-27)
+
+
+### Features
+
+* **template:** save a default registry index URL ([30ecc66](https://github.com/Antruly/uvp/commit/30ecc66082ddd07623d8e240c2a4c5b82cb0342a))
+* **template:** save a default registry index URL ([9a21a3a](https://github.com/Antruly/uvp/commit/9a21a3a648f34cc7c8c2ba42669fde594401f557))
+
 ## [0.9.0](https://github.com/Antruly/uvp/compare/uvp-agents-0.8.0...uvp-agents-0.9.0) (2026-11-26)
 
 
