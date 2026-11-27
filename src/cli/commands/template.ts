@@ -7,7 +7,14 @@ import {
   parseCsv,
   requirePositional,
 } from "../args.js";
-import type { CommandSpec } from "../commandSpec.js";
+import type { CommandSpec, LocalCommand } from "../commandSpec.js";
+import { EXIT_OK } from "../exitCodes.js";
+import {
+  resolveTemplateRegistryConfigPath,
+  resolveTemplateRegistryIndexUrl,
+  resetTemplateRegistryConfig,
+  writeTemplateRegistryConfig,
+} from "../../application/TemplateRegistry.js";
 
 /**
  * `uvp template ...`.
@@ -237,6 +244,76 @@ export const templateImportCommand: CommandSpec = {
   },
 };
 
+export const templateRegistryCommand: LocalCommand = {
+  path: ["template", "registry"],
+  summary: "Show or change the default template registry index URL.",
+  usage: "uvp template registry [set URL|reset] [--json]",
+  positionals: [
+    {
+      name: "ACTION",
+      description: "set URL persists a registry index; reset removes the saved value.",
+    },
+  ],
+  notes: [
+    "Resolution order for `uvp template fetch`: --index-url, then",
+    "UVP_TEMPLATE_REGISTRY_URL, then this saved value, then the public index.",
+    "The saved file is ~/.uvp/registry.json; UVP_REGISTRY_CONFIG moves it.",
+  ],
+  run: async (context) => {
+    const [action, value, extra] = context.parsed.positionals;
+    if (extra !== undefined) {
+      flagError("registry takes at most an action and a URL.", {
+        usage: "uvp template registry [set URL|reset]",
+      });
+    }
+    if (action === undefined) {
+      // show only
+    } else if (action === "set") {
+      if (value === undefined || value === "") {
+        flagError("registry set needs an http(s) index URL.", {
+          usage: "uvp template registry set https://mirror.example/index.json",
+        });
+      }
+      try {
+        await writeTemplateRegistryConfig(value);
+      } catch (error) {
+        flagError(error instanceof Error ? error.message : String(error), {
+          usage: "uvp template registry set https://mirror.example/index.json",
+        });
+      }
+    } else if (action === "reset") {
+      if (value !== undefined) {
+        flagError("registry reset takes no URL.", { usage: "uvp template registry reset" });
+      }
+      await resetTemplateRegistryConfig();
+    } else {
+      flagError(`"${action}" is not a registry action; use set or reset.`, {
+        usage: "uvp template registry [set URL|reset]",
+      });
+    }
+
+    const resolved = await resolveTemplateRegistryIndexUrl();
+    if (asBoolean(context.parsed, "json") === true) {
+      context.out(
+        JSON.stringify(
+          {
+            index_url: resolved.url,
+            source: resolved.source,
+            config: resolveTemplateRegistryConfigPath(),
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      context.out(`registry  ${resolved.url}`);
+      context.out(`source    ${resolved.source}`);
+      context.out(`config    ${resolved.configPath}`);
+    }
+    return EXIT_OK;
+  },
+};
+
 export const templateFetchCommand: CommandSpec = {
   path: ["template", "fetch"],
   tool: "uvp_template_fetch",
@@ -354,9 +431,10 @@ export const templateRemoveCommand: CommandSpec = {
 export const templateCommands: readonly CommandSpec[] = [
   templateSearchCommand,
   templateGetCommand,
+  templateFetchCommand,
+  templateRegistryCommand,
   templateValidateCommand,
   templateImportCommand,
-  templateFetchCommand,
   templateExportCommand,
   templateRemoveCommand,
 ];

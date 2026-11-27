@@ -223,13 +223,21 @@ uvp template search --text hello
 uvp init ./svc --name svc --template-package hello-package@1.0.0
 ```
 
-`uvp template search` reads the local store, not the registry's `index.json`.
-Remote search, download, and sync are still the registry-client work tracked in
-[#239](https://github.com/Antruly/uvp/issues/239); until that ships, the index at
-`https://raw.githubusercontent.com/Antruly/uvp-templates/main/index.json` is what
-a person or an agent reads to choose a package, and `uvp template import` is the
-hand-off. `uvp template export` writes a stored package back out in the same
-layout.
+`uvp template search` reads the local store. `uvp template fetch` reads the
+registry's `index.json`, downloads the named archive, verifies its digest and
+every declared file, and imports the package. The public index is
+`https://raw.githubusercontent.com/Antruly/uvp-templates/main/index.json`; if
+that host is unreachable, save a reachable mirror once:
+
+```bash
+uvp template registry set https://mirror.example/index.json
+uvp template fetch hello-package@1.0.0
+```
+
+Resolution is `--index-url` > `UVP_TEMPLATE_REGISTRY_URL` >
+`~/.uvp/registry.json` > the public index. `uvp template registry` shows the
+effective URL and source; `uvp template registry reset` removes the saved value.
+`uvp template export` writes a stored package back out in the same layout.
 
 <a id="current-status"></a>
 

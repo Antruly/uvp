@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import { compareTemplateVersions } from "../domain/templatePackage.js";
@@ -61,6 +62,128 @@ export const DEFAULT_TEMPLATE_REGISTRY_INDEX_URL =
 
 export const DEFAULT_TEMPLATE_REGISTRY_MAX_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_TEMPLATE_REGISTRY_TIMEOUT_MS = 10_000;
+
+/** The persistent registry settings file, beside the toolchain settings. */
+export const TEMPLATE_REGISTRY_CONFIG_SCHEMA = "uvp.registry-config/1";
+
+export interface TemplateRegistryConfig {
+  readonly schema: typeof TEMPLATE_REGISTRY_CONFIG_SCHEMA;
+  readonly indexUrl: string;
+}
+
+export interface ResolvedTemplateRegistryIndex {
+  readonly url: string;
+  /** `flag`, `environment`, `config`, or `default`; the first source that answered. */
+  readonly source: "flag" | "environment" | "config" | "default";
+  readonly configPath: string;
+}
+
+const httpUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const configPathFrom = (env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string => {
+  const configured = env["UVP_REGISTRY_CONFIG"]?.trim();
+  return configured === undefined || configured === ""
+    ? path.join(home, ".uvp", "registry.json")
+    : path.resolve(configured);
+};
+
+export const resolveTemplateRegistryConfigPath = configPathFrom;
+
+/** Read the saved registry URL; an absent file is not an error. */
+export const readTemplateRegistryConfig = async (
+  configPath: string = configPathFrom(),
+): Promise<TemplateRegistryConfig | undefined> => {
+  let text: string;
+  try {
+    text = await readFile(configPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error(`${configPath} is not JSON`);
+  }
+  if (!isRecord(raw) || raw["schema"] !== TEMPLATE_REGISTRY_CONFIG_SCHEMA) {
+    throw new Error(`${configPath} is not a ${TEMPLATE_REGISTRY_CONFIG_SCHEMA} file`);
+  }
+  const indexUrl = raw["index_url"];
+  if (typeof indexUrl !== "string" || !httpUrl(indexUrl)) {
+    throw new Error(`${configPath} does not name an http(s) index_url`);
+  }
+  return { schema: TEMPLATE_REGISTRY_CONFIG_SCHEMA, indexUrl };
+};
+
+export const writeTemplateRegistryConfig = async (
+  indexUrl: string,
+  configPath: string = configPathFrom(),
+): Promise<void> => {
+  if (!httpUrl(indexUrl)) throw new Error(`"${indexUrl}" is not an http(s) URL`);
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const temporary = `${configPath}.${randomUUID()}.tmp`;
+  await writeFile(
+    temporary,
+    `${JSON.stringify(
+      { schema: TEMPLATE_REGISTRY_CONFIG_SCHEMA, index_url: indexUrl },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  try {
+    await rename(temporary, configPath);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+};
+
+export const resetTemplateRegistryConfig = async (
+  configPath: string = configPathFrom(),
+): Promise<void> => {
+  await rm(configPath, { force: true });
+};
+
+/**
+ * Resolve the index URL in the order a user can predict:
+ * `--index-url` > `UVP_TEMPLATE_REGISTRY_URL` > `~/.uvp/registry.json` > public.
+ *
+ * The flag wins because it is the narrowest scope; the environment wins over the
+ * file because a one-off shell override should not require editing persisted
+ * state. The saved URL is a base index URL, not an archive directory.
+ */
+export const resolveTemplateRegistryIndexUrl = async (
+  override?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): Promise<ResolvedTemplateRegistryIndex> => {
+  const configPath = configPathFrom(env, home);
+  if (override !== undefined && override.trim() !== "") {
+    return { url: override.trim(), source: "flag", configPath };
+  }
+  const fromEnvironment = env["UVP_TEMPLATE_REGISTRY_URL"]?.trim();
+  if (fromEnvironment !== undefined && fromEnvironment !== "") {
+    if (!httpUrl(fromEnvironment)) {
+      throw new Error("UVP_TEMPLATE_REGISTRY_URL is not an http(s) URL");
+    }
+    return { url: fromEnvironment, source: "environment", configPath };
+  }
+  const config = await readTemplateRegistryConfig(configPath);
+  if (config !== undefined) return { url: config.indexUrl, source: "config", configPath };
+  return { url: DEFAULT_TEMPLATE_REGISTRY_INDEX_URL, source: "default", configPath };
+};
 
 const MAX_REDIRECTS = 3;
 
@@ -427,7 +550,7 @@ const writeCache = async (cachePath: string, body: Buffer): Promise<string | und
 export const readTemplateRegistryIndex = async (
   options: TemplateRegistryOptions = {},
 ): Promise<TemplateRegistryIndexResult> => {
-  const url = options.indexUrl ?? DEFAULT_TEMPLATE_REGISTRY_INDEX_URL;
+  const url = (await resolveTemplateRegistryIndexUrl(options.indexUrl)).url;
   const maxBytes = options.maxBytes ?? DEFAULT_TEMPLATE_REGISTRY_MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TEMPLATE_REGISTRY_TIMEOUT_MS;
   const cachePath = cachePathOf(options, url);

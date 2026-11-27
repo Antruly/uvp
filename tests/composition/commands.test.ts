@@ -150,7 +150,7 @@ describe("the command registry", () => {
     // contract-less command is not `missing` or `unknown`, just unreachable by
     // tool name.
     const local = COMMANDS.filter((command) => !isToolCommand(command)).map(commandName);
-    expect(local.sort()).toEqual(["uvp env", "uvp mcp", "uvp setup"]);
+    expect(local.sort()).toEqual(["uvp env", "uvp mcp", "uvp setup", "uvp template registry"]);
   });
 
   it("declares no flag that collides with a universal one", () => {
