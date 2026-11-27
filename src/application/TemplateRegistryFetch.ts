@@ -17,7 +17,6 @@ import type {
   TemplateRegistryVersion,
 } from "../domain/templateRegistry.js";
 import {
-  DEFAULT_TEMPLATE_REGISTRY_INDEX_URL,
   DEFAULT_TEMPLATE_REGISTRY_TIMEOUT_MS,
   TemplateRegistryError,
   defaultTemplateRegistryTransport,
@@ -163,7 +162,7 @@ const assertCoordinates = (id: string, version: string): void => {
 };
 
 const indexOptionsOf = (options: FetchTemplateRegistryPackageOptions): TemplateRegistryOptions => ({
-  indexUrl: options.indexUrl ?? DEFAULT_TEMPLATE_REGISTRY_INDEX_URL,
+  ...(options.indexUrl === undefined ? {} : { indexUrl: options.indexUrl }),
   ...(options.transport === undefined ? {} : { transport: options.transport }),
   ...(options.cacheRoot === undefined ? {} : { cacheRoot: options.cacheRoot }),
   ...(options.offline === undefined ? {} : { offline: options.offline }),

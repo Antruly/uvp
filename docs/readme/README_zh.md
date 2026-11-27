@@ -199,12 +199,19 @@ uvp template search --text hello
 uvp init ./svc --name svc --template-package hello-package@1.0.0
 ```
 
-`uvp template search` 读的是本地存储，不是仓库的 `index.json`。远程搜索、下载和同步
-仍属于 [#239](https://github.com/Antruly/uvp/issues/239) 跟踪的仓库客户端工作；在它
-落地之前，
-`https://raw.githubusercontent.com/Antruly/uvp-templates/main/index.json` 这份索引
-就是人或 Agent 选包时读的东西，`uvp template import` 是交接点。
-`uvp template export` 会把已存储的包按同样的布局写回去。
+`uvp template search` 读的是本地存储。`uvp template fetch` 读取仓库的
+`index.json`，下载其中指定的归档，校验归档摘要和每个声明文件，然后导入包。公共索引是
+`https://raw.githubusercontent.com/Antruly/uvp-templates/main/index.json`；如果这个
+主机不可达，保存一次可用镜像：
+
+```bash
+uvp template registry set https://mirror.example/index.json
+uvp template fetch hello-package@1.0.0
+```
+
+解析顺序是 `--index-url` > `UVP_TEMPLATE_REGISTRY_URL` > `~/.uvp/registry.json` >
+公共索引。`uvp template registry` 显示当前生效地址和来源；`uvp template registry reset`
+删除已保存的值。`uvp template export` 会把已存储的包按同样的布局写回去。
 
 <a id="当前状态"></a>
 

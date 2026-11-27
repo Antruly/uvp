@@ -869,6 +869,7 @@ uvp template search [--text TEXT] [--category C] [--framework F] [--tags a,b] \
   [--tag-mode all|any] [--features websocket,ssl] [--version 1.2.0] [--all-versions] \
   [--limit 20] [--offset 0]
 uvp template get acme-dashboard@1.2.0
+uvp template registry [set URL|reset]
 uvp template fetch acme-dashboard@1.2.0 [--replace] [--offline] [--index-url URL]
 uvp template validate ./acme-dashboard [--allow-unverified]
 uvp template import ./acme-dashboard [--replace] [--allow-unverified] [--dry-run]
@@ -876,8 +877,9 @@ uvp template export acme-dashboard@1.2.0 --target ./exported
 uvp template remove acme-dashboard[@1.2.0]
 ```
 
-The seven commands read and write the local template store; `fetch` is the one
-that downloads from the registry. The store root is
+The seven tool commands read and write the local template store; `fetch` is the
+one that downloads from the registry, and `registry` configures where it looks.
+The store root is
 `$UVP_TEMPLATE_HOME` when set, otherwise `~/.uvp/templates`; it is not a flag,
 so a person and an agent reached through MCP use the same store.
 
@@ -896,7 +898,13 @@ the remedies differ.
 and imports the package. `--offline` uses only the cached index and a
 digest-matching cached archive. The result is `network`, `cache`, or
 `undetermined`; undetermined is not "not found". `--index-url` points at a
-different registry index; `--timeout` bounds each request.
+different registry index for this call; `--timeout` bounds each request.
+
+`registry` shows the index URL `fetch` will use and where it came from.
+`registry set URL` saves the URL in `~/.uvp/registry.json`; `registry reset`
+removes it. Resolution is `--index-url`, then `UVP_TEMPLATE_REGISTRY_URL`, then
+the saved file, then the public index. `UVP_REGISTRY_CONFIG` moves the saved file
+for a test or a non-default home.
 
 `validate` runs the import's format check without writing. It does not consult
 the store, so a package already installed still validates here and is refused
